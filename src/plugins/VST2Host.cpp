@@ -35,18 +35,22 @@ void VST2Host::scanDirectory(const std::string& dir)
     std::error_code ec;
     if (!fs::exists(dir, ec)) return;
 
-    for (auto& entry : fs::directory_iterator(dir, ec)) {
-        if (!entry.is_directory()) continue;
+    // Recurse into subdirectories (e.g. /VST/Vendor/Plugin.vst)
+    // but skip descending into .vst bundles themselves
+    auto it = fs::recursive_directory_iterator(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    for (; it != fs::recursive_directory_iterator(); ++it) {
+        if (!it->is_directory()) continue;
 
-        std::string path = entry.path().string();
-        std::string ext = entry.path().extension().string();
-
+        std::string ext = it->path().extension().string();
         if (ext != ".vst") continue;
 
-        // Lightweight scan: name from filename only
+        // .vst bundle found — don't recurse into it
+        it.disable_recursion_pending();
+
         VST2PluginInfo info;
-        info.path = path;
-        info.name = entry.path().stem().string();
+        info.path = it->path().string();
+        info.name = it->path().stem().string();
         info.vendor = "";
 
         qDebug() << "VST2 found:" << QString::fromStdString(info.name)

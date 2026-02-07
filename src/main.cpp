@@ -116,7 +116,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Sorana Flow");
     app.setOrganizationName("SoranaFlow");
-    app.setApplicationVersion("1.2.0");
+    app.setApplicationVersion("1.2.1");
 
     // Set default font
     QFont defaultFont = app.font();

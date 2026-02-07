@@ -49,7 +49,7 @@ void AcoustIdProvider::performLookup(const QString& fingerprint, int duration, c
     request.setHeader(QNetworkRequest::ContentTypeHeader,
                       QStringLiteral("application/x-www-form-urlencoded"));
     request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("SoranaFlow/1.2.0"));
+                      QStringLiteral("SoranaFlow/1.2.1"));
     request.setTransferTimeout(15000);
 
     qDebug() << "[AcoustIdProvider] POST to AcoustID, duration:" << duration

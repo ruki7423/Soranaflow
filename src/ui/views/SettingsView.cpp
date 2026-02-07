@@ -3296,7 +3296,7 @@ QWidget* SettingsView::createAboutTab()
     layout->addWidget(appName);
 
     // ── Version ────────────────────────────────────────────────────
-    auto* versionLabel = new QLabel(QStringLiteral("Version 1.2.0"), content);
+    auto* versionLabel = new QLabel(QStringLiteral("Version 1.2.1"), content);
     versionLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;")
             .arg(ThemeManager::instance()->colors().foregroundMuted));
@@ -3401,7 +3401,7 @@ QWidget* SettingsView::createAboutTab()
             .arg(ThemeManager::instance()->colors().accent));
     reportLabel->setCursor(Qt::PointingHandCursor);
     connect(reportLabel, &QLabel::linkActivated, this, [](const QString&) {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://soranaflow.com/contact")));
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://soranaflow.com/support")));
     });
     reportLabel->setText(QStringLiteral("<a href='report' style='color: %1; text-decoration: none;'>Report Issue</a>")
         .arg(ThemeManager::instance()->colors().accent));

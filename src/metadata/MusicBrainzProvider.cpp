@@ -11,7 +11,7 @@
 const QString MusicBrainzProvider::API_BASE =
     QStringLiteral("https://musicbrainz.org/ws/2");
 const QString MusicBrainzProvider::USER_AGENT =
-    QStringLiteral("SoranaFlow/1.2.0 (https://github.com/soranaflow)");
+    QStringLiteral("SoranaFlow/1.2.1 (https://github.com/soranaflow)");
 
 MusicBrainzProvider* MusicBrainzProvider::instance()
 {

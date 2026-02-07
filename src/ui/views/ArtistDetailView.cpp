@@ -919,7 +919,7 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
     url.setQuery(q);
 
     QNetworkRequest request(url);
-    request.setRawHeader("User-Agent", "SoranaFlow/1.2.0");
+    request.setRawHeader("User-Agent", "SoranaFlow/1.2.1");
     request.setTransferTimeout(10000);
 
     // Cancel any prior pending request

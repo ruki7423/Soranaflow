@@ -44,14 +44,20 @@ void VST3Host::scanDirectory(const std::string& dir)
     std::error_code ec;
     if (!fs::exists(dir, ec)) return;
 
-    for (auto& entry : fs::directory_iterator(dir, ec)) {
-        if (!entry.is_directory()) continue;
+    // Recurse into subdirectories (e.g. /VST3/Vendor/Plugin.vst3)
+    // but skip descending into .vst3 bundles themselves
+    auto it = fs::recursive_directory_iterator(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    for (; it != fs::recursive_directory_iterator(); ++it) {
+        if (!it->is_directory()) continue;
 
-        std::string path = entry.path().string();
-        std::string ext = entry.path().extension().string();
+        std::string ext = it->path().extension().string();
 
         // VST3 plugins are directories with .vst3 extension
         if (ext != ".vst3") continue;
+
+        // .vst3 bundle found — don't recurse into it
+        it.disable_recursion_pending();
 
         // Lightweight scan: extract name from filename only.
         // Do NOT load the module — loading triggers ObjC class
@@ -59,10 +65,10 @@ void VST3Host::scanDirectory(const std::string& dir)
         // causing duplicate-class warnings and startup delays.
         // Full metadata is read when the user loads a plugin.
         VST3PluginInfo info;
-        info.path = path;
-        info.name = entry.path().stem().string();
+        info.path = it->path().string();
+        info.name = it->path().stem().string();
         info.vendor = "";
-        info.uid = path;
+        info.uid = it->path().string();
 
         qDebug() << "VST3 found:" << QString::fromStdString(info.name)
                  << "at" << QString::fromStdString(info.path);
