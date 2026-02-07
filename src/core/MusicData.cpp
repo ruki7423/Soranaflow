@@ -227,10 +227,10 @@ bool MusicDataProvider::hasDatabaseTracks() const
 
 void MusicDataProvider::reloadFromDatabase()
 {
-    // Flag-based debounce
+    // Re-entrancy guard (no timer debounce — scan rebuilds must reload)
     static bool isReloading = false;
     if (isReloading) {
-        qDebug() << "MusicDataProvider: Skipping - already reloading";
+        qDebug() << "MusicDataProvider: Skipping - re-entrant call";
         return;
     }
     isReloading = true;
@@ -238,9 +238,7 @@ void MusicDataProvider::reloadFromDatabase()
     loadFromDatabase();
     emit libraryUpdated();
 
-    QTimer::singleShot(1000, []() {
-        isReloading = false;
-    });
+    isReloading = false;
 }
 
 void MusicDataProvider::loadFromDatabase()
@@ -270,9 +268,19 @@ void MusicDataProvider::loadFromDatabase()
     QVector<Playlist> dbPlaylists = db->allPlaylists();
     qDebug() << "MusicDataProvider::loadFromDatabase - playlists in DB:" << dbPlaylists.size();
 
-    // NOTE: We no longer copy tracks into albums or albums into artists here.
-    // albumById() and artistById() load nested data on demand from the DB.
-    // This avoids O(N²) duplication that caused 30GB+ RAM with large libraries.
+    // NOTE: We do NOT copy tracks into albums here.
+    // albumById() loads tracks on demand from the DB.
+    // This avoids O(Tracks × Albums) duplication that caused 30GB+ RAM.
+
+    // Link album metadata (without tracks) to their artists — cheap since
+    // albums have empty tracks vectors (~200 bytes each, not thousands of Track copies)
+    for (auto& artist : dbArtists) {
+        for (const auto& album : dbAlbums) {
+            if (album.artistId == artist.id) {
+                artist.albums.append(album);
+            }
+        }
+    }
 
     // Swap under write lock — blocks readers briefly
     {

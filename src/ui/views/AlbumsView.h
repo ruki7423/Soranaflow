@@ -65,5 +65,6 @@ private:
     // Cover art cache + async loading
     QHash<QString, QPixmap> m_coverCache;
     QHash<QString, QPointer<QLabel>> m_coverLabels;
+    QHash<QString, QString> m_albumTrackPaths;  // albumId → first track file path
     int m_coverLoadIndex = 0;
 };

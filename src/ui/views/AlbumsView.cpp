@@ -274,6 +274,19 @@ void AlbumsView::reloadAlbums()
         albums = albumMap.values().toVector();
     }
 
+    // Build albumId → firstTrackPath map for cover art discovery
+    // (allAlbums() returns albums without tracks to save memory)
+    m_albumTrackPaths.clear();
+    {
+        const auto tracks = MusicDataProvider::instance()->allTracks();
+        for (const auto& t : tracks) {
+            if (!t.albumId.isEmpty() && !t.filePath.isEmpty()
+                && !m_albumTrackPaths.contains(t.albumId)) {
+                m_albumTrackPaths[t.albumId] = t.filePath;
+            }
+        }
+    }
+
     // Cache albums for re-layout on resize
     m_albums = albums;
 
@@ -505,6 +518,11 @@ QPixmap AlbumsView::findCoverArt(const Album& album)
             firstTrackPath = t.filePath;
             break;
         }
+    }
+
+    // Fallback: albums from cache have empty tracks — use pre-built map
+    if (firstTrackPath.isEmpty()) {
+        firstTrackPath = m_albumTrackPaths.value(album.id);
     }
 
     // Tier 2: folder image files

@@ -227,12 +227,15 @@ QPixmap ArtistsView::findArtistCoverArt(const Artist& artist)
         }
     }
 
-    // Get folder path from the artist's first album/track
+    // Get folder path from the artist's tracks (albums don't carry tracks in cache)
     QString folderPath;
-    if (!artist.albums.isEmpty()) {
-        for (const auto& album : artist.albums) {
-            if (!album.tracks.isEmpty() && !album.tracks.first().filePath.isEmpty()) {
-                folderPath = QFileInfo(album.tracks.first().filePath).absolutePath();
+    QString firstTrackPath;
+    {
+        const auto tracks = MusicDataProvider::instance()->allTracks();
+        for (const auto& track : tracks) {
+            if (track.artistId == artist.id && !track.filePath.isEmpty()) {
+                folderPath = QFileInfo(track.filePath).absolutePath();
+                firstTrackPath = track.filePath;
                 break;
             }
         }
@@ -257,14 +260,10 @@ QPixmap ArtistsView::findArtistCoverArt(const Artist& artist)
         }
     }
 
-    // Extract embedded cover from first track of first album
-    if (!artist.albums.isEmpty()) {
-        for (const auto& album : artist.albums) {
-            if (!album.tracks.isEmpty() && !album.tracks.first().filePath.isEmpty()) {
-                pixmap = MetadataReader::extractCoverArt(album.tracks.first().filePath);
-                if (!pixmap.isNull()) return pixmap;
-            }
-        }
+    // Extract embedded cover from the artist's first track
+    if (!firstTrackPath.isEmpty()) {
+        pixmap = MetadataReader::extractCoverArt(firstTrackPath);
+        if (!pixmap.isNull()) return pixmap;
     }
 
     // Fallback: any image file in the folder
