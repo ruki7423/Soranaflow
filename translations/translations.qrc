@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/translations">
+        <file>soranaflow_en.qm</file>
+        <file>soranaflow_ko.qm</file>
+        <file>soranaflow_ja.qm</file>
+        <file>soranaflow_zh.qm</file>
+    </qresource>
+</RCC>

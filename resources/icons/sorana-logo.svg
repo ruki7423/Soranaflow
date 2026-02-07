@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22D3EE"/>
+      <stop offset="50%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.95)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0.7)"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded background -->
+  <rect x="0" y="0" width="128" height="128" rx="28" ry="28" fill="url(#bgGrad)"/>
+  <!-- Play triangle -->
+  <path d="M 38 36 L 38 92 L 62 64 Z" fill="white" fill-opacity="0.92"/>
+  <!-- Sound wave arcs -->
+  <path d="M 68 44 Q 88 64, 68 84" fill="none" stroke="white" stroke-opacity="0.9" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 78 32 Q 106 64, 78 96" fill="none" stroke="white" stroke-opacity="0.7" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 88 22 Q 122 64, 88 106" fill="none" stroke="white" stroke-opacity="0.45" stroke-width="5" stroke-linecap="round"/>
+</svg>

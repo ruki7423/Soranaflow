@@ -1,0 +1,22 @@
+# Build
+build/
+
+# macOS
+.DS_Store
+
+# Secrets
+*.p8
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Backups
+*.bak
+
+# Qt
+moc_*.cpp
+qrc_*.cpp
+ui_*.h

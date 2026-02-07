@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Sorana Flow</string>
+    <key>CFBundleDisplayName</key>
+    <string>Sorana Flow</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.soranaflow.app</string>
+    <key>CFBundleVersion</key>
+    <string>1.2.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.2.0</string>
+    <key>CFBundleExecutable</key>
+    <string>SoranaFlow</string>
+    <key>CFBundleIconFile</key>
+    <string>SoranaFlow</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Haeseong Choi. All rights reserved.</string>
+    <key>SUFeedURL</key>
+    <string>https://soranaflow.com/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>atSefQFxtiKZENZ0KhCNPCWGgyeAdtdtAjjjd7EzmSM=</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Sorana Flow needs access to Apple Music to search and play music from your catalog.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSQuitAlwaysKeepsWindows</key>
+    <false/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Sorana Flow needs microphone access for audio input.</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio File</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>mp3</string>
+                <string>flac</string>
+                <string>wav</string>
+                <string>aiff</string>
+                <string>m4a</string>
+                <string>aac</string>
+                <string>ogg</string>
+                <string>dsf</string>
+                <string>dff</string>
+                <string>alac</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+        </dict>
+    </array>
+</dict>
+</plist>
