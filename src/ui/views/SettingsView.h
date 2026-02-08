@@ -87,6 +87,7 @@ private:
     QLabel* m_scanStatusLabel = nullptr;
     StyledButton* m_scanNowBtn = nullptr;
     StyledButton* m_fullRescanBtn = nullptr;
+    StyledButton* m_restoreButton = nullptr;
 
     // DSP controls
     StyledSwitch* m_dspEnabledSwitch = nullptr;

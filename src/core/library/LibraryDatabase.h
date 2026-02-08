@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QString>
+#include <QDateTime>
 #include <QVector>
 #include <optional>
 
@@ -87,6 +88,12 @@ public:
 
     // ── Rebuild helpers ──────────────────────────────────────────────
     void rebuildAlbumsAndArtists();
+
+    // ── Database backup / rollback ───────────────────────────────────
+    bool createBackup();
+    bool restoreFromBackup();
+    bool hasBackup() const;
+    QDateTime backupTimestamp() const;
 
 signals:
     void databaseChanged();

@@ -1394,6 +1394,57 @@ QWidget* SettingsView::createLibraryTab()
     });
     layout->addWidget(cleanupBtn);
 
+    // ── Section: Library Rollback ────────────────────────────────────
+    layout->addWidget(createSectionHeader(QStringLiteral("Library Rollback")));
+
+    auto* rollbackDesc = new QLabel(
+        QStringLiteral("Restore library data from before the last rescan or metadata rebuild. "
+                       "Your music files are never modified."), this);
+    rollbackDesc->setWordWrap(true);
+    rollbackDesc->setStyleSheet(
+        QStringLiteral("color: %1; font-size: 12px; border: none; padding: 4px 0;")
+            .arg(ThemeManager::instance()->colors().foregroundMuted));
+    layout->addWidget(rollbackDesc);
+
+    m_restoreButton = new StyledButton(QStringLiteral("Restore Previous Library Data"),
+                                        QStringLiteral("default"));
+    m_restoreButton->setFixedHeight(UISizes::buttonHeight);
+    m_restoreButton->setStyleSheet(ThemeManager::instance()->buttonStyle(ButtonVariant::Secondary));
+    m_restoreButton->setEnabled(LibraryDatabase::instance()->hasBackup());
+    connect(m_restoreButton, &QPushButton::clicked, this, [this]() {
+        auto* db = LibraryDatabase::instance();
+        QDateTime ts = db->backupTimestamp();
+        QString timeStr = ts.isValid() ? ts.toString(QStringLiteral("yyyy-MM-dd hh:mm")) : QStringLiteral("unknown");
+
+        if (!StyledMessageBox::confirm(this,
+                QStringLiteral("Restore Library Data"),
+                QStringLiteral("Restore library data from %1?\n\n"
+                               "This will undo the last metadata rebuild or rescan.\n"
+                               "Your music files will not be affected.").arg(timeStr)))
+            return;
+
+        bool ok = db->restoreFromBackup();
+        if (ok) {
+            MusicDataProvider::instance()->reloadFromDatabase();
+            StyledMessageBox::info(this,
+                QStringLiteral("Restored"),
+                QStringLiteral("Library data restored successfully."));
+            m_restoreButton->setEnabled(db->hasBackup());
+        } else {
+            StyledMessageBox::warning(this,
+                QStringLiteral("Restore Failed"),
+                QStringLiteral("Could not restore from backup."));
+        }
+    });
+    layout->addWidget(m_restoreButton);
+
+    // Update restore button when database changes
+    connect(LibraryDatabase::instance(), &LibraryDatabase::databaseChanged,
+            this, [this]() {
+        if (m_restoreButton)
+            m_restoreButton->setEnabled(LibraryDatabase::instance()->hasBackup());
+    });
+
     layout->addStretch();
 
     scrollArea->setWidget(content);
@@ -1515,10 +1566,13 @@ void SettingsView::onFullRescanClicked()
 
     m_scanNowBtn->setEnabled(false);
     m_fullRescanBtn->setEnabled(false);
-    m_scanStatusLabel->setText(QStringLiteral("Clearing library and rescanning..."));
+    m_scanStatusLabel->setText(QStringLiteral("Backing up and rescanning..."));
 
-    // Clear all tracks from the database
+    // Auto-backup before destructive operation
     auto* db = LibraryDatabase::instance();
+    db->createBackup();
+    if (m_restoreButton)
+        m_restoreButton->setEnabled(db->hasBackup());
     QVector<Track> allTracks = db->allTracks();
     for (const Track& t : allTracks) {
         db->removeTrack(t.id);
@@ -3296,7 +3350,7 @@ QWidget* SettingsView::createAboutTab()
     layout->addWidget(appName);
 
     // ── Version ────────────────────────────────────────────────────
-    auto* versionLabel = new QLabel(QStringLiteral("Version 1.3.0"), content);
+    auto* versionLabel = new QLabel(QStringLiteral("Version 1.3.1"), content);
     versionLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;")
             .arg(ThemeManager::instance()->colors().foregroundMuted));

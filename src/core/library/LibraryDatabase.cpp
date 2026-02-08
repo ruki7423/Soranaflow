@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QDebug>
 #include <QUuid>
 #include <QDateTime>
@@ -1262,6 +1263,61 @@ bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const
 bool LibraryDatabase::beginTransaction() { return m_db.transaction(); }
 bool LibraryDatabase::commitTransaction() { return m_db.commit(); }
 
+// ── Database backup / rollback ───────────────────────────────────────
+
+bool LibraryDatabase::createBackup()
+{
+    QString backupFile = m_dbPath + QStringLiteral(".backup");
+
+    if (QFile::exists(backupFile))
+        QFile::remove(backupFile);
+
+    bool ok = QFile::copy(m_dbPath, backupFile);
+    if (ok)
+        qDebug() << "[LibraryDatabase] Backup created:" << backupFile;
+    else
+        qWarning() << "[LibraryDatabase] Backup FAILED for" << m_dbPath;
+    return ok;
+}
+
+bool LibraryDatabase::restoreFromBackup()
+{
+    QString backupFile = m_dbPath + QStringLiteral(".backup");
+    if (!QFile::exists(backupFile)) {
+        qWarning() << "[LibraryDatabase] No backup found at" << backupFile;
+        return false;
+    }
+
+    // Close the database connection
+    m_db.close();
+
+    // Replace DB with backup
+    QFile::remove(m_dbPath);
+    bool ok = QFile::copy(backupFile, m_dbPath);
+
+    // Reopen the database
+    m_db.open();
+
+    if (ok) {
+        qDebug() << "[LibraryDatabase] Restored from backup";
+        emit databaseChanged();
+    } else {
+        qWarning() << "[LibraryDatabase] Restore FAILED";
+    }
+    return ok;
+}
+
+bool LibraryDatabase::hasBackup() const
+{
+    return QFile::exists(m_dbPath + QStringLiteral(".backup"));
+}
+
+QDateTime LibraryDatabase::backupTimestamp() const
+{
+    QFileInfo info(m_dbPath + QStringLiteral(".backup"));
+    return info.exists() ? info.lastModified() : QDateTime();
+}
+
 // ── Rebuild Albums & Artists from Tracks ─────────────────────────────
 void LibraryDatabase::rebuildAlbumsAndArtists()
 {
@@ -1283,6 +1339,9 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
     }
 
     lastRebuild.start();
+
+    // Auto-backup before destructive rebuild
+    createBackup();
 
     qDebug() << "LibraryDatabase::rebuildAlbumsAndArtists - starting rebuild...";
 

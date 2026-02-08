@@ -43,8 +43,10 @@
 
 **Library Management**
 - Smart library scanning with metadata extraction
+- Folder browser with tree-based navigation
 - Album art discovery (folder + embedded)
 - MusicBrainz / AcoustID integration for metadata lookup
+- Library rollback — one-click restore after rescan
 - Synced lyrics support (embedded + LRCLIB)
 
 **Streaming**
@@ -100,7 +102,7 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 5 (v1.0.0 → v1.2.2) |
+| GitHub Releases | 7 (v1.0.0 → v1.3.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
