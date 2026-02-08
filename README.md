@@ -116,7 +116,11 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## License
 
-Copyright 2025-2026 Sorana Flow. All rights reserved.
+**Proprietary** — Source code is viewable for reference only.
+No permission to use, copy, modify, or distribute.
+See [LICENSE](LICENSE) for full terms.
+
+Official binaries available at [soranaflow.com](https://soranaflow.com/downloads).
 
 ---
 
