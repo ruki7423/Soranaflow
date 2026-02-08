@@ -3296,7 +3296,7 @@ QWidget* SettingsView::createAboutTab()
     layout->addWidget(appName);
 
     // ── Version ────────────────────────────────────────────────────
-    auto* versionLabel = new QLabel(QStringLiteral("Version 1.2.1"), content);
+    auto* versionLabel = new QLabel(QStringLiteral("Version 1.2.2"), content);
     versionLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;")
             .arg(ThemeManager::instance()->colors().foregroundMuted));

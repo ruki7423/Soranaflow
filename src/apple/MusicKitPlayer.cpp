@@ -565,7 +565,7 @@ async function configureMusicKit() {
             developerToken: token,
             app: {
                 name: 'Sorana Flow',
-                build: '1.2.1'
+                build: '1.2.2'
             }
         });
         console.log('[MusicKit] MusicKit configured');

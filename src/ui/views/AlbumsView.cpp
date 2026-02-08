@@ -217,10 +217,15 @@ void AlbumsView::clearGrid()
 // ═══════════════════════════════════════════════════════════════════
 void AlbumsView::reloadAlbums()
 {
-    // Flag-based debounce
+    // Flag-based debounce — queue if busy, never drop
     static bool isReloading = false;
-    if (isReloading) return;
+    static bool pendingReload = false;
+    if (isReloading) {
+        pendingReload = true;
+        return;
+    }
     isReloading = true;
+    pendingReload = false;
 
     // Refresh view toggle icons for current theme
     {
@@ -279,13 +284,35 @@ void AlbumsView::reloadAlbums()
     m_albumTrackPaths.clear();
     {
         const auto tracks = MusicDataProvider::instance()->allTracks();
+
+        // Fast path: match by albumId (populated after rebuildAlbumsAndArtists)
         for (const auto& t : tracks) {
             if (!t.albumId.isEmpty() && !t.filePath.isEmpty()
                 && !m_albumTrackPaths.contains(t.albumId)) {
                 m_albumTrackPaths[t.albumId] = t.filePath;
             }
         }
+
+        // Fallback: before rebuildAlbumsAndArtists runs, tracks have empty
+        // albumId. Match by album title + artist name instead.
+        if (m_albumTrackPaths.isEmpty() && !tracks.isEmpty() && !albums.isEmpty()) {
+            QHash<QString, QString> nameToId;
+            for (const auto& a : albums) {
+                QString key = a.title.toLower() + QStringLiteral("||") + a.artist.toLower();
+                nameToId[key] = a.id;
+            }
+            for (const auto& t : tracks) {
+                if (t.album.isEmpty() || t.filePath.isEmpty()) continue;
+                QString key = t.album.toLower() + QStringLiteral("||") + t.artist.toLower();
+                QString aId = nameToId.value(key);
+                if (!aId.isEmpty() && !m_albumTrackPaths.contains(aId)) {
+                    m_albumTrackPaths[aId] = t.filePath;
+                }
+            }
+        }
     }
+    qDebug() << "[AlbumsView] reloadAlbums:" << albums.size() << "albums,"
+             << m_albumTrackPaths.size() << "trackPaths, cache:" << m_coverCache.size();
 
     // Cache albums for re-layout on resize
     m_albums = albums;
@@ -303,8 +330,12 @@ void AlbumsView::reloadAlbums()
     // Build cards with responsive layout
     relayoutGrid();
 
-    QTimer::singleShot(1000, []() {
+    QTimer::singleShot(500, this, [this]() {
         isReloading = false;
+        if (pendingReload) {
+            pendingReload = false;
+            reloadAlbums();
+        }
     });
 
     // Re-apply filter if active

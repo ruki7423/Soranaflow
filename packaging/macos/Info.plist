@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.soranaflow.app</string>
     <key>CFBundleVersion</key>
-    <string>1.2.1</string>
+    <string>1.2.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.1</string>
+    <string>1.2.2</string>
     <key>CFBundleExecutable</key>
     <string>SoranaFlow</string>
     <key>CFBundleIconFile</key>

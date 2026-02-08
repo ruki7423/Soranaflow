@@ -21,7 +21,7 @@ set -euo pipefail
 # ── Configuration ────────────────────────────────────────────────────
 APP_NAME="Sorana Flow"
 BUNDLE_NAME="SoranaFlow"
-VERSION="1.2.1"
+VERSION="1.2.2"
 TEAM_ID="W5JMPJXB5H"
 SIGNING_IDENTITY="Developer ID Application: HAESEONG CHOI (W5JMPJXB5H)"
 BUNDLE_ID="com.soranaflow.app"
@@ -32,7 +32,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 APP_BUNDLE="$BUILD_DIR/${BUNDLE_NAME}.app"
 ENTITLEMENTS="$PROJECT_DIR/packaging/macos/SoranaFlow.entitlements"
-DMG_NAME="Soranaflow 1.2.1.dmg"
+DMG_NAME="Soranaflow 1.2.2.dmg"
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 SPARKLE_PATH="/opt/homebrew/Caskroom/sparkle/2.8.1"
 

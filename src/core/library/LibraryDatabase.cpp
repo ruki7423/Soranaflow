@@ -1271,6 +1271,17 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
         qDebug() << "LibraryDatabase: Skipping rebuild - cooldown";
         return;
     }
+
+    // Guard: never wipe albums/artists when tracks table is empty
+    {
+        QSqlQuery countQ(m_db);
+        countQ.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));
+        if (!countQ.next() || countQ.value(0).toInt() == 0) {
+            qDebug() << "LibraryDatabase: Skipping rebuild - 0 tracks in DB";
+            return;
+        }
+    }
+
     lastRebuild.start();
 
     qDebug() << "LibraryDatabase::rebuildAlbumsAndArtists - starting rebuild...";
@@ -1300,7 +1311,7 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
             QString normalizedName = artistName.toLower();
             if (!artistNameToId.contains(normalizedName)) {
                 QString artistId = QStringLiteral("artist_") +
-                    QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+                    QString::number(qHash(normalizedName), 16).rightJustified(8, QLatin1Char('0'));
                 artistNameToId[normalizedName] = artistId;
             }
         }
@@ -1323,7 +1334,7 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
             QString key = albumName.toLower() + QStringLiteral("||") + artistName.toLower();
             if (!albumKeyToId.contains(key)) {
                 QString albumId = QStringLiteral("album_") +
-                    QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+                    QString::number(qHash(key), 16).rightJustified(8, QLatin1Char('0'));
                 albumKeyToId[key] = albumId;
             }
         }

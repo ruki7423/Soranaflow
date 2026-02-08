@@ -239,6 +239,18 @@ QPixmap ArtistsView::findArtistCoverArt(const Artist& artist)
                 break;
             }
         }
+        // Fallback: before rebuildAlbumsAndArtists, track.artistId is empty.
+        // Match by artist name instead.
+        if (firstTrackPath.isEmpty()) {
+            QString artistLower = artist.name.toLower().trimmed();
+            for (const auto& track : tracks) {
+                if (track.artist.toLower().trimmed() == artistLower && !track.filePath.isEmpty()) {
+                    folderPath = QFileInfo(track.filePath).absolutePath();
+                    firstTrackPath = track.filePath;
+                    break;
+                }
+            }
+        }
     }
 
     // Look for cover images in folder
@@ -379,19 +391,29 @@ QWidget* ArtistsView::createArtistCard(const Artist& artist, int cardWidth)
 
 void ArtistsView::populateArtists()
 {
-    // Flag-based debounce
+    // Flag-based debounce — queue if busy, never drop
     static bool isPopulating = false;
-    if (isPopulating) return;
+    static bool pendingPopulate = false;
+    if (isPopulating) {
+        pendingPopulate = true;
+        return;
+    }
     isPopulating = true;
+    pendingPopulate = false;
 
     m_artists = MusicDataProvider::instance()->allArtists();
+    qDebug() << "[ArtistsView] populateArtists:" << m_artists.size() << "artists, cache:" << m_coverCache.size();
 
     m_countLabel->setText(QString::number(m_artists.size()) + QStringLiteral(" artists"));
 
     relayoutGrid();
 
-    QTimer::singleShot(1000, []() {
+    QTimer::singleShot(500, this, [this]() {
         isPopulating = false;
+        if (pendingPopulate) {
+            pendingPopulate = false;
+            populateArtists();
+        }
     });
 }
 
