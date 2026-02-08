@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
-project(SoranaFlow VERSION 1.2.2 LANGUAGES CXX)
+project(SoranaFlow VERSION 1.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -329,6 +329,8 @@ set(VIEW_SOURCES
     src/ui/views/SettingsView.cpp
     src/ui/views/AppleMusicView.h
     src/ui/views/AppleMusicView.cpp
+    src/ui/views/FolderBrowserView.h
+    src/ui/views/FolderBrowserView.cpp
     # src/ui/views/TidalView.h      # TODO: restore when Tidal API available
     # src/ui/views/TidalView.cpp    # TODO: restore when Tidal API available
     src/ui/views/SearchResultsView.h

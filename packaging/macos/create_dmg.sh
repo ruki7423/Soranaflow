@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="Sorana Flow"
-VERSION="1.2.2"
+VERSION="1.3.0"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/../../build"

@@ -80,7 +80,7 @@ void FanartTvProvider::fetchArtistImages(const QString& artistMbid)
     qDebug() << "[Fanart.tv] Fetching:" << url.toString();
 
     QNetworkRequest request(url);
-    request.setRawHeader("User-Agent", "SoranaFlow/1.2.2");
+    request.setRawHeader("User-Agent", "SoranaFlow/1.3.0");
     request.setTransferTimeout(15000);
 
     QNetworkReply* reply = m_network->get(request);
@@ -170,7 +170,7 @@ void FanartTvProvider::downloadImage(const QString& url,
 {
     QUrl reqUrl(url);
     QNetworkRequest request(reqUrl);
-    request.setRawHeader("User-Agent", "SoranaFlow/1.2.2");
+    request.setRawHeader("User-Agent", "SoranaFlow/1.3.0");
     request.setTransferTimeout(15000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);

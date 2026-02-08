@@ -17,6 +17,7 @@
 #include "views/SettingsView.h"
 #include "views/AppleMusicView.h"
 // #include "views/TidalView.h"  // TODO: restore when Tidal API available
+#include "views/FolderBrowserView.h"
 #include "views/SearchResultsView.h"
 #include "../core/library/LibraryDatabase.h"
 #include "../core/CoverArtLoader.h"
@@ -382,6 +383,19 @@ AppleMusicView* MainWindow::ensureAppleMusicView()
     return m_appleMusicView;
 }
 
+FolderBrowserView* MainWindow::ensureFolderBrowserView()
+{
+    if (!m_folderBrowserView) {
+        m_folderBrowserView = new FolderBrowserView();
+        m_viewStack->addWidget(m_folderBrowserView);
+        connect(m_folderBrowserView, &FolderBrowserView::albumSelected,
+                this, &MainWindow::onAlbumSelected);
+        connect(m_folderBrowserView, &FolderBrowserView::artistSelected,
+                this, &MainWindow::onArtistSelected);
+    }
+    return m_folderBrowserView;
+}
+
 /* TODO: restore when Tidal API available
 TidalView* MainWindow::ensureTidalView()
 {
@@ -472,8 +486,9 @@ void MainWindow::onNavigationChanged(int index)
         case 2: m_viewStack->setCurrentWidget(ensureAlbumsView());     break;
         case 3: m_viewStack->setCurrentWidget(ensureArtistsView());    break;
         case 4: m_viewStack->setCurrentWidget(ensurePlaylistsView());  break;
-        case 5: m_viewStack->setCurrentWidget(ensureAppleMusicView()); break;
-        // case 6: m_viewStack->setCurrentWidget(ensureTidalView()); break;  // TODO: restore when Tidal API available
+        case 5: m_viewStack->setCurrentWidget(ensureAppleMusicView());   break;
+        case 6: m_viewStack->setCurrentWidget(ensureFolderBrowserView()); break;
+        // case 7: m_viewStack->setCurrentWidget(ensureTidalView()); break;  // TODO: restore when Tidal API available
         case 9: m_viewStack->setCurrentWidget(ensureSettingsView());   break;
     }
     m_sidebar->setActiveIndex(index);
@@ -586,7 +601,8 @@ int MainWindow::sidebarIndexForView(QWidget* view)
     if (view == m_playlistsView)       return 4;
     if (view == m_playlistDetailView)  return 4;
     if (view == m_appleMusicView)      return 5;
-    // if (view == m_tidalView)           return 6;  // TODO: restore when Tidal API available
+    if (view == m_folderBrowserView)  return 6;
+    // if (view == m_tidalView)           return 7;  // TODO: restore when Tidal API available
     if (view == m_queueView)           return 1;
     if (view == m_settingsView)        return 1;
     if (view == m_searchResultsView)   return -1;

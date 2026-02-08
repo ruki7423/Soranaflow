@@ -75,7 +75,7 @@ void CoverArtProvider::downloadImage(const QString& url,
     QUrl reqUrl(url);
     QNetworkRequest request(reqUrl);
     request.setRawHeader("User-Agent",
-                         "SoranaFlow/1.2.2 (https://github.com/soranaflow)");
+                         "SoranaFlow/1.3.0 (https://github.com/soranaflow)");
     request.setTransferTimeout(15000);
     // Cover Art Archive redirects to archive.org — must follow redirects
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,

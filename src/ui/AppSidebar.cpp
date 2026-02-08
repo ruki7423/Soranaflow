@@ -169,9 +169,10 @@ void AppSidebar::setupUI()
             { QStringLiteral("Artists"),      QStringLiteral(":/icons/users.svg")       },
             { QStringLiteral("Playlists"),    QStringLiteral(":/icons/list-music.svg")  },
             { QStringLiteral("Apple Music"),  QStringLiteral(":/icons/apple-music.svg") },
+            { QStringLiteral("Folders"),      QStringLiteral(":/icons/folder.svg")      },
             // { QStringLiteral("Tidal"),        QStringLiteral(":/icons/tidal.svg")       },  // TODO: restore when Tidal API available
         };
-        constexpr int NAV_ITEM_COUNT = 6;  // was 7, Tidal hidden
+        constexpr int NAV_ITEM_COUNT = 7;
 
         m_navContainer = new QWidget(this);
         auto* navLayout = new QVBoxLayout(m_navContainer);
@@ -429,9 +430,10 @@ void AppSidebar::toggleCollapse()
             QStringLiteral("Artists"),
             QStringLiteral("Playlists"),
             QStringLiteral("Apple Music"),
+            QStringLiteral("Folders"),
             // QStringLiteral("Tidal"),  // TODO: restore when Tidal API available
         };
-        for (int i = 0; i < m_navButtons.size() && i < 6; ++i) {  // was 7
+        for (int i = 0; i < m_navButtons.size() && i < 7; ++i) {
             m_navButtons[i]->setText(navTexts[i]);
             m_navButtons[i]->setFixedSize(QWIDGETSIZE_MAX, UISizes::thumbnailSize);
             m_navButtons[i]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -775,7 +777,7 @@ void AppSidebar::refreshTheme()
         ).arg(c.hover));
     }
 
-    // Nav button icons (0-4: themed icons, 5: Apple Music, 6: Tidal)
+    // Nav button icons (0-4: themed icons, 5: Apple Music, 6: Folders, 7: Tidal)
     const QString iconPaths[] = {
         ":/icons/radio.svg", ":/icons/library.svg", ":/icons/disc.svg",
         ":/icons/users.svg", ":/icons/list-music.svg"
@@ -784,13 +786,17 @@ void AppSidebar::refreshTheme()
         m_navButtons[i]->setIcon(tm->themedIcon(iconPaths[i]));
     }
     // Apple Music (index 5) - gradient icon, no theme change needed
-    /* TODO: restore when Tidal API available
-    // Tidal (index 6) - monochrome, needs theme-specific variant
+    // Folders (index 6) - themed icon
     if (m_navButtons.size() > 6) {
+        m_navButtons[6]->setIcon(tm->themedIcon(":/icons/folder.svg"));
+    }
+    /* TODO: restore when Tidal API available
+    // Tidal (index 7) - monochrome, needs theme-specific variant
+    if (m_navButtons.size() > 7) {
         QString tidalIcon = tm->isDark()
             ? QStringLiteral(":/icons/tidal-dark.svg")
             : QStringLiteral(":/icons/tidal-light.svg");
-        m_navButtons[6]->setIcon(QIcon(tidalIcon));
+        m_navButtons[7]->setIcon(QIcon(tidalIcon));
     }
     */
 
