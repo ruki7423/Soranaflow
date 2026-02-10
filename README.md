@@ -102,11 +102,31 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 7 (v1.0.0 → v1.3.1) |
+| GitHub Releases | 8 (v1.0.0 → v1.4.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
+
+## Changelog
+
+### v1.4.0 — Library Performance & Stability
+
+**Library Engine Overhaul**
+- SQLite WAL mode + mmap 256MB + 64MB cache for faster DB access
+- FTS5 full-text search — instant search across title, artist, album
+- HybridTrackModel — lightweight in-memory index (~100 bytes/track) for instant startup, sort, and search even with 100K+ tracks
+- String pooling for deduplicated metadata storage
+- Batch INSERT with transactions for album/artist rebuild
+- Async post-scan reload — no more UI freeze after library scan
+
+**Stability**
+- Thread-safe database access (QRecursiveMutex) — fixed potential crash when scanning and searching simultaneously
+
+**Apple Music**
+- Disconnect/reconnect functionality for Apple Music integration
+
+See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
 
 ## Links
 
