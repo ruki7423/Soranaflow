@@ -129,15 +129,9 @@ void PlaybackState::connectToMusicKitPlayer()
             // This avoids the stall-restart infinite loop
             auto* tap = AudioProcessTap::instance();
             if (playing && tap->isSupported() && !tap->isActive()) {
-                // Global tap doesn't need to wait for child processes
-                // Small delay ensures MusicKit audio has started
-                QTimer::singleShot(500, tap, [tap]() {
-                    if (!tap->isActive()) {
-                        tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
-                        qDebug() << "[Playback] Apple Music: Starting global ProcessTap";
-                        tap->start();
-                    }
-                });
+                tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
+                qDebug() << "[Playback] Apple Music: Activating ProcessTap";
+                tap->activate();
             }
 #endif
         }
@@ -373,14 +367,9 @@ void PlaybackState::playTrack(const Track& track)
         {
             auto* tap = AudioProcessTap::instance();
             if (tap->isSupported() && !tap->isActive()) {
-                // Global tap doesn't need to wait for child processes
-                QTimer::singleShot(500, tap, [tap]() {
-                    if (!tap->isActive()) {
-                        tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
-                        qDebug() << "[Playback] Apple Music: Starting global ProcessTap (play)";
-                        tap->start();
-                    }
-                });
+                tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
+                qDebug() << "[Playback] Apple Music: Activating ProcessTap (play)";
+                tap->activate();
             }
         }
 #endif
@@ -396,8 +385,8 @@ void PlaybackState::playTrack(const Track& track)
     if (m_currentSource == AppleMusic) {
         MusicKitPlayer::instance()->stop();
 #ifdef Q_OS_MACOS
-        AudioProcessTap::instance()->stop();
-        qDebug() << "[Playback] Apple Music: ProcessTap stopped";
+        AudioProcessTap::instance()->deactivate();
+        qDebug() << "[Playback] Apple Music: ProcessTap deactivated (stays warm)";
 #endif
     }
     m_currentSource = Local;

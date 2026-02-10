@@ -24,6 +24,9 @@ public:
     bool watchForChanges() const;
     void setWatchForChanges(bool enabled);
 
+    QStringList ignoreExtensions() const;
+    void setIgnoreExtensions(const QStringList& exts);
+
     // ── Audio ────────────────────────────────────────────────────────
     int volume() const;
     void setVolume(int vol);
@@ -207,6 +210,11 @@ public:
     int themeIndex() const;
     void setThemeIndex(int index);
 
+    // ── Language ─────────────────────────────────────────────────────
+    // "auto" = follow system locale, or explicit: "en", "ko", "ja", "zh"
+    QString language() const;
+    void setLanguage(const QString& lang);
+
     // ── Window ───────────────────────────────────────────────────────
     QByteArray windowGeometry() const;
     void setWindowGeometry(const QByteArray& geometry);
@@ -229,6 +237,7 @@ signals:
     void convolutionChanged();
     void hrtfChanged();
     void autoplayEnabledChanged(bool enabled);
+    void languageChanged();
 
 private:
     explicit Settings(QObject* parent = nullptr);

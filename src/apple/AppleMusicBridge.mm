@@ -54,12 +54,9 @@ AppleMusicManager::AppleMusicManager(QObject* parent)
     , d(new AppleMusicManagerPrivate)
     , m_network(new QNetworkAccessManager(this))
 {
-    // Read initial status synchronously
-    @autoreleasepool {
-        int rawStatus = [MusicKitSwiftBridge currentAuthorizationStatus];
-        d->authStatus = static_cast<AuthStatus>(rawStatus);
-        qDebug() << "AppleMusicManager: Initial auth status:" << rawStatus;
-    }
+    // Do NOT auto-detect auth status — require manual Connect
+    d->authStatus = NotDetermined;
+    qDebug() << "[AppleMusicManager] Initialized — manual Connect required";
 
     // Detect storefront from locale (e.g., "us", "jp", "gb")
     QString country = QLocale::system().name().section('_', 1).toLower();
@@ -195,9 +192,13 @@ void AppleMusicManager::requestAuthorization()
                 emit authorizationStatusChanged(d->authStatus);
             }, Qt::QueuedConnection);
 
-            // Automatically check subscription after authorization
+            // Automatically check subscription and re-request token after authorization
             if (d->authStatus == Authorized) {
                 checkSubscriptionStatus();
+                // Re-request Music User Token so MusicKit JS gets full playback access
+                QMetaObject::invokeMethod(this, [this]() {
+                    requestMusicUserToken();
+                }, Qt::QueuedConnection);
             }
         }];
     }

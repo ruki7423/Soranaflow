@@ -163,14 +163,14 @@ void AppSidebar::setupUI()
         };
 
         const NavItem navItems[] = {
-            { QStringLiteral("Now Playing"),  QStringLiteral(":/icons/radio.svg")      },
-            { QStringLiteral("Library"),      QStringLiteral(":/icons/library.svg")     },
-            { QStringLiteral("Albums"),       QStringLiteral(":/icons/disc.svg")        },
-            { QStringLiteral("Artists"),      QStringLiteral(":/icons/users.svg")       },
-            { QStringLiteral("Playlists"),    QStringLiteral(":/icons/list-music.svg")  },
-            { QStringLiteral("Apple Music"),  QStringLiteral(":/icons/apple-music.svg") },
-            { QStringLiteral("Folders"),      QStringLiteral(":/icons/folder.svg")      },
-            // { QStringLiteral("Tidal"),        QStringLiteral(":/icons/tidal.svg")       },  // TODO: restore when Tidal API available
+            { tr("Now Playing"),  QStringLiteral(":/icons/radio.svg")      },
+            { tr("Library"),      QStringLiteral(":/icons/library.svg")     },
+            { tr("Albums"),       QStringLiteral(":/icons/disc.svg")        },
+            { tr("Artists"),      QStringLiteral(":/icons/users.svg")       },
+            { tr("Playlists"),    QStringLiteral(":/icons/list-music.svg")  },
+            { tr("Apple Music"),  QStringLiteral(":/icons/apple-music.svg") },
+            { tr("Folders"),      QStringLiteral(":/icons/folder.svg")      },
+            // { tr("Tidal"),        QStringLiteral(":/icons/tidal.svg")       },  // TODO: restore when Tidal API available
         };
         constexpr int NAV_ITEM_COUNT = 7;
 
@@ -213,7 +213,7 @@ void AppSidebar::setupUI()
         m_libLayout->setContentsMargins(12, 8, 12, 8);
         m_libLayout->setSpacing(2);
 
-        auto* sectionLabel = new QLabel(QStringLiteral("LIBRARY FOLDERS"), m_librarySection);
+        auto* sectionLabel = new QLabel(tr("LIBRARY FOLDERS"), m_librarySection);
         sectionLabel->setObjectName(QStringLiteral("librarySectionLabel"));
         QFont sectionFont = sectionLabel->font();
         sectionFont.setPixelSize(11);
@@ -240,7 +240,7 @@ void AppSidebar::setupUI()
         settingsLayout->setSpacing(0);
 
         m_settingsButton = new QPushButton(settingsContainer);
-        m_settingsButton->setText(QStringLiteral("Settings"));
+        m_settingsButton->setText(tr("Settings"));
         m_settingsButton->setIcon(ThemeManager::instance()->themedIcon(":/icons/settings.svg"));
         m_settingsButton->setIconSize(QSize(20, 20));
         m_settingsButton->setFixedHeight(UISizes::thumbnailSize);
@@ -424,14 +424,14 @@ void AppSidebar::toggleCollapse()
 
         // Restore nav buttons to expanded state
         const QString navTexts[] = {
-            QStringLiteral("Now Playing"),
-            QStringLiteral("Library"),
-            QStringLiteral("Albums"),
-            QStringLiteral("Artists"),
-            QStringLiteral("Playlists"),
-            QStringLiteral("Apple Music"),
-            QStringLiteral("Folders"),
-            // QStringLiteral("Tidal"),  // TODO: restore when Tidal API available
+            tr("Now Playing"),
+            tr("Library"),
+            tr("Albums"),
+            tr("Artists"),
+            tr("Playlists"),
+            tr("Apple Music"),
+            tr("Folders"),
+            // tr("Tidal"),  // TODO: restore when Tidal API available
         };
         for (int i = 0; i < m_navButtons.size() && i < 7; ++i) {
             m_navButtons[i]->setText(navTexts[i]);
@@ -441,7 +441,7 @@ void AppSidebar::toggleCollapse()
         }
 
         // ── Restore settings button ──────────────────────────────
-        m_settingsButton->setText(QStringLiteral("Settings"));
+        m_settingsButton->setText(tr("Settings"));
         m_settingsButton->setFixedSize(QWIDGETSIZE_MAX, UISizes::thumbnailSize);
         m_settingsButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_settingsButton->setIconSize(QSize(20, 20));

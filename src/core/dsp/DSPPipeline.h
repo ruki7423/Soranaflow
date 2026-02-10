@@ -51,6 +51,9 @@ signals:
 
 private:
     std::atomic<bool> m_enabled{true};
+    std::atomic<bool> m_processLogOnce{false};
+    std::atomic<bool> m_pluginLogOnce{false};
+    std::atomic<int>  m_processCallCount{0};  // periodic diagnostic counter
     double m_sampleRate = 44100.0;
     int m_channels = 2;
 

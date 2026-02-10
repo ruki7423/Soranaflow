@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QTableView>
-#include <QStandardItemModel>
+#include <QAbstractTableModel>
 #include <QStyledItemDelegate>
 #include <QHeaderView>
 #include <QPainter>
@@ -76,6 +76,64 @@ private:
     QString m_highlightedId;
 };
 
+// ── Hybrid track model ──────────────────────────────────────────────
+// Stores TrackIndex master array + display list for filtering/sorting.
+// Supports both: setIndexes() for library, setTracks() for detail views.
+class HybridTrackModel : public QAbstractTableModel
+{
+    Q_OBJECT
+public:
+    explicit HybridTrackModel(const QVector<TrackColumn>& columns, QObject* parent = nullptr);
+
+    // Set data from TrackIndex array (LibraryView — lightweight)
+    void setIndexes(QVector<TrackIndex> indexes);
+
+    // Set data from Track array (detail views — converts to TrackIndex)
+    void setTracks(const QVector<Track>& tracks);
+
+    // Filtering via display list
+    void setFilter(const QString& query);
+    void setFilterArtist(const QString& artist);
+    void setFilterAlbum(const QString& album);
+    void setFilterFolder(const QString& folder);
+    void clearFilter();
+
+    // Sorting via display list
+    void sortByColumn(TrackColumn col, Qt::SortOrder order);
+    void clearSort();
+
+    // Access
+    const TrackIndex& indexAt(int displayRow) const;
+    int masterIndexForRow(int displayRow) const;
+    int visibleCount() const { return m_displayList.size(); }
+
+    void setHeaderSuffix(int section, const QString& suffix);
+
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex& parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+
+private:
+    void rebuildDisplayList();
+    void applySortToDisplayList();
+
+    QVector<TrackIndex> m_master;
+    QVector<int> m_displayList;    // indices into m_master
+    QVector<TrackColumn> m_columns;
+    QVector<QString> m_headerSuffixes;
+
+    // Filter state
+    enum class FilterMode { None, Search, Artist, Album, Folder };
+    FilterMode m_filterMode = FilterMode::None;
+    QString m_filterValue;
+
+    // Sort state
+    TrackColumn m_sortColumn = TrackColumn::Number;
+    Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
+    bool m_sorted = false;
+};
+
 // ── Table view ──────────────────────────────────────────────────────
 class TrackTableView : public QTableView
 {
@@ -84,9 +142,19 @@ public:
     explicit TrackTableView(const TrackTableConfig& config,
                             QWidget* parent = nullptr);
 
+    // Detail views (small track count) — model converts to TrackIndex
     void setTracks(const QVector<Track>& tracks);
+
+    // Library view (80K+) — model stores TrackIndex directly
+    void setIndexes(QVector<TrackIndex> indexes);
+
     void setHighlightedTrackId(const QString& id);
-    const QVector<Track>& tracks() const { return m_tracks; }
+
+    // Access to model for filter/sort delegation
+    HybridTrackModel* hybridModel() const { return m_model; }
+
+    // Visible count (after filtering)
+    int visibleCount() const { return m_model->visibleCount(); }
 
     // For embedding inside scroll areas: disable internal scrollbar,
     // set fixed height to fit all rows
@@ -115,13 +183,17 @@ private:
     void saveColumnWidths();
     void restoreColumnWidths();
     int columnForTrackColumn(TrackColumn col) const;
-    void populateModel();
     void onHeaderClicked(int logicalIndex);
+    Track trackForDisplayRow(int row) const;
 
     TrackTableConfig m_config;
-    QStandardItemModel* m_model;
+    HybridTrackModel* m_model;
     TrackTableDelegate* m_delegate;
-    QVector<Track> m_tracks;
+
+    // Full Track storage for detail views (setTracks path)
+    QVector<Track> m_fullTracks;
+    bool m_hasFullTracks = false;
+
     QString m_highlightedId;
     bool m_embedded = false;
     int m_hoverRow = -1;

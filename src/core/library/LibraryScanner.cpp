@@ -1,11 +1,13 @@
 #include "LibraryScanner.h"
 #include "LibraryDatabase.h"
 #include "../audio/MetadataReader.h"
+#include "../Settings.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QDateTime>
 #include <QDebug>
 #include <QTimer>
 #include <QThread>
@@ -13,6 +15,16 @@
 #ifdef Q_OS_MACOS
 #include "../../platform/macos/BookmarkManager.h"
 #endif
+
+static const QStringList kDefaultIgnoreExtensions = {
+    QStringLiteral("cue"), QStringLiteral("log"), QStringLiteral("txt"),
+    QStringLiteral("nfo"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+    QStringLiteral("png"), QStringLiteral("gif"), QStringLiteral("bmp"),
+    QStringLiteral("pdf"), QStringLiteral("md"), QStringLiteral("m3u"),
+    QStringLiteral("m3u8"), QStringLiteral("pls"), QStringLiteral("accurip"),
+    QStringLiteral("sfv"), QStringLiteral("ffp"), QStringLiteral("db"),
+    QStringLiteral("ini"), QStringLiteral("ds_store")
+};
 
 const QStringList LibraryScanner::s_supportedExtensions = {
     QStringLiteral("flac"),
@@ -70,6 +82,11 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
     // Run heavy scanning work on a background thread
     m_workerThread = QThread::create([this, folders]() {
+        // Build ignore extensions set
+        QSet<QString> ignoreExts;
+        for (const QString& ext : Settings::instance()->ignoreExtensions())
+            ignoreExts.insert(ext.toLower());
+
         // Collect all audio files first
         QStringList allFiles;
         for (const QString& folder : folders) {
@@ -78,7 +95,10 @@ void LibraryScanner::scanFolders(const QStringList& folders)
                 if (m_stopRequested) break;
                 it.next();
                 QFileInfo fi = it.fileInfo();
-                if (fi.isFile() && s_supportedExtensions.contains(fi.suffix().toLower())) {
+                if (!fi.isFile()) continue;
+                QString suffix = fi.suffix().toLower();
+                if (ignoreExts.contains(suffix)) continue;
+                if (s_supportedExtensions.contains(suffix)) {
                     allFiles.append(fi.absoluteFilePath());
                 }
             }
@@ -94,6 +114,9 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
         int total = allFiles.size();
         int tracksFound = 0;
+        int newCount = 0;
+        int updatedCount = 0;
+        int skippedCount = 0;
 
         qDebug() << "LibraryScanner: Found" << total << "audio files to process";
 
@@ -106,13 +129,35 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
             const QString& filePath = allFiles[i];
 
-            // Skip if already in database
-            if (db->trackByPath(filePath).has_value()) {
-                m_knownFiles.insert(filePath);
-                tracksFound++;
+            auto existingTrack = db->trackByPath(filePath);
+            if (existingTrack.has_value()) {
+                QFileInfo fi(filePath);
+                qint64 currentSize = fi.size();
+                qint64 currentMtime = fi.lastModified().toSecsSinceEpoch();
+
+                if (existingTrack->fileSize == currentSize
+                    && existingTrack->fileMtime == currentMtime
+                    && existingTrack->fileSize > 0) {
+                    // Unchanged — skip
+                    m_knownFiles.insert(filePath);
+                    tracksFound++;
+                    skippedCount++;
+                } else {
+                    // Changed — re-parse
+                    db->removeTrackByPath(filePath);
+                    processFile(filePath);
+                    tracksFound++;
+                    updatedCount++;
+                    if (++insertsSinceCommit >= 500) {
+                        db->commitTransaction();
+                        db->beginTransaction();
+                        insertsSinceCommit = 0;
+                    }
+                }
             } else {
                 processFile(filePath);
                 tracksFound++;
+                newCount++;
                 // Batch-commit every 500 inserts to limit transaction size
                 if (++insertsSinceCommit >= 500) {
                     db->commitTransaction();
@@ -132,8 +177,17 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
         db->commitTransaction();
 
+        qDebug() << "[LibraryScanner] Scan complete —"
+                 << "scanned:" << (newCount + updatedCount)
+                 << "skipped (unchanged):" << skippedCount
+                 << "new:" << newCount
+                 << "updated:" << updatedCount;
+
         // Rebuild album/artist tables from track data
         db->rebuildAlbumsAndArtists();
+
+        // Rebuild FTS5 full-text search index
+        db->rebuildFTSIndex();
 
         int finalCount = tracksFound;
         QMetaObject::invokeMethod(this, [this, finalCount, folders]() {
@@ -181,6 +235,12 @@ void LibraryScanner::processFile(const QString& filePath)
     }
 
     Track track = trackOpt.value();
+
+    // Populate file size/mtime for future scan skip
+    QFileInfo fi(filePath);
+    track.fileSize = fi.size();
+    track.fileMtime = fi.lastModified().toSecsSinceEpoch();
+
     LibraryDatabase::instance()->insertTrack(track);
     m_knownFiles.insert(filePath);
 }
@@ -222,12 +282,19 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
 
     qDebug() << "LibraryScanner: Directory changed:" << path;
 
+    // Build ignore extensions set
+    QSet<QString> ignoreExts;
+    for (const QString& ext : Settings::instance()->ignoreExtensions())
+        ignoreExts.insert(ext.toLower());
+
     // Check for new files
     QDirIterator it(path, QDir::Files);
     while (it.hasNext()) {
         it.next();
         QFileInfo fi = it.fileInfo();
-        if (!s_supportedExtensions.contains(fi.suffix().toLower()))
+        QString suffix = fi.suffix().toLower();
+        if (ignoreExts.contains(suffix)) continue;
+        if (!s_supportedExtensions.contains(suffix))
             continue;
 
         QString filePath = fi.absoluteFilePath();

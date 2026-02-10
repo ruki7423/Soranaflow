@@ -1,5 +1,6 @@
 #include "AcoustIdProvider.h"
 #include "RateLimiter.h"
+#include <QCoreApplication>
 
 #include <QNetworkReply>
 #include <QUrlQuery>
@@ -49,7 +50,7 @@ void AcoustIdProvider::performLookup(const QString& fingerprint, int duration, c
     request.setHeader(QNetworkRequest::ContentTypeHeader,
                       QStringLiteral("application/x-www-form-urlencoded"));
     request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("SoranaFlow/1.3.1"));
+                      QStringLiteral("SoranaFlow/%1").arg(QCoreApplication::applicationVersion()));
     request.setTransferTimeout(15000);
 
     qDebug() << "[AcoustIdProvider] POST to AcoustID, duration:" << duration

@@ -28,6 +28,7 @@
 #include <QListWidget>
 #include "../dialogs/StyledMessageBox.h"
 #include <QSlider>
+#include <QCoreApplication>
 #include <QDial>
 #include <QPainter>
 #include <QPainterPath>
@@ -37,6 +38,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QAbstractSpinBox>
 #include <cmath>
 #include "../../widgets/StyledInput.h"
 
@@ -160,6 +162,22 @@ void EQGraphWidget::paintEvent(QPaintEvent*)
 }
 
 // ═════════════════════════════════════════════════════════════════════
+//  eventFilter — block wheel events on unfocused spinboxes
+// ═════════════════════════════════════════════════════════════════════
+
+bool SettingsView::eventFilter(QObject* obj, QEvent* event)
+{
+    if (event->type() == QEvent::Wheel) {
+        auto* spin = qobject_cast<QAbstractSpinBox*>(obj);
+        if (spin && !spin->hasFocus()) {
+            event->ignore();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
+// ═════════════════════════════════════════════════════════════════════
 //  Constructor
 // ═════════════════════════════════════════════════════════════════════
 
@@ -202,12 +220,12 @@ void SettingsView::setupUI()
     m_tabWidget = new QTabWidget(this);
     m_tabWidget->setObjectName(QStringLiteral("SettingsTabWidget"));
 
-    m_tabWidget->addTab(createAudioTab(), QStringLiteral("Audio"));
-    m_tabWidget->addTab(createLibraryTab(), QStringLiteral("Library"));
-    m_tabWidget->addTab(createAppleMusicTab(), QStringLiteral("Apple Music"));
-    // m_tabWidget->addTab(createTidalTab(), QStringLiteral("Tidal"));  // TODO: restore when Tidal API available
-    m_tabWidget->addTab(createAppearanceTab(), QStringLiteral("Appearance"));
-    m_tabWidget->addTab(createAboutTab(), QStringLiteral("About"));
+    m_tabWidget->addTab(createAudioTab(), tr("Audio"));
+    m_tabWidget->addTab(createLibraryTab(), tr("Library"));
+    m_tabWidget->addTab(createAppleMusicTab(), tr("Apple Music"));
+    // m_tabWidget->addTab(createTidalTab(), tr("Tidal"));  // TODO: restore when Tidal API available
+    m_tabWidget->addTab(createAppearanceTab(), tr("Appearance"));
+    m_tabWidget->addTab(createAboutTab(), tr("About"));
 
     mainLayout->addWidget(m_tabWidget, 1);
 }
@@ -1304,6 +1322,43 @@ QWidget* SettingsView::createLibraryTab()
         QString(),
         scanIntervalCombo));
 
+    // Ignored file extensions
+    auto* ignoreEdit = new QLineEdit();
+    ignoreEdit->setText(Settings::instance()->ignoreExtensions().join(QStringLiteral("; ")));
+    ignoreEdit->setPlaceholderText(QStringLiteral("cue; log; txt; ..."));
+    ignoreEdit->setStyleSheet(
+        QStringLiteral("QLineEdit { background: %1; color: %2; border: 1px solid %3; "
+                        "border-radius: 6px; padding: 4px 8px; font-size: 12px; }")
+            .arg(ThemeManager::instance()->colors().backgroundSecondary,
+                 ThemeManager::instance()->colors().foreground,
+                 ThemeManager::instance()->colors().border));
+    connect(ignoreEdit, &QLineEdit::editingFinished, this, [ignoreEdit]() {
+        QStringList exts;
+        for (const QString& ext : ignoreEdit->text().split(QRegularExpression(QStringLiteral("[;,\\s]+")),
+                                                            Qt::SkipEmptyParts))
+            exts.append(ext.trimmed().toLower());
+        Settings::instance()->setIgnoreExtensions(exts);
+    });
+
+    auto* resetIgnoreBtn = new StyledButton(QStringLiteral("Reset"), QStringLiteral("outline"));
+    resetIgnoreBtn->setFixedWidth(70);
+    connect(resetIgnoreBtn, &QPushButton::clicked, this, [ignoreEdit]() {
+        Settings::instance()->setIgnoreExtensions({});
+        ignoreEdit->setText(Settings::instance()->ignoreExtensions().join(QStringLiteral("; ")));
+    });
+
+    auto* ignoreRow = new QWidget();
+    auto* ignoreRowLayout = new QHBoxLayout(ignoreRow);
+    ignoreRowLayout->setContentsMargins(0, 0, 0, 0);
+    ignoreRowLayout->setSpacing(8);
+    ignoreRowLayout->addWidget(ignoreEdit, 1);
+    ignoreRowLayout->addWidget(resetIgnoreBtn);
+
+    layout->addWidget(createSettingRow(
+        QStringLiteral("Ignored file extensions"),
+        QStringLiteral("Extensions to skip during scan (semicolon-separated)"),
+        ignoreRow));
+
     // ── Section: Organization ──────────────────────────────────────
     layout->addWidget(createSectionHeader(QStringLiteral("Organization")));
 
@@ -1573,11 +1628,7 @@ void SettingsView::onFullRescanClicked()
     db->createBackup();
     if (m_restoreButton)
         m_restoreButton->setEnabled(db->hasBackup());
-    QVector<Track> allTracks = db->allTracks();
-    for (const Track& t : allTracks) {
-        db->removeTrack(t.id);
-    }
-    db->rebuildAlbumsAndArtists();
+    db->clearAllData(true);  // preserves playlists
 
     LibraryScanner::instance()->scanFolders(folders);
 }
@@ -1594,9 +1645,7 @@ void SettingsView::onScanFinished(int tracksFound)
     m_fullRescanBtn->setEnabled(true);
     m_scanStatusLabel->setText(
         QStringLiteral("Scan complete. %1 tracks found.").arg(tracksFound));
-
-    // Reload data provider
-    MusicDataProvider::instance()->reloadFromDatabase();
+    // reloadFromDatabase() already triggered by rebuildAlbumsAndArtists → databaseChanged signal
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -1630,20 +1679,26 @@ void SettingsView::loadVstPlugins()
     if (vst2host->plugins().empty())
         vst2host->scanPlugins();
 
+    // If plugins were already loaded at startup (initializeDeferred),
+    // skip pipeline insertion — only populate the UI list.
+    auto* pipeline = AudioEngine::instance()->dspPipeline();
+    bool alreadyLoaded = pipeline && pipeline->processorCount() > 0;
+
     for (const QString& path : paths) {
         bool isVst2 = path.endsWith(QStringLiteral(".vst"));
-        std::shared_ptr<IDSPProcessor> proc;
 
-        if (isVst2) {
-            proc = vst2host->createProcessorFromPath(path.toStdString());
-        } else {
-            proc = host->createProcessorFromPath(path.toStdString());
-        }
-        if (!proc) continue;
-
-        auto* pipeline = AudioEngine::instance()->dspPipeline();
-        if (pipeline) {
-            pipeline->addProcessor(proc);
+        // Only create + add processor if not loaded at startup
+        if (!alreadyLoaded) {
+            std::shared_ptr<IDSPProcessor> proc;
+            if (isVst2) {
+                proc = vst2host->createProcessorFromPath(path.toStdString());
+            } else {
+                proc = host->createProcessorFromPath(path.toStdString());
+            }
+            if (!proc) continue;
+            if (pipeline) {
+                pipeline->addProcessor(proc);
+            }
         }
 
         // Find the plugin info for display name
@@ -2396,6 +2451,14 @@ void SettingsView::rebuildBandRows()
         rowLayout->addWidget(qSpin);
 
         rowLayout->addStretch();
+
+        // Block accidental wheel changes on unfocused spinboxes
+        freqSpin->setFocusPolicy(Qt::StrongFocus);
+        gainSpin->setFocusPolicy(Qt::StrongFocus);
+        qSpin->setFocusPolicy(Qt::StrongFocus);
+        freqSpin->installEventFilter(this);
+        gainSpin->installEventFilter(this);
+        qSpin->installEventFilter(this);
 
         // Connect dials <-> spinboxes
         connect(freqDial, &QDial::valueChanged, freqSpin, [freqSpin](int v) {
@@ -3314,6 +3377,39 @@ QWidget* SettingsView::createAppearanceTab()
         QStringLiteral("Reduce spacing for more content"),
         compactModeSwitch));
 
+    // ── Section: Language ────────────────────────────────────────────
+    layout->addWidget(createSectionHeader(tr("Language")));
+
+    auto* langCombo = new StyledComboBox();
+    langCombo->addItem(tr("System Default"), QStringLiteral("auto"));
+    langCombo->addItem(QStringLiteral("English"), QStringLiteral("en"));
+    langCombo->addItem(QString::fromUtf8("\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"), QStringLiteral("ko"));
+    langCombo->addItem(QString::fromUtf8("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"), QStringLiteral("ja"));
+    langCombo->addItem(QString::fromUtf8("\xe4\xb8\xad\xe6\x96\x87"), QStringLiteral("zh"));
+
+    // Select current language
+    QString currentLang = Settings::instance()->language();
+    for (int i = 0; i < langCombo->count(); ++i) {
+        if (langCombo->itemData(i).toString() == currentLang) {
+            langCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+
+    connect(langCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [langCombo](int index) {
+        QString lang = langCombo->itemData(index).toString();
+        Settings::instance()->setLanguage(lang);
+        StyledMessageBox::info(nullptr,
+            tr("Language Changed"),
+            tr("Please restart the application for the language change to take effect."));
+    });
+
+    layout->addWidget(createSettingRow(
+        tr("Language"),
+        tr("Select the display language"),
+        langCombo));
+
     layout->addStretch();
 
     scrollArea->setWidget(content);
@@ -3350,7 +3446,8 @@ QWidget* SettingsView::createAboutTab()
     layout->addWidget(appName);
 
     // ── Version ────────────────────────────────────────────────────
-    auto* versionLabel = new QLabel(QStringLiteral("Version 1.3.1"), content);
+    auto* versionLabel = new QLabel(
+        QStringLiteral("Version ") + QCoreApplication::applicationVersion(), content);
     versionLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;")
             .arg(ThemeManager::instance()->colors().foregroundMuted));

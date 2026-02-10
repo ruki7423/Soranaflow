@@ -159,6 +159,9 @@ private:
     // HRTF (Binaural Spatial Audio)
     HRTFProcessor m_hrtf;
 
+    // Render diagnostics
+    std::atomic<bool> m_renderDiagOnce{false};
+
 public:
     DSPPipeline* dspPipeline() { return m_dspPipeline.get(); }
 };

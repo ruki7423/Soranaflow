@@ -1,4 +1,5 @@
 #include "DSPPipeline.h"
+#include <QDebug>
 
 DSPPipeline::DSPPipeline(QObject* parent)
     : QObject(parent)
@@ -22,6 +23,22 @@ void DSPPipeline::process(float* buf, int frames, int channels)
 {
     if (!m_enabled.load(std::memory_order_acquire)) return;
 
+    // One-time entry diagnostic
+    if (!m_processLogOnce.exchange(true, std::memory_order_relaxed)) {
+        qDebug() << "[DSPPipeline::process] ENTERED — plugins:"
+                 << (int)m_plugins.size() << "enabled:" << m_enabled.load();
+    }
+
+    // Periodic diagnostic (~every 5 seconds at 44.1kHz/512-frame blocks ≈ 430 calls)
+    int callCount = m_processCallCount.fetch_add(1, std::memory_order_relaxed);
+    if (callCount > 0 && (callCount % 430) == 0) {
+        std::unique_lock<std::mutex> diagLock(m_pluginMutex, std::try_to_lock);
+        int pluginCount = diagLock.owns_lock() ? (int)m_plugins.size() : -1;
+        qDebug() << "[DSPPipeline] periodic — call#" << callCount
+                 << "plugins:" << pluginCount
+                 << "enabled:" << m_enabled.load();
+    }
+
     // Signal chain: Gain -> EQ -> Plugins
     m_gain->process(buf, frames, channels);
     m_eq->process(buf, frames, channels);
@@ -32,6 +49,15 @@ void DSPPipeline::process(float* buf, int frames, int channels)
     // this buffer rather than blocking the audio thread.
     std::unique_lock<std::mutex> lock(m_pluginMutex, std::try_to_lock);
     if (lock.owns_lock()) {
+        if (!m_plugins.empty() && !m_pluginLogOnce.exchange(true, std::memory_order_relaxed)) {
+            qDebug() << "[DSPPipeline] Processing" << (int)m_plugins.size()
+                     << "plugin(s) — first audio pass confirmed";
+            for (size_t i = 0; i < m_plugins.size(); ++i) {
+                qDebug() << "  plugin[" << i << "]"
+                         << QString::fromStdString(m_plugins[i]->getName())
+                         << "enabled:" << m_plugins[i]->isEnabled();
+            }
+        }
         for (auto& proc : m_plugins) {
             if (proc && proc->isEnabled()) {
                 proc->process(buf, frames, channels);
@@ -69,18 +95,53 @@ void DSPPipeline::addProcessor(std::shared_ptr<IDSPProcessor> proc)
 {
     if (!proc) return;
     proc->prepare(m_sampleRate, m_channels);
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
-    m_plugins.push_back(std::move(proc));
+
+    // Scoped lock — emit signal AFTER releasing to avoid deadlock.
+    // getSignalPath() calls processorCount()/processor() which also lock m_pluginMutex.
+    {
+        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        m_plugins.push_back(std::move(proc));
+        qDebug() << "[DSPPipeline] Added processor — external processors:" << (int)m_plugins.size();
+    }
+
+    // Auto-enable pipeline when plugins are added — user expects VSTs to process
+    if (!m_enabled.load(std::memory_order_acquire)) {
+        m_enabled.store(true, std::memory_order_release);
+        qDebug() << "[DSPPipeline] Auto-enabled — processor added while pipeline was disabled";
+    }
+
+    // Reset one-time flags so diagnostics fire again during next audio pass
+    m_processLogOnce.store(false, std::memory_order_relaxed);
+    m_pluginLogOnce.store(false, std::memory_order_relaxed);
+
+    // Signal OUTSIDE lock scope — slots may call processorCount()/processor()
     emit configurationChanged();
 }
 
 void DSPPipeline::removeProcessor(int index)
 {
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
-    if (index >= 0 && index < (int)m_plugins.size()) {
-        m_plugins.erase(m_plugins.begin() + index);
+    // Move the shared_ptr out of the vector under the lock, then destroy
+    // it AFTER releasing the lock. Plugin destructors (closeEditor,
+    // win->close()) can trigger Qt event processing that re-enters
+    // processorCount()/processor() — which also lock m_pluginMutex.
+    // Destroying inside the lock would deadlock on the non-recursive mutex.
+    std::shared_ptr<IDSPProcessor> removed;
+    {
+        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        if (index >= 0 && index < (int)m_plugins.size()) {
+            qDebug() << "[DSPPipeline] Removing processor at index" << index
+                     << "— remaining:" << (int)m_plugins.size() - 1;
+            removed = std::move(m_plugins[index]);
+            m_plugins.erase(m_plugins.begin() + index);
+        }
     }
+    // Signal OUTSIDE lock scope
     emit configurationChanged();
+    // `removed` destroyed here — plugin cleanup runs without the lock held
+    if (removed) {
+        qDebug() << "[DSPPipeline] Plugin"
+                 << QString::fromStdString(removed->getName()) << "destroyed safely";
+    }
 }
 
 int DSPPipeline::processorCount() const

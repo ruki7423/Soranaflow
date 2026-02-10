@@ -4,6 +4,8 @@
 #include "../core/audio/AudioEngine.h"
 #include "../core/library/LibraryScanner.h"
 #include "../plugins/VST3Host.h"
+#include "../plugins/VST2Host.h"
+#include "../core/dsp/DSPPipeline.h"
 #include "../apple/MusicKitPlayer.h"
 #include "views/NowPlayingView.h"
 #include "views/LibraryView.h"
@@ -25,6 +27,7 @@
 #include "../platform/macos/MacMediaIntegration.h"
 #endif
 #include <QDebug>
+#include <QTimer>
 #include <QCloseEvent>
 #include <QResizeEvent>
 #include <QKeyEvent>
@@ -267,6 +270,35 @@ void MainWindow::connectSignals()
             onSearch(query.trimmed());
         }
     });
+
+    // ── Scan progress indicator ────────────────────────────────────────
+    auto* scanner = LibraryScanner::instance();
+    auto* db = LibraryDatabase::instance();
+
+    // Delayed scan indicator — only show if operation takes >500ms
+    m_scanShowTimer = new QTimer(this);
+    m_scanShowTimer->setSingleShot(true);
+    connect(m_scanShowTimer, &QTimer::timeout, this, [this]() {
+        showScanIndicator(m_pendingScanMsg);
+    });
+
+    connect(scanner, &LibraryScanner::scanStarted, this, [this]() {
+        m_pendingScanMsg = QStringLiteral("Scanning library...");
+        m_scanShowTimer->start(500);
+    });
+    connect(scanner, &LibraryScanner::scanFinished, this, [this](int) {
+        hideScanIndicator();
+    });
+    connect(db, &LibraryDatabase::rebuildStarted, this, [this]() {
+        m_pendingScanMsg = QStringLiteral("Rebuilding library...");
+        if (!m_scanShowTimer->isActive() && (!m_scanOverlay || !m_scanOverlay->isVisible()))
+            m_scanShowTimer->start(500);
+        else if (m_scanOverlay && m_scanOverlay->isVisible())
+            showScanIndicator(m_pendingScanMsg);
+    });
+    connect(db, &LibraryDatabase::rebuildFinished, this, [this]() {
+        hideScanIndicator();
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -278,7 +310,84 @@ void MainWindow::initializeDeferred()
     if (m_initialized) return;
     m_initialized = true;
 
+    // ── Load saved VST plugins into DSP pipeline at startup ─────────
+    // SettingsView is lazy (created only when user opens Settings),
+    // so we must load saved plugins here to apply them from the first buffer.
+    {
+        QStringList paths = Settings::instance()->activeVstPlugins();
+        if (!paths.isEmpty()) {
+            auto* vst3host = VST3Host::instance();
+            if (vst3host->plugins().empty()) vst3host->scanPlugins();
+            auto* vst2host = VST2Host::instance();
+            if (vst2host->plugins().empty()) vst2host->scanPlugins();
+
+            auto* pipeline = AudioEngine::instance()->dspPipeline();
+            int loaded = 0;
+            for (const QString& path : paths) {
+                bool isVst2 = path.endsWith(QStringLiteral(".vst"));
+                std::shared_ptr<IDSPProcessor> proc;
+                if (isVst2)
+                    proc = vst2host->createProcessorFromPath(path.toStdString());
+                else
+                    proc = vst3host->createProcessorFromPath(path.toStdString());
+                if (!proc) {
+                    qDebug() << "[STARTUP] VST load FAILED:" << path;
+                    continue;
+                }
+                if (pipeline) {
+                    pipeline->addProcessor(proc);
+                    ++loaded;
+                    qDebug() << "[STARTUP] VST loaded:"
+                             << QString::fromStdString(proc->getName());
+                }
+            }
+            qDebug() << "[STARTUP] VST plugins loaded:" << loaded
+                     << "of" << paths.size();
+        }
+    }
+
     qDebug() << "[STARTUP] Deferred init complete";
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  Scan progress indicator
+// ═════════════════════════════════════════════════════════════════════
+
+void MainWindow::showScanIndicator(const QString& msg)
+{
+    if (!m_scanOverlay) {
+        m_scanOverlay = new QWidget(this);
+        m_scanOverlay->setObjectName(QStringLiteral("scanOverlay"));
+        m_scanOverlay->setStyleSheet(QStringLiteral(
+            "QWidget#scanOverlay { background: rgba(0,0,0,0.7); border-radius: 6px; }"
+            "QLabel { color: white; font-size: 12px; }"
+            "QProgressBar { background: rgba(255,255,255,0.2); border: none; border-radius: 2px; max-height: 4px; }"
+            "QProgressBar::chunk { background: #FF6B35; border-radius: 2px; }"));
+        auto* lay = new QHBoxLayout(m_scanOverlay);
+        lay->setContentsMargins(12, 6, 12, 6);
+        lay->setSpacing(8);
+        m_scanStatusLabel = new QLabel;
+        m_scanProgress = new QProgressBar;
+        m_scanProgress->setRange(0, 0);  // indeterminate
+        m_scanProgress->setFixedHeight(4);
+        m_scanProgress->setTextVisible(false);
+        lay->addWidget(m_scanStatusLabel);
+        lay->addWidget(m_scanProgress, 1);
+    }
+    m_scanStatusLabel->setText(msg);
+    m_scanOverlay->setGeometry(0, height() - 40, width(), 40);
+    m_scanOverlay->show();
+    m_scanOverlay->raise();
+    qDebug() << "[MainWindow] Scan indicator:" << msg;
+}
+
+void MainWindow::hideScanIndicator()
+{
+    if (m_scanShowTimer) m_scanShowTimer->stop();
+    if (m_scanOverlay && m_scanOverlay->isVisible()) {
+        m_scanOverlay->hide();
+        qDebug() << "[MainWindow] Scan indicator hidden";
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════

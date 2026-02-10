@@ -11,6 +11,7 @@
 #include <QWebChannel>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
+#include <QWebEngineCookieStore>
 #include <QWebEngineSettings>
 #include <QDebug>
 #include <QTimer>
@@ -162,15 +163,9 @@ void MusicKitPlayer::ensureWebView()
         qDebug() << "[MusicKitPlayer] WebView loadFinished:" << ok;
         if (ok) {
             m_webViewReady = true;
-
-            // If a token was received before the WebView was ready, inject it now
-            if (!m_pendingUserToken.isEmpty()) {
-                qDebug() << "[MusicKitPlayer] WebView ready, injecting pending token";
-                QTimer::singleShot(500, this, [this]() {
-                    injectMusicUserToken(m_pendingUserToken);
-                    m_pendingUserToken.clear();
-                });
-            }
+            // Token is already embedded in HTML via %3 — no JS injection needed
+            qDebug() << "[MusicKitPlayer] WebView ready (token embedded in HTML:"
+                     << !m_pendingUserToken.isEmpty() << ")";
         } else {
             qDebug() << "[MusicKitPlayer] WebView URL:" << m_webView->url();
             qDebug() << "[MusicKitPlayer] WebView title:" << m_webView->title();
@@ -211,6 +206,11 @@ void MusicKitPlayer::play(const QString& songId)
 
     if (!m_initialized) {
         m_pendingSongId = songId;
+        // Only create WebView if we have a token — otherwise wait for token
+        if (m_pendingUserToken.isEmpty()) {
+            qDebug() << "[MusicKitPlayer] No token yet — queuing song, waiting for token";
+            return;
+        }
         ensureWebView();
         return;
     }
@@ -288,20 +288,38 @@ void MusicKitPlayer::onMusicKitReady()
     // Route audio to the app's selected output device
     updateOutputDevice();
 
-    // Inject pending user token if available
-    bool tokenInjectionPending = false;
+    // If token was pre-set via __musicUserToken JS global, check if
+    // MusicKit.configure() actually picked it up (isAuthorized == true).
     if (!m_pendingUserToken.isEmpty()) {
-        qDebug() << "[MusicKitPlayer] MusicKit ready, injecting pending user token";
-        tokenInjectionPending = true;
-        injectMusicUserToken(m_pendingUserToken);
-        m_pendingUserToken.clear();
-        // NOTE: If m_pendingSongId is set, it will be played in the token
-        // injection callback AFTER the token is actually injected into JS.
+        qDebug() << "[MusicKitPlayer] MusicKit ready — checking if token was included in configure";
+        m_webView->page()->runJavaScript(
+            QStringLiteral("music ? music.isAuthorized : false"),
+            [this](const QVariant& result) {
+                bool isAuth = result.toBool();
+                qDebug() << "[MusicKitPlayer] Post-configure auth check: isAuthorized =" << isAuth;
+                if (isAuth) {
+                    qDebug() << "[MusicKitPlayer] Token was in MusicKit.configure() — full playback available";
+                    m_pendingUserToken.clear();
+                    emit fullPlaybackAvailable();
+                    if (!m_pendingSongId.isEmpty()) {
+                        QString id = m_pendingSongId;
+                        m_pendingSongId.clear();
+                        qDebug() << "[MusicKitPlayer] Playing pending song:" << id;
+                        play(id);
+                    }
+                } else {
+                    // Token wasn't in configure (race: CDN loaded before JS global was set)
+                    qDebug() << "[MusicKitPlayer] Token was NOT in configure — trying injection";
+                    QString token = m_pendingUserToken;
+                    m_pendingUserToken.clear();
+                    injectMusicUserToken(token);
+                }
+            });
+        return;  // Async — pending song handled in callback
     }
 
-    // Play pending song ONLY if no token injection is happening
-    // (otherwise the callback in injectMusicUserToken handles it)
-    if (!tokenInjectionPending && !m_pendingSongId.isEmpty()) {
+    // No token pending — play pending song directly
+    if (!m_pendingSongId.isEmpty()) {
         QString id = m_pendingSongId;
         m_pendingSongId.clear();
         qDebug() << "[MusicKitPlayer] Playing pending song (no token pending):" << id;
@@ -351,14 +369,33 @@ void MusicKitPlayer::injectMusicUserToken(const QString& token)
     }
 
     if (!m_webView) {
-        qDebug() << "[MusicKitPlayer] WebView is null, storing as pending";
+        qDebug() << "[MusicKitPlayer] WebView is null, storing token";
         m_pendingUserToken = token;
+        // Create WebView with token embedded in HTML — token is guaranteed in configure()
+        if (!m_initialized) {
+            qDebug() << "[MusicKitPlayer] Token received — creating WebView with token in HTML";
+            ensureWebView();
+        }
         return;
     }
 
     if (!m_ready) {
         qDebug() << "[MusicKitPlayer] MusicKit not ready yet, storing as pending";
         m_pendingUserToken = token;
+        // WebView loaded but MusicKit CDN still loading — set JS global
+        // so configureMusicKit() will include the token
+        if (m_webViewReady) {
+            qDebug() << "[MusicKitPlayer] WebView ready, setting __musicUserToken JS global";
+            QString escaped = token;
+            escaped.replace(QLatin1String("\\"), QLatin1String("\\\\"));
+            escaped.replace(QLatin1Char('\''), QLatin1String("\\'"));
+            escaped.replace(QLatin1Char('\n'), QLatin1String("\\n"));
+            escaped.replace(QLatin1Char('\r'), QLatin1String("\\r"));
+            m_webView->page()->runJavaScript(
+                QStringLiteral("__musicUserToken = '%1'; "
+                    "console.log('[MusicKit] __musicUserToken set by C++ (late, length: ' + __musicUserToken.length + ')');")
+                .arg(escaped));
+        }
         return;
     }
 
@@ -372,31 +409,87 @@ void MusicKitPlayer::injectMusicUserToken(const QString& token)
     QString js = QStringLiteral("injectMusicUserToken('%1')").arg(escapedToken);
     qDebug() << "[MusicKitPlayer] Running JS injection (token length:" << token.length() << ")";
 
-    m_webView->page()->runJavaScript(js, [this](const QVariant& result) {
-        qDebug() << "[MusicKitPlayer] Token injection JS returned:" << result;
-        if (result.toBool()) {
+    m_webView->page()->runJavaScript(js, [this, token](const QVariant& result) {
+        QString status = result.toString();
+        qDebug() << "[MusicKitPlayer] Token injection JS returned:" << status;
+
+        if (status == QLatin1String("ok")) {
             qDebug() << "[MusicKitPlayer] Token injection SUCCEEDED — full playback available";
-            // Play pending song NOW that token is injected
+            emit fullPlaybackAvailable();
             if (!m_pendingSongId.isEmpty()) {
                 QString id = m_pendingSongId;
                 m_pendingSongId.clear();
                 qDebug() << "[MusicKitPlayer] Token ready, playing pending song:" << id;
                 play(id);
+            } else {
+                // Replay current song with full-access token
+                runJS(QStringLiteral(
+                    "(function() {"
+                    "  if (!music || !music.nowPlayingItem) return;"
+                    "  var id = music.nowPlayingItem.id;"
+                    "  if (id) {"
+                    "    console.log('[MusicKit] Token injected during playback — replaying: ' + id);"
+                    "    music.setQueue({ song: id }).then(function() { return music.play(); })"
+                    "    .catch(function(e) { console.error('[MusicKit] Replay error:', e); });"
+                    "  }"
+                    "})()"
+                ));
             }
+        } else if (status == QLatin1String("needs_reinit")) {
+            qDebug() << "[MusicKitPlayer] Direct token set failed — reinitializing with token in configure()";
+            // Store token for the new WebView's loadFinished handler
+            m_pendingUserToken = token;
+            // Tear down current WebView
+            if (m_webView) {
+                m_webView->disconnect();
+                m_webView->deleteLater();
+                m_webView = nullptr;
+            }
+            delete m_channel;
+            m_channel = nullptr;
+            m_ready = false;
+            m_initialized = false;
+            m_webViewReady = false;
+            // Recreate — loadFinished will pre-set __musicUserToken before configure
+            qDebug() << "[MusicKitPlayer] Recreating WebView with token in configure path";
+            ensureWebView();
         } else {
-            qDebug() << "[MusicKitPlayer] Token injection returned false (check JS console)";
+            qDebug() << "[MusicKitPlayer] Token injection returned unexpected:" << status;
         }
     });
 }
 
 void MusicKitPlayer::clearMusicUserToken()
 {
-    qDebug() << "[MusicKitPlayer] Clearing Music User Token";
+    qDebug() << "[MusicKitPlayer] Clearing Music User Token — full WebView teardown";
     m_pendingUserToken.clear();
-    if (m_webView && m_webView->page()) {
-        m_webView->page()->runJavaScript(
-            QStringLiteral("if(window.music){music.unauthorize();}"));
+    m_pendingSongId.clear();
+
+    // Destroy WebView entirely — clears cookies, storage, cached JS auth state
+    if (m_webView) {
+        if (m_ready)
+            runJS(QStringLiteral("if(music) music.stop()"));
+
+        QWebEnginePage* page = m_webView->page();
+        // Clear all browsing data (cookies, localStorage, sessionStorage)
+        if (page && page->profile()) {
+            page->profile()->clearHttpCache();
+            page->profile()->cookieStore()->deleteAllCookies();
+        }
+
+        m_webView->setPage(nullptr);
+        delete page;
+        m_webView->hide();
+        delete m_webView;
+        m_webView = nullptr;
     }
+    delete m_channel;
+    m_channel = nullptr;
+    m_ready = false;
+    m_initialized = false;
+    m_webViewReady = false;
+
+    qDebug() << "[MusicKitPlayer] WebView destroyed — reconnect will create fresh instance";
 }
 
 void MusicKitPlayer::onAuthStatusChanged(const QString& statusJson)
@@ -507,11 +600,17 @@ void MusicKitPlayer::runJS(const QString& js)
 QString MusicKitPlayer::generateHTML()
 {
     QString devToken = AppleMusicManager::instance()->developerToken();
-
-    // Escape any single quotes in the token (JWT tokens shouldn't have them, but safety)
     devToken.replace(QLatin1Char('\''), QStringLiteral("\\'"));
 
-    return QStringLiteral(R"HTML(
+    // Escape music user token for safe embedding in HTML/JS
+    QString userToken = m_pendingUserToken;
+    userToken.replace(QLatin1String("\\"), QLatin1String("\\\\"));
+    userToken.replace(QLatin1Char('\''), QLatin1String("\\'"));
+    userToken.replace(QLatin1Char('\n'), QLatin1String("\\n"));
+    userToken.replace(QLatin1Char('\r'), QLatin1String("\\r"));
+    qDebug() << "[MusicKitPlayer] Embedding token in HTML, length:" << m_pendingUserToken.length();
+
+    QString html = QStringLiteral(R"HTML(
 <!DOCTYPE html>
 <html>
 <head>
@@ -524,6 +623,7 @@ QString MusicKitPlayer::generateHTML()
 var bridge = null;
 var music = null;
 var playbackStartedEmitted = false;
+var __musicUserToken = '%3' || null;  // Embedded by C++ at HTML generation
 
 console.log('[MusicKit] Initializing QWebChannel...');
 
@@ -561,13 +661,23 @@ async function configureMusicKit() {
             return;
         }
 
-        await MusicKit.configure({
+        var config = {
             developerToken: token,
             app: {
                 name: 'Sorana Flow',
-                build: '1.3.1'
+                build: '%2'
             }
-        });
+        };
+
+        // Include Music User Token if C++ pre-set it before configure
+        if (__musicUserToken) {
+            config.musicUserToken = __musicUserToken;
+            console.log('[MusicKit] Including pre-set Music User Token in configure (length: ' + __musicUserToken.length + ')');
+        } else {
+            console.log('[MusicKit] No Music User Token available at configure time');
+        }
+
+        await MusicKit.configure(config);
         console.log('[MusicKit] MusicKit configured');
 
         music = MusicKit.getInstance();
@@ -577,10 +687,15 @@ async function configureMusicKit() {
         music.bitrate = MusicKit.PlaybackBitrate.HIGH;
         console.log('[MusicKit] Bitrate set to HIGH (256kbps)');
 
-        // Skip music.authorize() — it tries to open a login popup which
-        // cannot work in a hidden WebView. The user is already authorized
-        // at the OS level via native MusicKit (AppleMusicManager).
-        console.log('[MusicKit] Skipping authorize (using system credentials)');
+        // Call authorize() — required for DRM stream access even when
+        // musicUserToken was passed in configure(). In WebView context with
+        // a valid token, this completes immediately without showing a popup.
+        try {
+            await music.authorize();
+            console.log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
+        } catch (authErr) {
+            console.log('[MusicKit] authorize() error (non-fatal): ' + authErr);
+        }
 
         // Event listeners
         music.addEventListener('playbackStateDidChange', function(event) {
@@ -668,35 +783,36 @@ function injectMusicUserToken(token) {
     if (!music) {
         console.log('[MusicKit] ERROR: MusicKit instance not initialized');
         if (bridge) bridge.onError('MusicKit not initialized when injecting token');
-        return false;
+        return 'no_instance';
     }
 
     console.log('[MusicKit] Injecting Music User Token (length: ' + token.length + ')');
 
-    // Direct property assignment - documented approach
+    // Try direct property assignment
     music.musicUserToken = token;
 
-    // Verify the injection worked
     var isAuth = music.isAuthorized;
     var previewOnly = music.previewOnly || false;
     var hasToken = music.musicUserToken ? true : false;
 
-    console.log('[MusicKit] After injection:');
+    console.log('[MusicKit] After direct set:');
     console.log('[MusicKit]   isAuthorized: ' + isAuth);
     console.log('[MusicKit]   previewOnly: ' + previewOnly);
     console.log('[MusicKit]   hasToken: ' + hasToken);
     console.log('[MusicKit]   tokenLength: ' + (music.musicUserToken ? music.musicUserToken.length : 0));
 
-    var status = {
-        isAuthorized: isAuth,
-        previewOnly: previewOnly,
-        hasToken: hasToken,
-        tokenLength: token.length
-    };
+    if (hasToken && isAuth) {
+        if (bridge) bridge.onAuthStatusChanged(JSON.stringify({
+            isAuthorized: true, previewOnly: false, hasToken: true, tokenLength: token.length
+        }));
+        return 'ok';
+    }
 
-    if (bridge) bridge.onAuthStatusChanged(JSON.stringify(status));
-
-    return (isAuth && !previewOnly);
+    // Direct set failed — store token and return 'needs_reinit' so C++ can
+    // tear down and reconfigure MusicKit with the token passed in configure()
+    console.log('[MusicKit] Direct token set FAILED — musicUserToken is read-only in this MusicKit version');
+    __musicUserToken = token;
+    return 'needs_reinit';
 }
 
 function getAuthStatus() {
@@ -918,5 +1034,7 @@ async function applySinkToElement(el) {
 </script>
 </body>
 </html>
-)HTML").arg(devToken);
+)HTML").arg(devToken, QCoreApplication::applicationVersion(), userToken);
+
+    return html;
 }

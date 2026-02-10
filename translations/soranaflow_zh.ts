@@ -209,6 +209,45 @@ Use clipboard image?</source>
     </message>
 </context>
 <context>
+    <name>AppSidebar</name>
+    <message>
+        <source>Now Playing</source>
+        <translation>正在播放</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>音乐库</translation>
+    </message>
+    <message>
+        <source>Albums</source>
+        <translation>专辑</translation>
+    </message>
+    <message>
+        <source>Artists</source>
+        <translation>艺术家</translation>
+    </message>
+    <message>
+        <source>Playlists</source>
+        <translation>播放列表</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Folders</source>
+        <translation>文件夹</translation>
+    </message>
+    <message>
+        <source>LIBRARY FOLDERS</source>
+        <translation>音乐库文件夹</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>设置</translation>
+    </message>
+</context>
+<context>
     <name>SettingsView</name>
     <message>
         <source>Language Changed</source>
@@ -217,6 +256,38 @@ Use clipboard image?</source>
     <message>
         <source>Please restart the application for the language change to take effect.</source>
         <translation>请重新启动应用程序以使语言更改生效。</translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation>音频</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>音乐库</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>外观</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>关于</translation>
+    </message>
+    <message>
+        <source>Language</source>
+        <translation>语言</translation>
+    </message>
+    <message>
+        <source>System Default</source>
+        <translation>系统默认</translation>
+    </message>
+    <message>
+        <source>Select the display language</source>
+        <translation>选择显示语言</translation>
     </message>
 </context>
 </TS>

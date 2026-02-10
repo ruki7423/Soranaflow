@@ -66,6 +66,29 @@ void Settings::setWatchForChanges(bool enabled)
     emit watchForChangesChanged(enabled);
 }
 
+// ── Ignore Extensions ───────────────────────────────────────────────
+static const QStringList s_defaultIgnoreExtensions = {
+    QStringLiteral("cue"), QStringLiteral("log"), QStringLiteral("txt"),
+    QStringLiteral("nfo"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+    QStringLiteral("png"), QStringLiteral("gif"), QStringLiteral("bmp"),
+    QStringLiteral("pdf"), QStringLiteral("md"), QStringLiteral("m3u"),
+    QStringLiteral("m3u8"), QStringLiteral("pls"), QStringLiteral("accurip"),
+    QStringLiteral("sfv"), QStringLiteral("ffp"), QStringLiteral("db"),
+    QStringLiteral("ini"), QStringLiteral("ds_store")
+};
+
+QStringList Settings::ignoreExtensions() const
+{
+    QString val = m_settings.value(QStringLiteral("library/ignoreExtensions")).toString();
+    if (val.isEmpty()) return s_defaultIgnoreExtensions;
+    return val.split(QStringLiteral(";"), Qt::SkipEmptyParts);
+}
+
+void Settings::setIgnoreExtensions(const QStringList& exts)
+{
+    m_settings.setValue(QStringLiteral("library/ignoreExtensions"), exts.join(QStringLiteral(";")));
+}
+
 // ── Volume ──────────────────────────────────────────────────────────
 int Settings::volume() const
 {
@@ -652,6 +675,20 @@ QString Settings::organizePattern() const
 void Settings::setOrganizePattern(const QString& pattern)
 {
     m_settings.setValue(QStringLiteral("library/organizePattern"), pattern);
+}
+
+// ── Language ─────────────────────────────────────────────────────────
+QString Settings::language() const
+{
+    return m_settings.value(QStringLiteral("general/language"), QStringLiteral("auto")).toString();
+}
+
+void Settings::setLanguage(const QString& lang)
+{
+    if (language() != lang) {
+        m_settings.setValue(QStringLiteral("general/language"), lang);
+        emit languageChanged();
+    }
 }
 
 // ── Theme ───────────────────────────────────────────────────────────

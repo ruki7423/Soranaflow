@@ -2,6 +2,7 @@
 #include "library/LibraryDatabase.h"
 #include <QDebug>
 #include <QTimer>
+#include <QtConcurrent>
 
 // ── Color Constants ─────────────────────────────────────────────────
 static const QColor HIRES_COLOR("#D4AF37");
@@ -168,10 +169,27 @@ MusicDataProvider::MusicDataProvider(QObject* parent)
 {
 }
 
-QVector<Track>    MusicDataProvider::allTracks()    const { QReadLocker l(&m_lock); return m_tracks; }
+QVector<Track> MusicDataProvider::allTracks() const {
+    QReadLocker l(&m_lock);
+    if (m_tracks.isEmpty() && !m_useMockData) {
+        // Lazy-load from DB on demand (not kept in memory after post-scan reload)
+        l.unlock();
+        auto* db = LibraryDatabase::instance();
+        if (db) return db->allTracks();
+        return {};
+    }
+    return m_tracks;
+}
 QVector<Album>    MusicDataProvider::allAlbums()    const { QReadLocker l(&m_lock); return m_albums; }
 QVector<Artist>   MusicDataProvider::allArtists()   const { QReadLocker l(&m_lock); return m_artists; }
 QVector<Playlist> MusicDataProvider::allPlaylists() const { QReadLocker l(&m_lock); return m_playlists; }
+
+QVector<TrackIndex> MusicDataProvider::allTrackIndexes() const
+{
+    auto* db = LibraryDatabase::instance();
+    if (!db) return {};
+    return db->allTrackIndexes();
+}
 
 Album MusicDataProvider::albumById(const QString& id) const
 {
@@ -227,18 +245,78 @@ bool MusicDataProvider::hasDatabaseTracks() const
 
 void MusicDataProvider::reloadFromDatabase()
 {
-    // Re-entrancy guard (no timer debounce — scan rebuilds must reload)
-    static bool isReloading = false;
-    if (isReloading) {
-        qDebug() << "MusicDataProvider: Skipping - re-entrant call";
+    // Atomic re-entrancy guard (thread-safe, replaces static bool)
+    if (m_reloading.exchange(true)) {
+        qDebug() << "MusicDataProvider: Skipping - reload already in progress";
         return;
     }
-    isReloading = true;
 
-    loadFromDatabase();
-    emit libraryUpdated();
+    // First load is synchronous (startup needs data immediately)
+    if (!m_firstLoadDone) {
+        loadFromDatabase();
+        m_firstLoadDone = true;
+        m_reloading.store(false);
+        emit libraryUpdated();
+        return;
+    }
 
-    isReloading = false;
+    // Subsequent loads run DB queries off main thread
+    // Skip allTracks() — LibraryView uses allTrackIndexes() directly.
+    // allTracks() is lazy-loaded from DB on demand when needed.
+    QtConcurrent::run([this]() {
+        auto* db = LibraryDatabase::instance();
+        if (!db) {
+            m_reloading.store(false);
+            return;
+        }
+
+        int trackCount = db->trackCount();
+        QVector<Album>    dbAlbums    = db->allAlbums();
+        QVector<Artist>   dbArtists   = db->allArtists();
+        QVector<Playlist> dbPlaylists = db->allPlaylists();
+
+        qDebug() << "MusicDataProvider::reloadFromDatabase (async) — tracks:" << trackCount
+                 << "albums:" << dbAlbums.size() << "artists:" << dbArtists.size();
+
+        if (trackCount == 0) {
+            QMetaObject::invokeMethod(this, [this]() {
+                {
+                    QWriteLocker l(&m_lock);
+                    m_useMockData = true;
+                }
+                m_reloading.store(false);
+                emit libraryUpdated();
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        // Link album metadata to artists (cheap — no track copies)
+        for (auto& artist : dbArtists) {
+            for (const auto& album : dbAlbums) {
+                if (album.artistId == artist.id)
+                    artist.albums.append(album);
+            }
+        }
+
+        // Move results to main thread for swap + signal
+        QMetaObject::invokeMethod(this, [this,
+                albums  = std::move(dbAlbums),
+                artists = std::move(dbArtists),
+                playlists = std::move(dbPlaylists)]() mutable {
+            {
+                QWriteLocker l(&m_lock);
+                m_useMockData = false;
+                m_tracks.clear();  // Clear cached tracks — lazy-loaded on demand
+                m_albums    = std::move(albums);
+                m_artists   = std::move(artists);
+                m_playlists = std::move(playlists);
+            }
+            qDebug() << "MusicDataProvider: Reloaded"
+                     << m_albums.size() << "albums," << m_artists.size() << "artists";
+            m_reloading.store(false);
+            emit libraryUpdated();
+        }, Qt::QueuedConnection);
+    });
 }
 
 void MusicDataProvider::loadFromDatabase()
@@ -294,6 +372,9 @@ void MusicDataProvider::loadFromDatabase()
 
     qDebug() << "MusicDataProvider: Loaded" << m_tracks.size() << "tracks,"
              << m_albums.size() << "albums," << m_artists.size() << "artists";
+
+    // Pre-warm lightweight track index (activates string pooling + mmap cache)
+    db->allTrackIndexes();
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -48,7 +48,14 @@ AppleMusicView::AppleMusicView(QWidget* parent)
     connect(am, &AppleMusicManager::errorOccurred,
             this, &AppleMusicView::onError);
     connect(am, &AppleMusicManager::authorizationStatusChanged,
-            this, [this](AppleMusicManager::AuthStatus) { updateAuthStatus(); });
+            this, [this](AppleMusicManager::AuthStatus status) {
+                updateAuthStatus();
+                // On disconnect, clear cached token so reconnect uses fresh one
+                if (status == AppleMusicManager::NotDetermined) {
+                    qDebug() << "[AppleMusicView] Auth revoked — clearing cached Music User Token";
+                    m_musicUserToken.clear();
+                }
+            });
 
     updateAuthStatus();
 
@@ -111,9 +118,8 @@ AppleMusicView::AppleMusicView(QWidget* parent)
             am->requestMusicUserToken();
         });
 
-    // Request Music User Token at startup
-    qDebug() << "[AppleMusicView] Requesting Music User Token at startup";
-    am->requestMusicUserToken();
+    // Do NOT request Music User Token at startup — wait for user to Connect
+    qDebug() << "[AppleMusicView] Waiting for manual Connect (no auto-token request)";
 
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &AppleMusicView::refreshTheme);

@@ -6,6 +6,8 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QTimer>
+#include <QTranslator>
+#include <QLocale>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -44,6 +46,48 @@ static void shutdownCrashHandler(int sig)
 #include "platform/macos/AudioProcessTap.h"
 #include "apple/AppleMusicManager.h"
 #endif
+
+// ── i18n: Translation loading ────────────────────────────────────────
+static QTranslator* s_appTranslator = nullptr;
+
+static void loadLanguage(QApplication& app, const QString& lang)
+{
+    if (s_appTranslator) {
+        app.removeTranslator(s_appTranslator);
+        delete s_appTranslator;
+        s_appTranslator = nullptr;
+    }
+
+    QString locale = lang;
+    if (locale == QStringLiteral("auto")) {
+        locale = QLocale::system().name().left(2); // "ko", "ja", "zh", "en"
+    }
+
+    if (locale == QStringLiteral("en")) return; // English is source, no translator needed
+
+    s_appTranslator = new QTranslator();
+
+    // Try loading from Qt resource system (embedded .qm files)
+    QString qrcPath = QStringLiteral(":/translations/soranaflow_%1.qm").arg(locale);
+    if (s_appTranslator->load(qrcPath)) {
+        app.installTranslator(s_appTranslator);
+        qDebug() << "[i18n] Loaded translation:" << locale << "(from qrc)";
+        return;
+    }
+
+    // Fallback: try app bundle Resources/translations/
+    QString bundlePath = QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../Resources/translations/soranaflow_%1.qm").arg(locale);
+    if (s_appTranslator->load(bundlePath)) {
+        app.installTranslator(s_appTranslator);
+        qDebug() << "[i18n] Loaded translation:" << locale << bundlePath;
+        return;
+    }
+
+    qDebug() << "[i18n] No translation found for" << locale;
+    delete s_appTranslator;
+    s_appTranslator = nullptr;
+}
 
 int main(int argc, char* argv[]) {
     std::cout << "[STARTUP] Sorana Flow initializing..." << std::endl;
@@ -116,7 +160,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Sorana Flow");
     app.setOrganizationName("SoranaFlow");
-    app.setApplicationVersion("1.3.1");
+    app.setApplicationVersion("1.4.0");
 
     // Set default font
     QFont defaultFont = app.font();
@@ -130,6 +174,10 @@ int main(int argc, char* argv[]) {
 
     // ── Phase 0: Lightweight init needed for UI ──────────────────────
     Settings::instance();
+
+    // Load translations before any UI is created
+    loadLanguage(app, Settings::instance()->language());
+
     int themeIdx = Settings::instance()->themeIndex();
     ThemeManager::instance()->setTheme(static_cast<ThemeManager::Theme>(themeIdx));
 
@@ -211,7 +259,9 @@ int main(int argc, char* argv[]) {
         // Restore DSP settings
         auto* pipeline = AudioEngine::instance()->dspPipeline();
         if (pipeline) {
-            pipeline->setEnabled(settings->dspEnabled());
+            bool dspOn = settings->dspEnabled();
+            pipeline->setEnabled(dspOn);
+            qDebug() << "[STARTUP] DSP pipeline enabled:" << dspOn;
             pipeline->gainProcessor()->setGainDb(settings->preampGain());
             pipeline->equalizerProcessor()->setBand(0, 250.0f, settings->eqLow(), 1.0f);
             pipeline->equalizerProcessor()->setBand(1, 1000.0f, settings->eqMid(), 1.0f);
@@ -275,7 +325,6 @@ int main(int argc, char* argv[]) {
             QObject::connect(LibraryDatabase::instance(), &LibraryDatabase::databaseChanged,
                              MusicDataProvider::instance(), &MusicDataProvider::reloadFromDatabase);
 
-            LibraryDatabase::instance()->removeDuplicates();
             MusicDataProvider::instance()->reloadFromDatabase();
 
             // Set queue from loaded tracks only if no queue was restored

@@ -178,6 +178,27 @@ void AudioDeviceManager::refreshDeviceList()
             }
         }
 
+        // Transport type (for diagnostics — AirPlay, Bluetooth, USB, etc.)
+        {
+            AudioObjectPropertyAddress transportProp = {
+                kAudioDevicePropertyTransportType,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            UInt32 transportType = 0;
+            UInt32 transportSize = sizeof(UInt32);
+            AudioObjectGetPropertyData(devId, &transportProp, 0, nullptr, &transportSize, &transportType);
+
+            char typeStr[5] = {};
+            typeStr[0] = (transportType >> 24) & 0xFF;
+            typeStr[1] = (transportType >> 16) & 0xFF;
+            typeStr[2] = (transportType >> 8) & 0xFF;
+            typeStr[3] = transportType & 0xFF;
+            qDebug() << "[AudioDevice]" << info.name
+                     << "transport:" << typeStr
+                     << "outputs:" << info.outputChannels;
+        }
+
         // Device alive check
         {
             AudioObjectPropertyAddress aliveProp = {

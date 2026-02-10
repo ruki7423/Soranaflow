@@ -5,7 +5,9 @@
 #include <QString>
 #include <QDateTime>
 #include <QVector>
+#include <QMutex>
 #include <optional>
+#include <atomic>
 
 #include "../MusicData.h"
 
@@ -22,6 +24,7 @@ public:
     // ── Tracks ───────────────────────────────────────────────────────
     bool trackExists(const QString& filePath) const;
     void removeDuplicates();
+    void clearAllData(bool preservePlaylists = true);
     bool insertTrack(const Track& track);
     bool updateTrack(const Track& track);
     bool updateTrackMetadata(const QString& trackId,
@@ -36,7 +39,10 @@ public:
     std::optional<Track> trackById(const QString& id) const;
     std::optional<Track> trackByPath(const QString& filePath) const;
     QVector<Track> allTracks() const;
+    QVector<TrackIndex> allTrackIndexes() const;
     QVector<Track> searchTracks(const QString& query) const;
+    QVector<QString> searchTracksFTS(const QString& query) const;
+    void rebuildFTSIndex();
     int trackCount() const;
 
     // ── Albums ───────────────────────────────────────────────────────
@@ -97,11 +103,14 @@ public:
 
 signals:
     void databaseChanged();
+    void rebuildStarted();
+    void rebuildFinished();
 
 private:
     explicit LibraryDatabase(QObject* parent = nullptr);
     void createTables();
     void createIndexes();
+    void doRebuildInternal();
 
     QString generateId() const;
     Track trackFromQuery(const QSqlQuery& query) const;
@@ -110,4 +119,6 @@ private:
 
     QSqlDatabase m_db;
     QString m_dbPath;
+    mutable QRecursiveMutex m_dbMutex;
+    std::atomic<bool> m_rebuildPending{false};
 };

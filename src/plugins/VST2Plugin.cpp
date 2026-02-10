@@ -253,6 +253,16 @@ void VST2Plugin::process(float* buf, int frames, int channels)
 
     std::lock_guard<std::mutex> lock(m_processMutex);
 
+    // One-time diagnostic — capture input peak before processing
+    static bool s_vst2Diag = false;
+    bool doLog = !s_vst2Diag;
+    float inputPeak = 0;
+    if (doLog) {
+        int n = std::min(frames * channels, 1024);
+        for (int i = 0; i < n; ++i)
+            inputPeak = std::max(inputPeak, std::abs(buf[i]));
+    }
+
     // Ensure buffers are large enough
     if (channels != m_channels || frames > m_blockSize) {
         m_channels = channels;
@@ -295,6 +305,19 @@ void VST2Plugin::process(float* buf, int frames, int channels)
         for (int ch = 0; ch < channels; ++ch) {
             buf[f * channels + ch] = m_outBuffers[ch][f];
         }
+    }
+
+    // One-time diagnostic — capture output peak and log comparison
+    if (doLog) {
+        float outputPeak = 0;
+        int n = std::min(frames * channels, 1024);
+        for (int i = 0; i < n; ++i)
+            outputPeak = std::max(outputPeak, std::abs(buf[i]));
+        qDebug() << "[VST2 DIAG]" << QString::fromStdString(m_name)
+                 << "in:" << inputPeak << "out:" << outputPeak
+                 << "frames:" << frames << "ch:" << channels
+                 << "enabled:" << m_enabled;
+        s_vst2Diag = true;
     }
 }
 
@@ -410,11 +433,10 @@ QWidget* VST2Plugin::openEditor(QWidget* parent)
     });
     m_idleTimer->start(50);  // 20 Hz
 
-    // When window closes, clean up
+    // When window closes externally (X button), null our pointers
+    // Do NOT call EDITOR_CLOSE here — closeEditor() handles that
     QObject::connect(window, &QObject::destroyed, [this]() {
-        qDebug() << "VST2: Editor window destroyed, cleaning up";
-        if (m_effect)
-            dispatcher(VST_EFFECT_OPCODE_EDITOR_CLOSE);
+        qDebug() << "VST2: Editor window destroyed";
         m_idleTimer = nullptr;   // owned by window, already deleted
         m_editorWindow = nullptr;
     });
@@ -428,21 +450,25 @@ QWidget* VST2Plugin::openEditor(QWidget* parent)
 
 void VST2Plugin::closeEditor()
 {
+    if (!m_editorWindow) return;
+
     if (m_idleTimer) {
         m_idleTimer->stop();
         m_idleTimer = nullptr;
     }
 
+    // Disconnect destroyed signal FIRST to prevent re-entry
+    QObject::disconnect(m_editorWindow, nullptr, nullptr, nullptr);
+
+    // Tell VST2 plugin to close its editor
     if (m_effect)
         dispatcher(VST_EFFECT_OPCODE_EDITOR_CLOSE);
 
-    if (m_editorWindow) {
-        // Disconnect destroyed signal to avoid double-close
-        QObject::disconnect(m_editorWindow, nullptr, nullptr, nullptr);
-        m_editorWindow->close();
-        m_editorWindow->deleteLater();
-        m_editorWindow = nullptr;
-    }
+    auto* win = m_editorWindow;
+    m_editorWindow = nullptr;
+    win->close();
+    win->deleteLater();
+    qDebug() << "VST2: Editor closed cleanly";
 }
 
 // ═══════════════════════════════════════════════════════════════════════

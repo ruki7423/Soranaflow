@@ -5,6 +5,8 @@
 #include <QVBoxLayout>
 #include <QShortcut>
 #include <QStack>
+#include <QLabel>
+#include <QProgressBar>
 #include "AppSidebar.h"
 #include "PlaybackBar.h"
 
@@ -109,6 +111,15 @@ private:
 
     QWidget* m_previousView = nullptr;
     bool m_initialized = false;
+
+    // Scan progress indicator
+    QWidget* m_scanOverlay = nullptr;
+    QLabel* m_scanStatusLabel = nullptr;
+    QProgressBar* m_scanProgress = nullptr;
+    QTimer* m_scanShowTimer = nullptr;
+    QString m_pendingScanMsg;
+    void showScanIndicator(const QString& msg);
+    void hideScanIndicator();
 
     // Global navigation history
     QStack<int> m_viewHistory;

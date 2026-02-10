@@ -122,6 +122,7 @@ private:
     double m_sampleRate = 44100.0;
     int m_channels = 2;
     int m_maxBlockSize = 4096;
+    int64_t m_transportPos = 0;
 
     // Metadata
     std::string m_pluginName;

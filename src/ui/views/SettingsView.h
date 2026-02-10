@@ -50,6 +50,9 @@ class SettingsView : public QWidget {
 public:
     explicit SettingsView(QWidget* parent = nullptr);
 
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
 private slots:
     void onAddFolderClicked();
     void onRemoveFolderClicked(const QString& folder);

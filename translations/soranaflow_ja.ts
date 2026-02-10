@@ -209,6 +209,45 @@ Use clipboard image?</source>
     </message>
 </context>
 <context>
+    <name>AppSidebar</name>
+    <message>
+        <source>Now Playing</source>
+        <translation>再生中</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>ライブラリ</translation>
+    </message>
+    <message>
+        <source>Albums</source>
+        <translation>アルバム</translation>
+    </message>
+    <message>
+        <source>Artists</source>
+        <translation>アーティスト</translation>
+    </message>
+    <message>
+        <source>Playlists</source>
+        <translation>プレイリスト</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Folders</source>
+        <translation>フォルダ</translation>
+    </message>
+    <message>
+        <source>LIBRARY FOLDERS</source>
+        <translation>ライブラリフォルダ</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>設定</translation>
+    </message>
+</context>
+<context>
     <name>SettingsView</name>
     <message>
         <source>Language Changed</source>
@@ -217,6 +256,38 @@ Use clipboard image?</source>
     <message>
         <source>Please restart the application for the language change to take effect.</source>
         <translation>言語の変更を反映するにはアプリケーションを再起動してください。</translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation>オーディオ</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>ライブラリ</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>外観</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>情報</translation>
+    </message>
+    <message>
+        <source>Language</source>
+        <translation>言語</translation>
+    </message>
+    <message>
+        <source>System Default</source>
+        <translation>システムデフォルト</translation>
+    </message>
+    <message>
+        <source>Select the display language</source>
+        <translation>表示言語を選択してください</translation>
     </message>
 </context>
 </TS>

@@ -9,14 +9,20 @@ public:
     static AudioProcessTap* instance();
 
     bool isSupported() const;
-    bool start();
-    void stop();
+    bool start();       // warmup + activate (backward compat)
+    void stop();        // full teardown
     bool isActive() const;
 
-    // Pre-create tap resources for faster start
-    // Call when user navigates to Apple Music to avoid stall on play
+    // Pre-create tap + aggregate + IOProc in standby (no DSP processing).
+    // Call when user navigates to Apple Music. IOProc runs but outputs silence.
     void prepareForPlayback();
     bool isPrepared() const;
+
+    // Instant activate/deactivate — flip atomic flag, no CoreAudio calls.
+    // activate(): IOProc starts running audio through DSP pipeline.
+    // deactivate(): IOProc returns to silence passthrough, tap stays warm.
+    void activate();
+    void deactivate();
 
     void setDSPPipeline(DSPPipeline* pipeline);
 

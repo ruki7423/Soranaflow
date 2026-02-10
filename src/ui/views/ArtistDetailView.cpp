@@ -1,4 +1,5 @@
 #include "ArtistDetailView.h"
+#include <QCoreApplication>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QFontMetrics>
@@ -919,7 +920,8 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
     url.setQuery(q);
 
     QNetworkRequest request(url);
-    request.setRawHeader("User-Agent", "SoranaFlow/1.3.1");
+    request.setRawHeader("User-Agent",
+        QStringLiteral("SoranaFlow/%1").arg(QCoreApplication::applicationVersion()).toUtf8());
     request.setTransferTimeout(10000);
 
     // Cancel any prior pending request

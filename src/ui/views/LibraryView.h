@@ -54,7 +54,6 @@ private:
     QPushButton* m_fetchMetadataBtn = nullptr;
     QPushButton* m_identifyAudioBtn = nullptr;
     TrackTableView* m_trackTable;
-    QVector<Track> m_allTracks;
     QLabel* m_headerLabel;
     QLabel* m_countLabel;
     QLabel* m_statusLabel = nullptr;

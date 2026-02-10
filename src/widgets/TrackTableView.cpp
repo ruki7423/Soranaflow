@@ -10,6 +10,7 @@
 #include <QSettings>
 #include <QScrollBar>
 #include <QContextMenuEvent>
+#include <QSet>
 #include <algorithm>
 
 // ═════════════════════════════════════════════════════════════════════
@@ -197,13 +198,293 @@ QColor TrackTableDelegate::resolveFormatColor(AudioFormat format,
 }
 
 // ═════════════════════════════════════════════════════════════════════
+//  HybridTrackModel — display list model over TrackIndex master array
+// ═════════════════════════════════════════════════════════════════════
+
+static const TrackIndex s_emptyIndex;
+
+HybridTrackModel::HybridTrackModel(const QVector<TrackColumn>& columns, QObject* parent)
+    : QAbstractTableModel(parent)
+    , m_columns(columns)
+    , m_headerSuffixes(columns.size())
+{
+}
+
+void HybridTrackModel::setIndexes(QVector<TrackIndex> indexes)
+{
+    m_master = std::move(indexes);
+    m_sorted = false;
+    m_filterMode = FilterMode::None;
+    m_filterValue.clear();
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::setTracks(const QVector<Track>& tracks)
+{
+    m_master.clear();
+    m_master.reserve(tracks.size());
+    for (const Track& t : tracks)
+        m_master.append(indexFromTrack(t));
+    m_sorted = false;
+    m_filterMode = FilterMode::None;
+    m_filterValue.clear();
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::setFilter(const QString& query)
+{
+    m_filterMode = query.isEmpty() ? FilterMode::None : FilterMode::Search;
+    m_filterValue = query;
+
+    if (m_filterMode == FilterMode::Search && query.length() >= 2) {
+        // Use FTS5 for 2+ character queries (< 1ms vs ~50ms linear scan)
+        auto* db = LibraryDatabase::instance();
+        QVector<QString> matchIds = db->searchTracksFTS(query);
+        QSet<QString> matchSet(matchIds.begin(), matchIds.end());
+
+        beginResetModel();
+        m_displayList.clear();
+        m_displayList.reserve(matchIds.size());
+        for (int i = 0; i < m_master.size(); ++i) {
+            if (matchSet.contains(m_master[i].id))
+                m_displayList.append(i);
+        }
+        if (m_sorted)
+            applySortToDisplayList();
+        endResetModel();
+    } else {
+        // Empty or 1-char: fallback to in-memory linear scan
+        rebuildDisplayList();
+    }
+}
+
+void HybridTrackModel::setFilterArtist(const QString& artist)
+{
+    m_filterMode = FilterMode::Artist;
+    m_filterValue = artist;
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::setFilterAlbum(const QString& album)
+{
+    m_filterMode = FilterMode::Album;
+    m_filterValue = album;
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::setFilterFolder(const QString& folder)
+{
+    m_filterMode = FilterMode::Folder;
+    m_filterValue = folder;
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::clearFilter()
+{
+    m_filterMode = FilterMode::None;
+    m_filterValue.clear();
+    rebuildDisplayList();
+}
+
+void HybridTrackModel::sortByColumn(TrackColumn col, Qt::SortOrder order)
+{
+    m_sortColumn = col;
+    m_sortOrder = order;
+    m_sorted = true;
+    // Re-sort display list in place (no full rebuild needed)
+    beginResetModel();
+    applySortToDisplayList();
+    endResetModel();
+}
+
+void HybridTrackModel::clearSort()
+{
+    m_sorted = false;
+    rebuildDisplayList();
+}
+
+const TrackIndex& HybridTrackModel::indexAt(int displayRow) const
+{
+    if (displayRow < 0 || displayRow >= m_displayList.size())
+        return s_emptyIndex;
+    return m_master[m_displayList[displayRow]];
+}
+
+int HybridTrackModel::masterIndexForRow(int displayRow) const
+{
+    if (displayRow < 0 || displayRow >= m_displayList.size())
+        return -1;
+    return m_displayList[displayRow];
+}
+
+void HybridTrackModel::setHeaderSuffix(int section, const QString& suffix)
+{
+    if (section < 0 || section >= m_headerSuffixes.size()) return;
+    m_headerSuffixes[section] = suffix;
+    emit headerDataChanged(Qt::Horizontal, section, section);
+}
+
+int HybridTrackModel::rowCount(const QModelIndex& parent) const
+{
+    if (parent.isValid()) return 0;
+    return m_displayList.size();
+}
+
+int HybridTrackModel::columnCount(const QModelIndex& parent) const
+{
+    if (parent.isValid()) return 0;
+    return m_columns.size();
+}
+
+QVariant HybridTrackModel::data(const QModelIndex& index, int role) const
+{
+    if (!index.isValid()) return {};
+    const int row = index.row();
+    const int col = index.column();
+    if (row < 0 || row >= m_displayList.size() || col < 0 || col >= m_columns.size())
+        return {};
+
+    const TrackIndex& t = m_master[m_displayList[row]];
+
+    // Track ID available on every column for highlight lookup
+    if (role == Qt::UserRole + 10)
+        return t.id;
+
+    const TrackColumn tcol = m_columns[col];
+
+    switch (tcol) {
+    case TrackColumn::Number:
+        if (role == Qt::DisplayRole) return QString::number(row + 1);
+        if (role == Qt::TextAlignmentRole) return Qt::AlignCenter;
+        break;
+    case TrackColumn::Title:
+        if (role == Qt::DisplayRole) return t.title;
+        break;
+    case TrackColumn::Artist:
+        if (role == Qt::DisplayRole) return t.artist;
+        break;
+    case TrackColumn::Album:
+        if (role == Qt::DisplayRole) return t.album;
+        break;
+    case TrackColumn::Format:
+        if (role == Qt::DisplayRole) return getFormatLabel(t.format);
+        if (role == Qt::UserRole + 1) return static_cast<int>(t.format);
+        if (role == Qt::UserRole + 2) return t.sampleRate;
+        if (role == Qt::UserRole + 3) return t.bitDepth;
+        break;
+    case TrackColumn::Duration:
+        if (role == Qt::DisplayRole) return formatDuration(t.duration);
+        if (role == Qt::TextAlignmentRole)
+            return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
+        break;
+    }
+
+    return {};
+}
+
+QVariant HybridTrackModel::headerData(int section, Qt::Orientation orientation, int role) const
+{
+    if (orientation != Qt::Horizontal || role != Qt::DisplayRole)
+        return {};
+    if (section < 0 || section >= m_columns.size())
+        return {};
+
+    QString label;
+    switch (m_columns[section]) {
+    case TrackColumn::Number:   label = QStringLiteral("#"); break;
+    case TrackColumn::Title:    label = QStringLiteral("TITLE"); break;
+    case TrackColumn::Artist:   label = QStringLiteral("ARTIST"); break;
+    case TrackColumn::Album:    label = QStringLiteral("ALBUM"); break;
+    case TrackColumn::Format:   label = QStringLiteral("FORMAT"); break;
+    case TrackColumn::Duration: label = QStringLiteral("DURATION"); break;
+    }
+
+    if (section < m_headerSuffixes.size() && !m_headerSuffixes[section].isEmpty())
+        label += m_headerSuffixes[section];
+
+    return label;
+}
+
+void HybridTrackModel::rebuildDisplayList()
+{
+    beginResetModel();
+    m_displayList.clear();
+    m_displayList.reserve(m_master.size());
+
+    for (int i = 0; i < m_master.size(); ++i) {
+        const TrackIndex& ti = m_master[i];
+        bool match = true;
+
+        switch (m_filterMode) {
+        case FilterMode::None:
+            break;
+        case FilterMode::Search:
+            match = ti.title.contains(m_filterValue, Qt::CaseInsensitive) ||
+                    ti.artist.contains(m_filterValue, Qt::CaseInsensitive) ||
+                    ti.album.contains(m_filterValue, Qt::CaseInsensitive);
+            break;
+        case FilterMode::Artist:
+            match = (ti.artist == m_filterValue);
+            break;
+        case FilterMode::Album:
+            match = (ti.album == m_filterValue);
+            break;
+        case FilterMode::Folder:
+            match = ti.filePath.startsWith(m_filterValue);
+            break;
+        }
+
+        if (match) m_displayList.append(i);
+    }
+
+    if (m_sorted)
+        applySortToDisplayList();
+
+    endResetModel();
+}
+
+void HybridTrackModel::applySortToDisplayList()
+{
+    std::stable_sort(m_displayList.begin(), m_displayList.end(),
+        [this](int a, int b) {
+            const TrackIndex& ta = m_master[a];
+            const TrackIndex& tb = m_master[b];
+            bool less = false;
+            switch (m_sortColumn) {
+            case TrackColumn::Number:
+                less = ta.trackNumber < tb.trackNumber;
+                break;
+            case TrackColumn::Title:
+                less = ta.title.compare(tb.title, Qt::CaseInsensitive) < 0;
+                break;
+            case TrackColumn::Artist:
+                less = ta.artist.compare(tb.artist, Qt::CaseInsensitive) < 0;
+                break;
+            case TrackColumn::Album:
+                less = ta.album.compare(tb.album, Qt::CaseInsensitive) < 0;
+                break;
+            case TrackColumn::Format: {
+                auto qa = classifyAudioQuality(ta.format, ta.sampleRate, ta.bitDepth);
+                auto qb = classifyAudioQuality(tb.format, tb.sampleRate, tb.bitDepth);
+                less = static_cast<int>(qa) < static_cast<int>(qb);
+                break;
+            }
+            case TrackColumn::Duration:
+                less = ta.duration < tb.duration;
+                break;
+            }
+            return m_sortOrder == Qt::AscendingOrder ? less : !less;
+        });
+}
+
+// ═════════════════════════════════════════════════════════════════════
 //  TrackTableView
 // ═════════════════════════════════════════════════════════════════════
 
 TrackTableView::TrackTableView(const TrackTableConfig& config, QWidget* parent)
     : QTableView(parent)
     , m_config(config)
-    , m_model(new QStandardItemModel(this))
+    , m_model(new HybridTrackModel(config.columns, this))
     , m_delegate(new TrackTableDelegate(config.columns, this))
 {
     setModel(m_model);
@@ -225,8 +506,6 @@ TrackTableView::TrackTableView(const TrackTableConfig& config, QWidget* parent)
         "QTableView::item:selected { background: transparent; }"
         "QTableView::item:focus { outline: none; border: none; }"));
 
-    // Set up columns
-    m_model->setColumnCount(config.columns.size());
     setupHeader();
 
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
@@ -245,20 +524,14 @@ void TrackTableView::setupHeader()
     hdr->setSectionResizeMode(QHeaderView::Interactive);
     hdr->setStretchLastSection(false);
 
-    // Set header labels
-    QStringList labels;
+    // Find title column for stretch
     int titleCol = -1;
     for (int i = 0; i < m_config.columns.size(); ++i) {
-        switch (m_config.columns[i]) {
-        case TrackColumn::Number:   labels << QStringLiteral("#"); break;
-        case TrackColumn::Title:    labels << QStringLiteral("TITLE"); titleCol = i; break;
-        case TrackColumn::Artist:   labels << QStringLiteral("ARTIST"); break;
-        case TrackColumn::Album:    labels << QStringLiteral("ALBUM"); break;
-        case TrackColumn::Format:   labels << QStringLiteral("FORMAT"); break;
-        case TrackColumn::Duration: labels << QStringLiteral("DURATION"); break;
+        if (m_config.columns[i] == TrackColumn::Title) {
+            titleCol = i;
+            break;
         }
     }
-    m_model->setHorizontalHeaderLabels(labels);
 
     // Default column widths
     for (int i = 0; i < m_config.columns.size(); ++i) {
@@ -332,68 +605,16 @@ void TrackTableView::refreshTheme()
 
 void TrackTableView::setTracks(const QVector<Track>& tracks)
 {
-    m_tracks = tracks;
+    m_fullTracks = tracks;
+    m_hasFullTracks = true;
     m_sorted = false;
     horizontalHeader()->setSortIndicatorShown(false);
-    populateModel();
-}
 
-void TrackTableView::populateModel()
-{
-    m_model->removeRows(0, m_model->rowCount());
+    m_model->setTracks(tracks);
 
-    for (int i = 0; i < m_tracks.size(); ++i) {
-        const Track& t = m_tracks[i];
-        QList<QStandardItem*> row;
-
-        for (int c = 0; c < m_config.columns.size(); ++c) {
-            auto* item = new QStandardItem();
-            item->setEditable(false);
-
-            switch (m_config.columns[c]) {
-            case TrackColumn::Number:
-                item->setText(QString::number(i + 1));
-                item->setTextAlignment(Qt::AlignCenter);
-                // Store track id for highlighting
-                item->setData(t.id, Qt::UserRole + 10);
-                break;
-            case TrackColumn::Title:
-                item->setText(t.title);
-                break;
-            case TrackColumn::Artist:
-                item->setText(t.artist);
-                break;
-            case TrackColumn::Album:
-                item->setText(t.album);
-                break;
-            case TrackColumn::Format:
-                item->setText(getFormatLabel(t.format));
-                item->setData(static_cast<int>(t.format), Qt::UserRole + 1);
-                item->setData(t.sampleRate, Qt::UserRole + 2);
-                item->setData(t.bitDepth, Qt::UserRole + 3);
-                item->setData(t.bitrate, Qt::UserRole + 4);
-                break;
-            case TrackColumn::Duration:
-                item->setText(formatDuration(t.duration));
-                item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-                break;
-            }
-
-            // Store track id on every item for highlighting lookup
-            if (m_config.columns[c] != TrackColumn::Number) {
-                item->setData(t.id, Qt::UserRole + 10);
-            }
-
-            row.append(item);
-        }
-
-        m_model->appendRow(row);
-    }
-
-    // Row height
-    for (int i = 0; i < m_model->rowCount(); ++i) {
-        setRowHeight(i, UISizes::rowHeight);
-    }
+    // Uniform row height
+    verticalHeader()->setDefaultSectionSize(UISizes::rowHeight);
+    verticalHeader()->setVisible(false);
 
     // Embedded mode: update fixed height
     if (m_embedded) {
@@ -401,9 +622,27 @@ void TrackTableView::populateModel()
                               + horizontalHeader()->height() + 2;
         setFixedHeight(totalHeight);
     }
+}
 
-    // Hide vertical header (row numbers provided by delegate)
+void TrackTableView::setIndexes(QVector<TrackIndex> indexes)
+{
+    m_fullTracks.clear();
+    m_hasFullTracks = false;
+    m_sorted = false;
+    horizontalHeader()->setSortIndicatorShown(false);
+
+    m_model->setIndexes(std::move(indexes));
+
+    // Uniform row height
+    verticalHeader()->setDefaultSectionSize(UISizes::rowHeight);
     verticalHeader()->setVisible(false);
+
+    // Embedded mode: update fixed height
+    if (m_embedded) {
+        const int totalHeight = m_model->rowCount() * UISizes::rowHeight
+                              + horizontalHeader()->height() + 2;
+        setFixedHeight(totalHeight);
+    }
 }
 
 void TrackTableView::onHeaderClicked(int logicalIndex)
@@ -423,56 +662,30 @@ void TrackTableView::onHeaderClicked(int logicalIndex)
     }
     m_sorted = true;
 
-    // Update header labels with arrow indicator
+    // Update header arrow indicators
     for (int i = 0; i < m_config.columns.size(); ++i) {
-        QString label;
-        switch (m_config.columns[i]) {
-        case TrackColumn::Number:   label = QStringLiteral("#"); break;
-        case TrackColumn::Title:    label = QStringLiteral("TITLE"); break;
-        case TrackColumn::Artist:   label = QStringLiteral("ARTIST"); break;
-        case TrackColumn::Album:    label = QStringLiteral("ALBUM"); break;
-        case TrackColumn::Format:   label = QStringLiteral("FORMAT"); break;
-        case TrackColumn::Duration: label = QStringLiteral("DURATION"); break;
-        }
         if (i == logicalIndex) {
-            label += (m_sortOrder == Qt::AscendingOrder)
+            m_model->setHeaderSuffix(i, (m_sortOrder == Qt::AscendingOrder)
                 ? QStringLiteral("  \u25B2")   // ▲
-                : QStringLiteral("  \u25BC");   // ▼
+                : QStringLiteral("  \u25BC")); // ▼
+        } else {
+            m_model->setHeaderSuffix(i, QString());
         }
-        m_model->setHeaderData(i, Qt::Horizontal, label);
     }
 
-    // Sort m_tracks
-    std::stable_sort(m_tracks.begin(), m_tracks.end(),
-        [this](const Track& a, const Track& b) {
-            bool less = false;
-            switch (m_sortColumn) {
-            case TrackColumn::Number:
-                less = a.trackNumber < b.trackNumber;
-                break;
-            case TrackColumn::Title:
-                less = a.title.compare(b.title, Qt::CaseInsensitive) < 0;
-                break;
-            case TrackColumn::Artist:
-                less = a.artist.compare(b.artist, Qt::CaseInsensitive) < 0;
-                break;
-            case TrackColumn::Album:
-                less = a.album.compare(b.album, Qt::CaseInsensitive) < 0;
-                break;
-            case TrackColumn::Format: {
-                auto qa = classifyAudioQuality(a.format, a.sampleRate, a.bitDepth);
-                auto qb = classifyAudioQuality(b.format, b.sampleRate, b.bitDepth);
-                less = static_cast<int>(qa) < static_cast<int>(qb);
-                break;
-            }
-            case TrackColumn::Duration:
-                less = a.duration < b.duration;
-                break;
-            }
-            return m_sortOrder == Qt::AscendingOrder ? less : !less;
-        });
+    // Delegate sorting to the model's display list
+    m_model->sortByColumn(col, m_sortOrder);
+}
 
-    populateModel();
+Track TrackTableView::trackForDisplayRow(int row) const
+{
+    if (m_hasFullTracks) {
+        int masterIdx = m_model->masterIndexForRow(row);
+        if (masterIdx >= 0 && masterIdx < m_fullTracks.size())
+            return m_fullTracks[masterIdx];
+    }
+    // Index mode — construct Track from TrackIndex
+    return trackFromIndex(m_model->indexAt(row));
 }
 
 void TrackTableView::setHighlightedTrackId(const QString& id)
@@ -540,8 +753,8 @@ void TrackTableView::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         const QModelIndex idx = indexAt(event->pos());
-        if (idx.isValid() && idx.row() < m_tracks.size()) {
-            const Track& t = m_tracks[idx.row()];
+        if (idx.isValid() && idx.row() < m_model->visibleCount()) {
+            const Track t = trackForDisplayRow(idx.row());
 
             // Click on # column (play icon area) -> play immediately
             int numCol = columnForTrackColumn(TrackColumn::Number);
@@ -574,13 +787,13 @@ void TrackTableView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         const QModelIndex idx = indexAt(event->pos());
-        if (idx.isValid() && idx.row() < m_tracks.size()) {
+        if (idx.isValid() && idx.row() < m_model->visibleCount()) {
             // Skip # column — single-click already triggered play in mousePressEvent
             int numCol = columnForTrackColumn(TrackColumn::Number);
             if (numCol >= 0 && idx.column() == numCol)
                 return;
 
-            emit trackDoubleClicked(m_tracks[idx.row()]);
+            emit trackDoubleClicked(trackForDisplayRow(idx.row()));
             return;
         }
     }
@@ -590,20 +803,20 @@ void TrackTableView::mouseDoubleClickEvent(QMouseEvent* event)
 void TrackTableView::contextMenuEvent(QContextMenuEvent* event)
 {
     const QModelIndex idx = indexAt(event->pos());
-    if (!idx.isValid() || idx.row() >= m_tracks.size())
+    if (!idx.isValid() || idx.row() >= m_model->visibleCount())
         return;
 
     // Collect selected tracks
     QVector<Track> selectedTracks;
     QModelIndexList selectedRows = selectionModel()->selectedRows();
     for (const QModelIndex& sel : selectedRows) {
-        if (sel.row() >= 0 && sel.row() < m_tracks.size())
-            selectedTracks.append(m_tracks[sel.row()]);
+        if (sel.row() >= 0 && sel.row() < m_model->visibleCount())
+            selectedTracks.append(trackForDisplayRow(sel.row()));
     }
     if (selectedTracks.isEmpty())
-        selectedTracks.append(m_tracks[idx.row()]);
+        selectedTracks.append(trackForDisplayRow(idx.row()));
 
-    const Track& clickedTrack = m_tracks[idx.row()];
+    const Track clickedTrack = trackForDisplayRow(idx.row());
 
     QMenu menu(this);
     menu.setStyleSheet(ThemeManager::instance()->menuStyle());

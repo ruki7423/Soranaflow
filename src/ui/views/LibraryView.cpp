@@ -340,7 +340,12 @@ void LibraryView::setupUI()
 
     connect(m_trackTable, &TrackTableView::trackDoubleClicked,
             this, [this](const Track& t) {
-        QVector<Track> queue = m_allTracks;
+        // Build queue from visible TrackIndex entries
+        auto* model = m_trackTable->hybridModel();
+        QVector<Track> queue;
+        queue.reserve(model->visibleCount());
+        for (int i = 0; i < model->visibleCount(); ++i)
+            queue.append(trackFromIndex(model->indexAt(i)));
         PlaybackState::instance()->setQueue(queue);
         PlaybackState::instance()->playTrack(t);
     });
@@ -414,9 +419,9 @@ void LibraryView::setupUI()
 
 void LibraryView::populateTracks()
 {
-    m_allTracks = MusicDataProvider::instance()->allTracks();
-    m_trackTable->setTracks(m_allTracks);
-    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_allTracks.size()));
+    auto indexes = MusicDataProvider::instance()->allTrackIndexes();
+    m_trackTable->setIndexes(std::move(indexes));
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -425,27 +430,12 @@ void LibraryView::populateTracks()
 
 void LibraryView::filterTracks(const QString& query)
 {
-    int visibleCount = 0;
-
-    for (int i = 0; i < m_allTracks.size(); ++i) {
-        if (query.isEmpty()) {
-            m_trackTable->setRowHidden(i, false);
-            visibleCount++;
-        } else {
-            const Track& track = m_allTracks[i];
-            const bool matches =
-                track.title.contains(query, Qt::CaseInsensitive) ||
-                track.artist.contains(query, Qt::CaseInsensitive) ||
-                track.album.contains(query, Qt::CaseInsensitive);
-
-            m_trackTable->setRowHidden(i, !matches);
-            if (matches) {
-                visibleCount++;
-            }
-        }
-    }
-
-    m_countLabel->setText(QStringLiteral("%1 tracks").arg(visibleCount));
+    auto* model = m_trackTable->hybridModel();
+    if (query.isEmpty())
+        model->clearFilter();
+    else
+        model->setFilter(query);
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -508,16 +498,22 @@ void LibraryView::onScanClicked()
 
 void LibraryView::onPlayAllClicked()
 {
-    if (m_allTracks.isEmpty()) return;
+    auto* model = m_trackTable->hybridModel();
+    if (model->visibleCount() == 0) return;
+
+    QVector<Track> queue;
+    queue.reserve(model->visibleCount());
+    for (int i = 0; i < model->visibleCount(); ++i)
+        queue.append(trackFromIndex(model->indexAt(i)));
 
     auto* ps = PlaybackState::instance();
-    ps->setQueue(m_allTracks);
+    ps->setQueue(queue);
 
     if (ps->shuffleEnabled()) {
-        int startIdx = QRandomGenerator::global()->bounded(m_allTracks.size());
-        ps->playTrack(m_allTracks.at(startIdx));
+        int startIdx = QRandomGenerator::global()->bounded(queue.size());
+        ps->playTrack(queue.at(startIdx));
     } else {
-        ps->playTrack(m_allTracks.first());
+        ps->playTrack(queue.first());
     }
 }
 
@@ -527,7 +523,8 @@ void LibraryView::onPlayAllClicked()
 
 void LibraryView::onFetchMetadataClicked()
 {
-    if (m_allTracks.isEmpty()) {
+    auto allTracks = MusicDataProvider::instance()->allTracks();
+    if (allTracks.isEmpty()) {
         StyledMessageBox::info(this, QStringLiteral("Metadata"),
             QStringLiteral("No tracks in library to fetch metadata for."));
         return;
@@ -536,8 +533,8 @@ void LibraryView::onFetchMetadataClicked()
     if (StyledMessageBox::confirm(this, QStringLiteral("Fetch Metadata"),
             QStringLiteral("Fetch metadata for %1 tracks from MusicBrainz?\n\n"
                             "This may take a while due to API rate limits (1 request/sec).")
-                .arg(m_allTracks.size()))) {
-        MetadataService::instance()->fetchMissingMetadata(m_allTracks);
+                .arg(allTracks.size()))) {
+        MetadataService::instance()->fetchMissingMetadata(allTracks);
     }
 }
 
@@ -547,7 +544,8 @@ void LibraryView::onFetchMetadataClicked()
 
 void LibraryView::onIdentifyAudioClicked()
 {
-    if (m_allTracks.isEmpty()) {
+    auto allTracks = MusicDataProvider::instance()->allTracks();
+    if (allTracks.isEmpty()) {
         StyledMessageBox::info(this, QStringLiteral("Identify by Audio"),
             QStringLiteral("No tracks in library to identify."));
         return;
@@ -555,7 +553,7 @@ void LibraryView::onIdentifyAudioClicked()
 
     // Find tracks that need identification
     QVector<Track> tracksToIdentify;
-    for (const Track& track : m_allTracks) {
+    for (const Track& track : allTracks) {
         bool needsId =
             track.title.isEmpty() ||
             track.title == QStringLiteral("Unknown") ||
@@ -590,14 +588,14 @@ void LibraryView::onIdentifyAudioClicked()
 
 void LibraryView::addTracksFromFiles(const QStringList& files)
 {
+    auto* db = LibraryDatabase::instance();
     for (const QString& filePath : files) {
         auto trackOpt = MetadataReader::readTrack(filePath);
         if (!trackOpt.has_value()) continue;
-        m_allTracks.append(trackOpt.value());
+        db->insertTrack(trackOpt.value());
     }
-
-    m_trackTable->setTracks(m_allTracks);
-    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_allTracks.size()));
+    db->rebuildAlbumsAndArtists();
+    MusicDataProvider::instance()->reloadFromDatabase();
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -698,31 +696,15 @@ void LibraryView::onLibraryUpdated()
 void LibraryView::filterByFolder(const QString& folderPath)
 {
     m_activeFolder = folderPath;
+    m_activeArtist.clear();
+    m_activeAlbum.clear();
     m_searchInput->lineEdit()->clear();
 
-    // Rebuild track list with only matching tracks sorted by track number
-    QVector<QPair<int, Track>> matchingTracks;
-    for (const Track& t : std::as_const(m_allTracks)) {
-        if (t.filePath.startsWith(folderPath)) {
-            matchingTracks.append({t.trackNumber, t});
-        }
-    }
+    auto* model = m_trackTable->hybridModel();
+    model->setFilterFolder(folderPath);
+    model->sortByColumn(TrackColumn::Number, Qt::AscendingOrder);
 
-    std::sort(matchingTracks.begin(), matchingTracks.end(),
-              [](const QPair<int, Track>& a, const QPair<int, Track>& b) {
-                  return a.first < b.first;
-              });
-
-    QVector<Track> sorted;
-    sorted.reserve(matchingTracks.size());
-    for (const auto& pair : matchingTracks) {
-        sorted.append(pair.second);
-    }
-
-    m_trackTable->setTracks(sorted);
-
-    m_countLabel->setText(
-        QString::number(sorted.size()) + QStringLiteral(" tracks"));
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
     m_headerLabel->setText(QStringLiteral("Library — %1").arg(QFileInfo(folderPath).fileName()));
     m_showAllBtn->setVisible(true);
 }
@@ -737,14 +719,10 @@ void LibraryView::filterByArtist(const QString& artistName)
     m_activeArtist = artistName;
     m_searchInput->lineEdit()->clear();
 
-    QVector<Track> filtered;
-    for (const Track& t : std::as_const(m_allTracks)) {
-        if (t.artist == artistName)
-            filtered.append(t);
-    }
+    auto* model = m_trackTable->hybridModel();
+    model->setFilterArtist(artistName);
 
-    m_trackTable->setTracks(filtered);
-    m_countLabel->setText(QStringLiteral("%1 tracks").arg(filtered.size()));
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
     m_headerLabel->setText(QStringLiteral("Library — %1").arg(artistName));
     m_showAllBtn->setVisible(true);
 }
@@ -759,24 +737,11 @@ void LibraryView::filterByAlbum(const QString& albumName)
     m_activeAlbum = albumName;
     m_searchInput->lineEdit()->clear();
 
-    QVector<QPair<int, Track>> matchingTracks;
-    for (const Track& t : std::as_const(m_allTracks)) {
-        if (t.album == albumName)
-            matchingTracks.append({t.trackNumber, t});
-    }
+    auto* model = m_trackTable->hybridModel();
+    model->setFilterAlbum(albumName);
+    model->sortByColumn(TrackColumn::Number, Qt::AscendingOrder);
 
-    std::sort(matchingTracks.begin(), matchingTracks.end(),
-              [](const QPair<int, Track>& a, const QPair<int, Track>& b) {
-                  return a.first < b.first;
-              });
-
-    QVector<Track> sorted;
-    sorted.reserve(matchingTracks.size());
-    for (const auto& pair : matchingTracks)
-        sorted.append(pair.second);
-
-    m_trackTable->setTracks(sorted);
-    m_countLabel->setText(QStringLiteral("%1 tracks").arg(sorted.size()));
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
     m_headerLabel->setText(QStringLiteral("Library — %1").arg(albumName));
     m_showAllBtn->setVisible(true);
 }
@@ -792,7 +757,8 @@ void LibraryView::showAllTracks()
     m_showAllBtn->setVisible(false);
     m_headerLabel->setText(QStringLiteral("Library"));
 
-    m_trackTable->setTracks(m_allTracks);
-    m_countLabel->setText(
-        QStringLiteral("%1 tracks").arg(m_allTracks.size()));
+    auto* model = m_trackTable->hybridModel();
+    model->clearFilter();
+    model->clearSort();
+    m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
 }

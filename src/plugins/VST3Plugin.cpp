@@ -1,5 +1,6 @@
 #include "VST3Plugin.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
+#include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <QWidget>
 #include <QWindow>
@@ -400,6 +401,16 @@ void VST3Plugin::process(float* buf, int frames, int channels)
 
     std::lock_guard<std::mutex> lock(m_processMutex);
 
+    // One-time diagnostic — capture input peak
+    static bool s_vst3Diag = false;
+    bool doLog = !s_vst3Diag;
+    float inputPeak = 0;
+    if (doLog) {
+        int n = std::min(frames * channels, 1024);
+        for (int i = 0; i < n; ++i)
+            inputPeak = std::max(inputPeak, std::abs(buf[i]));
+    }
+
     // Ensure buffers are large enough
     if (channels != m_channels || frames > m_maxBlockSize) {
         m_channels = channels;
@@ -442,6 +453,13 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     outputBus.silenceFlags = 0;
     outputBus.channelBuffers32 = m_outputPtrs.data();
 
+    // Provide ProcessContext — many plugins (e.g. iZotope Ozone) require it
+    ProcessContext processContext{};
+    processContext.state = ProcessContext::kPlaying;
+    processContext.sampleRate = m_sampleRate;
+    processContext.projectTimeSamples = m_transportPos;
+    m_transportPos += frames;
+
     ProcessData data;
     data.processMode = kRealtime;
     data.symbolicSampleSize = kSample32;
@@ -454,7 +472,7 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     data.outputParameterChanges = nullptr;
     data.inputEvents = nullptr;
     data.outputEvents = nullptr;
-    data.processContext = nullptr;
+    data.processContext = &processContext;
 
     tresult result = m_processor->process(data);
     if (result != kResultOk) {
@@ -466,6 +484,19 @@ void VST3Plugin::process(float* buf, int frames, int channels)
         for (int ch = 0; ch < channels; ++ch) {
             buf[f * channels + ch] = m_outputChannelBuffers[ch][f];
         }
+    }
+
+    // One-time diagnostic — capture output peak and log comparison
+    if (doLog) {
+        float outputPeak = 0;
+        int n = std::min(frames * channels, 1024);
+        for (int i = 0; i < n; ++i)
+            outputPeak = std::max(outputPeak, std::abs(buf[i]));
+        qDebug() << "[VST3 DIAG]" << QString::fromStdString(m_pluginName)
+                 << "in:" << inputPeak << "out:" << outputPeak
+                 << "frames:" << frames << "ch:" << channels
+                 << "enabled:" << m_enabled;
+        s_vst3Diag = true;
     }
 }
 
@@ -496,6 +527,7 @@ void VST3Plugin::prepare(double sampleRate, int channels)
 void VST3Plugin::reset()
 {
     if (!m_loaded || !m_processor) return;
+    m_transportPos = 0;
 
     if (m_processing) {
         m_processor->setProcessing(false);

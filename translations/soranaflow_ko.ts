@@ -209,6 +209,45 @@ Use clipboard image?</source>
     </message>
 </context>
 <context>
+    <name>AppSidebar</name>
+    <message>
+        <source>Now Playing</source>
+        <translation>지금 재생 중</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>라이브러리</translation>
+    </message>
+    <message>
+        <source>Albums</source>
+        <translation>앨범</translation>
+    </message>
+    <message>
+        <source>Artists</source>
+        <translation>아티스트</translation>
+    </message>
+    <message>
+        <source>Playlists</source>
+        <translation>재생목록</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Folders</source>
+        <translation>폴더</translation>
+    </message>
+    <message>
+        <source>LIBRARY FOLDERS</source>
+        <translation>라이브러리 폴더</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>설정</translation>
+    </message>
+</context>
+<context>
     <name>SettingsView</name>
     <message>
         <source>Language Changed</source>
@@ -217,6 +256,38 @@ Use clipboard image?</source>
     <message>
         <source>Please restart the application for the language change to take effect.</source>
         <translation>언어 변경을 적용하려면 애플리케이션을 다시 시작해주세요.</translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation>오디오</translation>
+    </message>
+    <message>
+        <source>Library</source>
+        <translation>라이브러리</translation>
+    </message>
+    <message>
+        <source>Apple Music</source>
+        <translation>Apple Music</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>외관</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>정보</translation>
+    </message>
+    <message>
+        <source>Language</source>
+        <translation>언어</translation>
+    </message>
+    <message>
+        <source>System Default</source>
+        <translation>시스템 기본값</translation>
+    </message>
+    <message>
+        <source>Select the display language</source>
+        <translation>표시 언어를 선택하세요</translation>
     </message>
 </context>
 </TS>

@@ -94,6 +94,7 @@ struct TapIOData {
     DSPPipeline*       pipeline  = nullptr;
     std::vector<float> interleaved;      // pre-allocated
     int                channels  = 2;
+    std::atomic<bool>  dspActive{false}; // when false, IOProc writes silence (standby)
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -193,6 +194,14 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
 
     if (!outOutputData || outOutputData->mNumberBuffers == 0)
         return noErr;
+
+    // ── Standby mode: DSP inactive → write silence and return ────────
+    if (!io->dspActive.load(std::memory_order_relaxed)) {
+        for (UInt32 i = 0; i < outOutputData->mNumberBuffers; ++i)
+            memset(outOutputData->mBuffers[i].mData, 0,
+                   outOutputData->mBuffers[i].mDataByteSize);
+        return noErr;
+    }
 
     // ── No input → silence ──────────────────────────────────────────
     if (!inInputData || inInputData->mNumberBuffers == 0) {
@@ -569,12 +578,37 @@ void AudioProcessTap::prepareForPlayback()
         int channels = 2;
         d->ioData.channels = channels;
         d->ioData.interleaved.resize(8192 * channels, 0.0f);
+        d->ioData.dspActive.store(false, std::memory_order_relaxed); // standby
+
+        // Prepare DSP pipeline so activate() is truly instant
+        if (d->ioData.pipeline)
+            d->ioData.pipeline->prepare(d->deviceRate, channels);
+
+        // ── Create and start IOProc in standby (dspActive=false) ────
+        // IOProc runs but outputs silence until activate() is called.
+        resetTapVerificationCounters();
+
+        OSStatus ioErr = AudioDeviceCreateIOProcID(d->aggregateID, tapIOProc,
+                                                    &d->ioData, &d->ioProcID);
+        if (ioErr != noErr) {
+            qWarning() << "[ProcessTap] Prepare: Failed to create IOProc:" << ioErr;
+            // Non-fatal: start() will retry via full creation path
+        } else {
+            ioErr = AudioDeviceStart(d->aggregateID, d->ioProcID);
+            if (ioErr != noErr) {
+                qWarning() << "[ProcessTap] Prepare: Failed to start IOProc:" << ioErr;
+                AudioDeviceDestroyIOProcID(d->aggregateID, d->ioProcID);
+                d->ioProcID = nullptr;
+            } else {
+                qDebug() << "[ProcessTap] IOProc started in standby (dspActive=false)";
+            }
+        }
 
         d->prepared = true;
 
         auto prepareEnd = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(prepareEnd - prepareStart);
-        qDebug() << "[ProcessTap] Tap pre-created in" << duration.count() << "ms, ready for instant start";
+        qDebug() << "[ProcessTap] Warmup complete in" << duration.count() << "ms — tap in standby";
         emit tapPrepared();
     }
 }
@@ -589,20 +623,30 @@ bool AudioProcessTap::start()
 
         auto startTime = std::chrono::high_resolution_clock::now();
 
-        // ── Fast path: use pre-created resources ─────────────────────
-        if (d->prepared && d->aggregateID != kAudioObjectUnknown) {
-            qDebug() << "[ProcessTap] Using pre-created tap, starting IOProc only";
+        // ── Fast path: pre-warmed IOProc already running in standby ──
+        if (d->prepared && d->aggregateID != kAudioObjectUnknown && d->ioProcID) {
+            qDebug() << "[ProcessTap] Activating pre-warmed tap (instant)";
+            d->ioData.dspActive.store(true, std::memory_order_release);
+            d->active = true;
+            auto endTime = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+            qDebug() << "[ProcessTap] Activated in" << duration.count() << "ms (fast path)";
+            emit tapStarted();
+            return true;
+        }
 
-            // Prepare DSP pipeline for tap sample rate
+        // ── Medium path: prepared but IOProc not yet running ────────
+        if (d->prepared && d->aggregateID != kAudioObjectUnknown) {
+            qDebug() << "[ProcessTap] Prepared but IOProc not running, creating now";
+
             if (d->ioData.pipeline)
                 d->ioData.pipeline->prepare(d->deviceRate, d->ioData.channels);
 
-            // Create and start IOProc
+            resetTapVerificationCounters();
             OSStatus err = AudioDeviceCreateIOProcID(d->aggregateID, tapIOProc,
                                             &d->ioData, &d->ioProcID);
             if (err != noErr) {
                 qWarning() << "[ProcessTap] Failed to create IOProc:" << err;
-                // Clean up and fall through to full creation
                 d->prepared = false;
             } else {
                 err = AudioDeviceStart(d->aggregateID, d->ioProcID);
@@ -612,10 +656,11 @@ bool AudioProcessTap::start()
                     d->ioProcID = nullptr;
                     d->prepared = false;
                 } else {
+                    d->ioData.dspActive.store(true, std::memory_order_release);
                     d->active = true;
                     auto endTime = std::chrono::high_resolution_clock::now();
                     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-                    qDebug() << "[ProcessTap] IOProc started in" << duration.count() << "ms (fast path)";
+                    qDebug() << "[ProcessTap] IOProc started in" << duration.count() << "ms (medium path)";
                     emit tapStarted();
                     return true;
                 }
@@ -895,6 +940,7 @@ bool AudioProcessTap::start()
             return false;
         }
 
+        d->ioData.dspActive.store(true, std::memory_order_release);
         d->active = true;
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
@@ -910,9 +956,10 @@ bool AudioProcessTap::start()
 
 void AudioProcessTap::stop()
 {
-    if (!d->active) return;
+    if (!d->active && !d->prepared) return;
 
-    qDebug() << "[ProcessTap] Stopping...";
+    qDebug() << "[ProcessTap] Stopping (full teardown)...";
+    d->ioData.dspActive.store(false, std::memory_order_release);
 
     if (d->ioProcID && d->aggregateID != kAudioObjectUnknown) {
         AudioDeviceStop(d->aggregateID, d->ioProcID);
@@ -936,6 +983,34 @@ void AudioProcessTap::stop()
     d->prepared = false;
 
     qDebug() << "[ProcessTap] Stopped";
+    emit tapStopped();
+}
+
+void AudioProcessTap::activate()
+{
+    if (d->active) return;
+
+    // If warmed up with IOProc running: instant activation
+    if (d->prepared && d->ioProcID && d->aggregateID != kAudioObjectUnknown) {
+        d->ioData.dspActive.store(true, std::memory_order_release);
+        d->active = true;
+        qDebug() << "[ProcessTap] Activated (instant — IOProc was in standby)";
+        emit tapStarted();
+        return;
+    }
+
+    // Not warmed up — fall back to full start()
+    qDebug() << "[ProcessTap] activate() — not warmed up, calling start()";
+    start();
+}
+
+void AudioProcessTap::deactivate()
+{
+    if (!d->active) return;
+
+    d->ioData.dspActive.store(false, std::memory_order_release);
+    d->active = false;
+    qDebug() << "[ProcessTap] Deactivated (tap stays warm in standby)";
     emit tapStopped();
 }
 

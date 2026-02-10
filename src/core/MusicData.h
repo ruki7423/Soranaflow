@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QObject>
 #include <QReadWriteLock>
+#include <atomic>
 
 // ── Audio Format Enum ───────────────────────────────────────────────
 enum class AudioFormat {
@@ -71,7 +72,54 @@ struct Track {
     double r128Peak = 0.0;             // dBTP
     bool hasReplayGain = false;
     bool hasR128 = false;
+
+    qint64 fileSize = 0;     // bytes
+    qint64 fileMtime = 0;    // seconds since epoch
 };
+
+// ── Lightweight index for display (no MBIDs, no coverUrl, no ReplayGain) ──
+struct TrackIndex {
+    QString id;
+    QString title;
+    QString artist;
+    QString album;
+    int     duration = 0;
+    AudioFormat format = AudioFormat::FLAC;
+    QString sampleRate;
+    QString bitDepth;
+    int     trackNumber = 0;
+    int     discNumber = 0;
+    QString filePath;
+    // Volume leveling — needed for queue building
+    double r128Loudness = 0.0;
+    double r128Peak = 0.0;
+    bool   hasR128 = false;
+};
+
+inline Track trackFromIndex(const TrackIndex& idx) {
+    Track t;
+    t.id = idx.id;
+    t.title = idx.title;
+    t.artist = idx.artist;
+    t.album = idx.album;
+    t.duration = idx.duration;
+    t.format = idx.format;
+    t.sampleRate = idx.sampleRate;
+    t.bitDepth = idx.bitDepth;
+    t.trackNumber = idx.trackNumber;
+    t.discNumber = idx.discNumber;
+    t.filePath = idx.filePath;
+    t.r128Loudness = idx.r128Loudness;
+    t.r128Peak = idx.r128Peak;
+    t.hasR128 = idx.hasR128;
+    return t;
+}
+
+inline TrackIndex indexFromTrack(const Track& t) {
+    return TrackIndex{t.id, t.title, t.artist, t.album, t.duration,
+                      t.format, t.sampleRate, t.bitDepth, t.trackNumber,
+                      t.discNumber, t.filePath, t.r128Loudness, t.r128Peak, t.hasR128};
+}
 
 struct Album {
     QString         id;
@@ -113,7 +161,8 @@ class MusicDataProvider : public QObject
 public:
     static MusicDataProvider* instance();
 
-    QVector<Track>    allTracks()    const;
+    QVector<Track>    allTracks() const;
+    QVector<TrackIndex> allTrackIndexes() const;
     QVector<Album>    allAlbums()    const;
     QVector<Artist>   allArtists()   const;
     QVector<Playlist> allPlaylists() const;
@@ -142,6 +191,8 @@ private:
     QVector<Playlist> m_playlists;
 
     bool m_useMockData = true;
+    bool m_firstLoadDone = false;
+    std::atomic<bool> m_reloading{false};
 };
 
 // ── Utility Functions ───────────────────────────────────────────────

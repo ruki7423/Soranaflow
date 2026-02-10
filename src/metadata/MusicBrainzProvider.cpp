@@ -1,5 +1,6 @@
 #include "MusicBrainzProvider.h"
 #include "RateLimiter.h"
+#include <QCoreApplication>
 
 #include <QNetworkReply>
 #include <QUrlQuery>
@@ -11,7 +12,7 @@
 const QString MusicBrainzProvider::API_BASE =
     QStringLiteral("https://musicbrainz.org/ws/2");
 const QString MusicBrainzProvider::USER_AGENT =
-    QStringLiteral("SoranaFlow/1.3.1 (https://github.com/soranaflow)");
+    QStringLiteral("SoranaFlow/%1 (https://github.com/soranaflow)").arg(QCoreApplication::applicationVersion());
 
 MusicBrainzProvider* MusicBrainzProvider::instance()
 {
