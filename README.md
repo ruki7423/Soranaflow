@@ -102,13 +102,22 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 8 (v1.0.0 → v1.4.0) |
+| GitHub Releases | 9 (v1.0.0 → v1.4.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.4.1 — Stability & Polish
+
+- Apple Music works in distributed builds (embedded JWT token)
+- Faster library scan — adaptive thread count for external drives
+- Fixed 6-minute beachball on first play (async queue save)
+- Auth popup auto-closes after Apple Music connect
+- Smoother scanning — reduced UI reloads during scan
+- Fixed font warnings (Sans-serif, SF Pro Display)
 
 ### v1.4.0 — Library Performance & Stability
 
