@@ -239,15 +239,23 @@ void LibraryScanner::scanFolders(const QStringList& folders)
                     &pool, chunk, processOneFile);
                 tagLibReadMs += tagLibTimer.elapsed();
 
-                // Serial DB insert (batch transaction)
-                db->beginTransaction();
-                for (const Track& track : batchTracks) {
-                    if (!track.filePath.isEmpty()) {
-                        db->insertTrack(track);
-                        m_knownFiles.insert(track.filePath);
+                // Serial DB insert — mini-batches of 20 to reduce mutex hold time
+                // (lets read queries through between commits)
+                const int MINI_BATCH = 20;
+                for (int mb = 0; mb < batchTracks.size(); mb += MINI_BATCH) {
+                    int mbEnd = qMin(mb + MINI_BATCH, (int)batchTracks.size());
+                    db->beginTransaction();
+                    for (int j = mb; j < mbEnd; ++j) {
+                        const Track& track = batchTracks[j];
+                        if (!track.filePath.isEmpty()) {
+                            db->insertTrack(track);
+                            m_knownFiles.insert(track.filePath);
+                        }
                     }
+                    db->commitTransaction();
+                    if (mbEnd < batchTracks.size())
+                        QThread::usleep(100);  // 0.1ms yield for read queries
                 }
-                db->commitTransaction();
 
                 processedCount += chunk.size();
 

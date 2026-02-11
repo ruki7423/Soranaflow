@@ -55,18 +55,19 @@ LibraryDatabase::~LibraryDatabase()
 // ── open / close ────────────────────────────────────────────────────
 bool LibraryDatabase::open()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (m_db.isOpen()) return true;
 
-    m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("library"));
+    // Write connection (scanner, inserts, updates)
+    m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("library_write"));
     m_db.setDatabaseName(m_dbPath);
 
     if (!m_db.open()) {
-        qWarning() << "LibraryDatabase: Failed to open:" << m_db.lastError().text();
+        qWarning() << "LibraryDatabase: Failed to open write connection:" << m_db.lastError().text();
         return false;
     }
 
-    // Enable WAL mode + performance PRAGMAs (foobar2000 pattern)
+    // Enable WAL mode + performance PRAGMAs
     QSqlQuery pragma(m_db);
     pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
@@ -74,7 +75,24 @@ bool LibraryDatabase::open()
     pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));   // 256MB mmap window
     pragma.exec(QStringLiteral("PRAGMA cache_size=-65536"));     // 64MB page cache
     pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));     // temp tables in RAM
-    qDebug() << "[LibraryDB] SQLite optimized: WAL + mmap 256MB + cache 64MB";
+
+    // Read connection (MDP, search, UI queries) — separate from writer for WAL concurrency
+    m_readDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("library_read"));
+    m_readDb.setDatabaseName(m_dbPath);
+
+    if (!m_readDb.open()) {
+        qWarning() << "LibraryDatabase: Failed to open read connection:" << m_readDb.lastError().text();
+        return false;
+    }
+
+    QSqlQuery readPragma(m_readDb);
+    readPragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+    readPragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+    readPragma.exec(QStringLiteral("PRAGMA cache_size=-65536"));
+    readPragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+    readPragma.exec(QStringLiteral("PRAGMA query_only=ON"));
+
+    qDebug() << "[LibraryDB] Dual-connection: WAL + mmap 256MB + cache 64MB (read/write split)";
 
     createTables();
     createIndexes();
@@ -108,10 +126,20 @@ bool LibraryDatabase::open()
 
 void LibraryDatabase::close()
 {
-    QMutexLocker lock(&m_dbMutex);
-    if (m_db.isOpen()) {
-        m_db.close();
+    {
+        QMutexLocker lock(&m_readMutex);
+        if (m_readDb.isOpen()) {
+            m_readDb.close();
+        }
     }
+    {
+        QMutexLocker lock(&m_writeMutex);
+        if (m_db.isOpen()) {
+            m_db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("library_read"));
+    QSqlDatabase::removeDatabase(QStringLiteral("library_write"));
 }
 
 // ── createTables ────────────────────────────────────────────────────
@@ -352,8 +380,8 @@ Track LibraryDatabase::trackFromQuery(const QSqlQuery& query) const
 // ── Tracks ──────────────────────────────────────────────────────────
 bool LibraryDatabase::trackExists(const QString& filePath) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT COUNT(*) FROM tracks WHERE file_path = ?"));
     q.addBindValue(filePath);
     if (q.exec() && q.next()) {
@@ -364,10 +392,10 @@ bool LibraryDatabase::trackExists(const QString& filePath) const
 
 QHash<QString, QPair<qint64, qint64>> LibraryDatabase::allTrackFileMeta() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QElapsedTimer t; t.start();
     QHash<QString, QPair<qint64, qint64>> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT file_path, file_size, file_mtime FROM tracks"));
     result.reserve(10000);
     while (q.next()) {
@@ -380,7 +408,7 @@ QHash<QString, QPair<qint64, qint64>> LibraryDatabase::allTrackFileMeta() const
 
 void LibraryDatabase::removeDuplicates()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QElapsedTimer t; t.start();
     qDebug() << "=== LibraryDatabase::removeDuplicates ===";
 
@@ -448,7 +476,7 @@ void LibraryDatabase::removeDuplicates()
 
 void LibraryDatabase::clearAllData(bool preservePlaylists)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     qDebug() << "=== LibraryDatabase::clearAllData ===" << "preservePlaylists:" << preservePlaylists;
 
     QSqlQuery q(m_db);
@@ -471,7 +499,7 @@ void LibraryDatabase::clearAllData(bool preservePlaylists)
 
 bool LibraryDatabase::insertTrack(const Track& track)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
 
     // Incremental: ensure album/artist rows exist and get IDs
     // Skip during batch mode (scanner bulk insert) — rebuildAlbumsAndArtists handles it
@@ -539,7 +567,7 @@ bool LibraryDatabase::insertTrack(const Track& track)
 
 bool LibraryDatabase::updateTrack(const Track& track)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (track.id.isEmpty()) {
         qWarning() << "LibraryDatabase::updateTrack - track has no ID, falling back to insertTrack";
         return insertTrack(track);
@@ -615,7 +643,7 @@ bool LibraryDatabase::updateTrackMetadata(const QString& trackId,
                                            const QString& albumMbid,
                                            const QString& releaseGroupMbid)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (trackId.isEmpty()) {
         qWarning() << "LibraryDatabase::updateTrackMetadata - empty track ID";
         return false;
@@ -656,7 +684,7 @@ bool LibraryDatabase::updateTrackMetadata(const QString& trackId,
 
 bool LibraryDatabase::removeTrack(const QString& id)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
 
     // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
     std::optional<Track> existing;
@@ -678,7 +706,7 @@ bool LibraryDatabase::removeTrack(const QString& id)
 
 bool LibraryDatabase::removeTrackByPath(const QString& filePath)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
 
     // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
     std::optional<Track> existing;
@@ -700,8 +728,8 @@ bool LibraryDatabase::removeTrackByPath(const QString& filePath)
 
 std::optional<Track> LibraryDatabase::trackById(const QString& id) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT * FROM tracks WHERE id = ?"));
     q.addBindValue(id);
     if (q.exec() && q.next()) {
@@ -712,8 +740,8 @@ std::optional<Track> LibraryDatabase::trackById(const QString& id) const
 
 std::optional<Track> LibraryDatabase::trackByPath(const QString& filePath) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT * FROM tracks WHERE file_path = ?"));
     q.addBindValue(filePath);
     if (q.exec() && q.next()) {
@@ -724,10 +752,10 @@ std::optional<Track> LibraryDatabase::trackByPath(const QString& filePath) const
 
 QVector<Track> LibraryDatabase::allTracks() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QElapsedTimer t; t.start();
     QVector<Track> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT * FROM tracks ORDER BY artist, album, disc_number, track_number"));
     while (q.next()) {
         result.append(trackFromQuery(q));
@@ -738,12 +766,12 @@ QVector<Track> LibraryDatabase::allTracks() const
 
 QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QElapsedTimer t; t.start();
     QVector<TrackIndex> result;
     StringPool pool;  // deduplicates artist/album names (~60% memory savings)
 
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral(
         "SELECT id, title, artist, album, duration, format, sample_rate, bit_depth, "
         "track_number, disc_number, file_path, r128_loudness, r128_peak "
@@ -775,7 +803,7 @@ QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
 
 QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<QString> ids;
     if (query.isEmpty()) return ids;
 
@@ -784,7 +812,7 @@ QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const
     ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
     ftsQuery += QStringLiteral("*");
 
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT t.id FROM tracks t "
         "INNER JOIN tracks_fts f ON t.rowid = f.rowid "
@@ -805,7 +833,7 @@ QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const
 
 void LibraryDatabase::rebuildFTSIndex()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QElapsedTimer t; t.start();
     QSqlQuery q(m_db);
     m_db.transaction();
@@ -821,7 +849,7 @@ void LibraryDatabase::rebuildFTSIndex()
 
 QVector<Track> LibraryDatabase::searchTracks(const QString& query) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Track> result;
     if (query.isEmpty()) return result;
 
@@ -831,7 +859,7 @@ QVector<Track> LibraryDatabase::searchTracks(const QString& query) const
         ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
         ftsQuery += QStringLiteral("*");
 
-        QSqlQuery q(m_db);
+        QSqlQuery q(m_readDb);
         q.prepare(QStringLiteral(
             "SELECT t.* FROM tracks t "
             "INNER JOIN tracks_fts f ON t.rowid = f.rowid "
@@ -848,7 +876,7 @@ QVector<Track> LibraryDatabase::searchTracks(const QString& query) const
         qDebug() << "[LibraryDB] FTS5 search:" << query << "→" << result.size() << "tracks";
     } else {
         // 1 char: fallback to LIKE (FTS5 too broad for single chars)
-        QSqlQuery q(m_db);
+        QSqlQuery q(m_readDb);
         q.prepare(QStringLiteral(
             "SELECT * FROM tracks WHERE "
             "title LIKE ? OR artist LIKE ? OR album LIKE ? "
@@ -870,8 +898,8 @@ QVector<Track> LibraryDatabase::searchTracks(const QString& query) const
 
 int LibraryDatabase::trackCount() const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));
     if (q.next()) {
         return q.value(0).toInt();
@@ -882,7 +910,7 @@ int LibraryDatabase::trackCount() const
 // ── Albums ──────────────────────────────────────────────────────────
 bool LibraryDatabase::insertAlbum(const Album& album)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO albums "
@@ -910,16 +938,16 @@ bool LibraryDatabase::insertAlbum(const Album& album)
 
 bool LibraryDatabase::updateAlbum(const Album& album)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     return insertAlbum(album);
 }
 
 QVector<Album> LibraryDatabase::allAlbums() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QElapsedTimer t; t.start();
     QVector<Album> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT * FROM albums ORDER BY artist, title"));
 
     if (q.lastError().isValid()) {
@@ -953,8 +981,8 @@ QVector<Album> LibraryDatabase::allAlbums() const
 
 Album LibraryDatabase::albumById(const QString& id) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT * FROM albums WHERE id = ?"));
     q.addBindValue(id);
     if (q.exec() && q.next()) {
@@ -990,7 +1018,7 @@ Album LibraryDatabase::albumById(const QString& id) const
 // ── Artists ─────────────────────────────────────────────────────────
 bool LibraryDatabase::insertArtist(const Artist& artist)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO artists (id, name, cover_url, genres) "
@@ -1011,16 +1039,16 @@ bool LibraryDatabase::insertArtist(const Artist& artist)
 
 bool LibraryDatabase::updateArtist(const Artist& artist)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     return insertArtist(artist);
 }
 
 QVector<Artist> LibraryDatabase::allArtists() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QElapsedTimer t; t.start();
     QVector<Artist> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT * FROM artists ORDER BY name"));
 
     if (q.lastError().isValid()) {
@@ -1048,8 +1076,8 @@ QVector<Artist> LibraryDatabase::allArtists() const
 
 Artist LibraryDatabase::artistById(const QString& id) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT * FROM artists WHERE id = ?"));
     q.addBindValue(id);
     if (q.exec() && q.next()) {
@@ -1078,9 +1106,9 @@ Artist LibraryDatabase::artistById(const QString& id) const
 
 QVector<Album> LibraryDatabase::searchAlbums(const QString& query) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Album> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT * FROM albums WHERE "
         "title LIKE ? OR artist LIKE ? "
@@ -1113,9 +1141,9 @@ QVector<Album> LibraryDatabase::searchAlbums(const QString& query) const
 
 QVector<Artist> LibraryDatabase::searchArtists(const QString& query) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Artist> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT * FROM artists WHERE name LIKE ? ORDER BY name LIMIT 10"
     ));
@@ -1140,7 +1168,7 @@ QVector<Artist> LibraryDatabase::searchArtists(const QString& query) const
 // ── Playlists ───────────────────────────────────────────────────────
 bool LibraryDatabase::insertPlaylist(const Playlist& playlist)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO playlists (id, name, description, cover_url, is_smart, created_at) "
@@ -1179,13 +1207,13 @@ bool LibraryDatabase::insertPlaylist(const Playlist& playlist)
 
 bool LibraryDatabase::updatePlaylist(const Playlist& playlist)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     return insertPlaylist(playlist);
 }
 
 bool LibraryDatabase::removePlaylist(const QString& id)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("DELETE FROM playlists WHERE id = ?"));
     q.addBindValue(id);
@@ -1202,9 +1230,9 @@ bool LibraryDatabase::removePlaylist(const QString& id)
 
 QVector<Playlist> LibraryDatabase::allPlaylists() const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Playlist> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.exec(QStringLiteral("SELECT * FROM playlists ORDER BY created_at DESC"));
 
     while (q.next()) {
@@ -1217,7 +1245,7 @@ QVector<Playlist> LibraryDatabase::allPlaylists() const
         p.createdAt       = q.value(QStringLiteral("created_at")).toString();
 
         // Load tracks
-        QSqlQuery tq(m_db);
+        QSqlQuery tq(m_readDb);
         tq.prepare(QStringLiteral(
             "SELECT t.* FROM tracks t "
             "JOIN playlist_tracks pt ON t.id = pt.track_id "
@@ -1238,8 +1266,8 @@ QVector<Playlist> LibraryDatabase::allPlaylists() const
 
 Playlist LibraryDatabase::playlistById(const QString& id) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral("SELECT * FROM playlists WHERE id = ?"));
     q.addBindValue(id);
     if (q.exec() && q.next()) {
@@ -1252,7 +1280,7 @@ Playlist LibraryDatabase::playlistById(const QString& id) const
         p.createdAt       = q.value(QStringLiteral("created_at")).toString();
 
         // Load tracks
-        QSqlQuery tq(m_db);
+        QSqlQuery tq(m_readDb);
         tq.prepare(QStringLiteral(
             "SELECT t.* FROM tracks t "
             "JOIN playlist_tracks pt ON t.id = pt.track_id "
@@ -1272,7 +1300,7 @@ Playlist LibraryDatabase::playlistById(const QString& id) const
 
 bool LibraryDatabase::addTrackToPlaylist(const QString& playlistId, const QString& trackId, int position)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
 
     if (position < 0) {
@@ -1300,7 +1328,7 @@ bool LibraryDatabase::addTrackToPlaylist(const QString& playlistId, const QStrin
 
 bool LibraryDatabase::removeTrackFromPlaylist(const QString& playlistId, const QString& trackId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?"));
@@ -1311,7 +1339,7 @@ bool LibraryDatabase::removeTrackFromPlaylist(const QString& playlistId, const Q
 
 bool LibraryDatabase::reorderPlaylistTrack(const QString& playlistId, int fromPos, int toPos)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     // Get the track at fromPos
     q.prepare(QStringLiteral(
@@ -1352,7 +1380,7 @@ bool LibraryDatabase::reorderPlaylistTrack(const QString& playlistId, int fromPo
 // ── Volume Leveling ─────────────────────────────────────────────────
 void LibraryDatabase::updateR128Loudness(const QString& filePath, double loudness, double peak)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "UPDATE tracks SET r128_loudness = ?, r128_peak = ? WHERE file_path = ?"));
@@ -1367,7 +1395,7 @@ void LibraryDatabase::updateR128Loudness(const QString& filePath, double loudnes
 // ── Play History ────────────────────────────────────────────────────
 void LibraryDatabase::recordPlay(const QString& trackId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("INSERT INTO play_history (track_id) VALUES (?)"));
     q.addBindValue(trackId);
@@ -1382,9 +1410,9 @@ void LibraryDatabase::recordPlay(const QString& trackId)
 
 QVector<Track> LibraryDatabase::recentlyPlayed(int limit) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Track> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT DISTINCT t.* FROM tracks t "
         "JOIN play_history ph ON t.id = ph.track_id "
@@ -1401,9 +1429,9 @@ QVector<Track> LibraryDatabase::recentlyPlayed(int limit) const
 
 QVector<Track> LibraryDatabase::mostPlayed(int limit) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Track> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT * FROM tracks WHERE play_count > 0 "
         "ORDER BY play_count DESC LIMIT ?"
@@ -1419,9 +1447,9 @@ QVector<Track> LibraryDatabase::mostPlayed(int limit) const
 
 QVector<Track> LibraryDatabase::recentlyAdded(int limit) const
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_readMutex);
     QVector<Track> result;
-    QSqlQuery q(m_db);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT * FROM tracks ORDER BY added_at DESC LIMIT ?"
     ));
@@ -1437,8 +1465,8 @@ QVector<Track> LibraryDatabase::recentlyAdded(int limit) const
 // ── MBID Helpers ─────────────────────────────────────────────────────
 QString LibraryDatabase::releaseGroupMbidForAlbum(const QString& albumId) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT release_group_mbid, album_mbid FROM tracks "
         "WHERE album_id = ? AND (release_group_mbid IS NOT NULL AND release_group_mbid != '') "
@@ -1463,8 +1491,8 @@ QString LibraryDatabase::releaseGroupMbidForAlbum(const QString& albumId) const
 
 QString LibraryDatabase::artistMbidForArtist(const QString& artistId) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT artist_mbid FROM tracks "
         "WHERE artist_id = ? AND artist_mbid IS NOT NULL AND artist_mbid != '' "
@@ -1480,7 +1508,7 @@ QString LibraryDatabase::artistMbidForArtist(const QString& artistId) const
 
 void LibraryDatabase::backupTrackMetadata(const QString& trackId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (trackId.isEmpty()) return;
 
     QSqlQuery q(m_db);
@@ -1501,7 +1529,7 @@ void LibraryDatabase::backupTrackMetadata(const QString& trackId)
 
 bool LibraryDatabase::undoLastMetadataChange(const QString& trackId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (trackId.isEmpty()) return false;
 
     // Get the most recent backup
@@ -1555,8 +1583,8 @@ bool LibraryDatabase::undoLastMetadataChange(const QString& trackId)
 
 bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const
 {
-    QMutexLocker lock(&m_dbMutex);
-    QSqlQuery q(m_db);
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
     q.prepare(QStringLiteral(
         "SELECT COUNT(*) FROM metadata_backups WHERE track_id = ?"));
     q.addBindValue(trackId);
@@ -1567,14 +1595,14 @@ bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const
 }
 
 // ── Transaction helpers ──────────────────────────────────────────────
-bool LibraryDatabase::beginTransaction() { QMutexLocker lock(&m_dbMutex); m_batchMode = true; return m_db.transaction(); }
-bool LibraryDatabase::commitTransaction() { QMutexLocker lock(&m_dbMutex); m_batchMode = false; return m_db.commit(); }
+bool LibraryDatabase::beginTransaction() { QMutexLocker lock(&m_writeMutex); m_batchMode = true; return m_db.transaction(); }
+bool LibraryDatabase::commitTransaction() { QMutexLocker lock(&m_writeMutex); m_batchMode = false; return m_db.commit(); }
 
 // ── Database backup / rollback ───────────────────────────────────────
 
 bool LibraryDatabase::createBackup()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QString backupFile = m_dbPath + QStringLiteral(".backup");
 
     if (QFile::exists(backupFile))
@@ -1590,7 +1618,7 @@ bool LibraryDatabase::createBackup()
 
 bool LibraryDatabase::restoreFromBackup()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QString backupFile = m_dbPath + QStringLiteral(".backup");
     if (!QFile::exists(backupFile)) {
         qWarning() << "[LibraryDatabase] No backup found at" << backupFile;
@@ -1631,7 +1659,7 @@ QDateTime LibraryDatabase::backupTimestamp() const
 
 QString LibraryDatabase::findOrCreateArtist(const QString& artistName)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (artistName.trimmed().isEmpty()) return {};
 
     QString normalizedName = artistName.trimmed().toLower();
@@ -1670,7 +1698,7 @@ QString LibraryDatabase::findOrCreateArtist(const QString& artistName)
 
 QString LibraryDatabase::findOrCreateAlbum(const QString& albumTitle, const QString& artistName, const QString& artistId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (albumTitle.trimmed().isEmpty()) return {};
 
     QString key = albumTitle.trimmed().toLower() + QStringLiteral("||") + artistName.trimmed().toLower();
@@ -1713,7 +1741,7 @@ QString LibraryDatabase::findOrCreateAlbum(const QString& albumTitle, const QStr
 
 void LibraryDatabase::updateAlbumStatsIncremental(const QString& albumId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (albumId.isEmpty()) return;
 
     QSqlQuery q(m_db);
@@ -1734,7 +1762,7 @@ void LibraryDatabase::updateAlbumStatsIncremental(const QString& albumId)
 
 void LibraryDatabase::updateAlbumsAndArtistsForTrack(const Track& track)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
 
     QString artistId;
     QString albumId;
@@ -1766,7 +1794,7 @@ void LibraryDatabase::updateAlbumsAndArtistsForTrack(const Track& track)
 
 void LibraryDatabase::cleanOrphanedAlbumsAndArtists()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
 
     QSqlQuery q(m_db);
     q.exec(QStringLiteral(
@@ -1793,7 +1821,7 @@ void LibraryDatabase::clearIncrementalCaches()
 
 void LibraryDatabase::refreshAlbumMetadataFromTracks(const QString& albumId)
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     if (albumId.isEmpty()) return;
 
     QSqlQuery q(m_db);
@@ -1817,7 +1845,7 @@ void LibraryDatabase::refreshAlbumMetadataFromTracks(const QString& albumId)
 // ── Rebuild Albums & Artists from Tracks ─────────────────────────────
 void LibraryDatabase::rebuildAlbumsAndArtists()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     // Skip if recently rebuilt (5-second cooldown)
     static QElapsedTimer lastRebuild;
     if (lastRebuild.isValid() && lastRebuild.elapsed() < 5000) {
@@ -1867,7 +1895,7 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
 
 void LibraryDatabase::doRebuildInternal()
 {
-    QMutexLocker lock(&m_dbMutex);
+    QMutexLocker lock(&m_writeMutex);
     QElapsedTimer rebuildTimer; rebuildTimer.start();
     QElapsedTimer stepTimer;
 

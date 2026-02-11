@@ -60,6 +60,7 @@ signals:
     void previewOnlyMode();
     void tokenExpired();
     void playbackEnded();
+    void authorizationPending();   // system "Allow Access" dialog is about to appear
 
 private:
     explicit MusicKitPlayer(QObject* parent = nullptr);

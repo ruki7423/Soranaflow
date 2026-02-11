@@ -128,9 +128,11 @@ private:
     AudioFormat audioFormatFromString(const QString& str) const;
     QString audioFormatToString(AudioFormat fmt) const;
 
-    QSqlDatabase m_db;
+    QSqlDatabase m_db;        // write connection (scanner, inserts, updates)
+    QSqlDatabase m_readDb;    // read connection (MDP, search, UI queries)
     QString m_dbPath;
-    mutable QRecursiveMutex m_dbMutex;
+    mutable QRecursiveMutex m_writeMutex;  // protects m_db (writes)
+    mutable QRecursiveMutex m_readMutex;   // protects m_readDb (reads)
     std::atomic<bool> m_rebuildPending{false};
 
     // Batch mode: skip incremental album/artist work during bulk scan

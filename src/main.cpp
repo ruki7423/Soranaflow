@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Sorana Flow");
     app.setOrganizationName("SoranaFlow");
-    app.setApplicationVersion("1.4.1");
+    app.setApplicationVersion("1.4.2");
 
     // Set default font
     QFont defaultFont = app.font();
@@ -372,7 +372,7 @@ int main(int argc, char* argv[]) {
     // === DIAGNOSTIC: Verify database state ===
     QTimer::singleShot(1000, []() {
         qDebug() << "=== DATABASE DIAGNOSTIC ===";
-        QSqlDatabase db = QSqlDatabase::database(QStringLiteral("library"));
+        QSqlDatabase db = QSqlDatabase::database(QStringLiteral("library_read"));
         QSqlQuery q(db);
 
         q.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));

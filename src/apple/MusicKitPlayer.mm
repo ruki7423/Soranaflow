@@ -95,6 +95,20 @@
         QString result = QString::fromNSString([body description]);
         qDebug() << "[MusicKit JS] tokenInjectionResult:" << result;
     }
+    else if ([name isEqualToString:@"authWillPrompt"]) {
+        qDebug() << "[MusicKitPlayer] Auth prompt incoming — bringing app to front";
+        // Bring app to front so macOS "Allow Access" dialog is visible
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSApp activateIgnoringOtherApps:YES];
+        });
+        // System dialog may appear after a short delay — re-activate to ensure visibility
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [NSApp activateIgnoringOtherApps:YES];
+        });
+        QMetaObject::invokeMethod(p, [p]() { emit p->authorizationPending(); },
+                                  Qt::QueuedConnection);
+    }
 }
 
 // WKNavigationDelegate
@@ -154,9 +168,26 @@
     panel.contentView = popup;
     panel.title = @"Apple Music Sign In";
     [panel center];
+    [panel setLevel:NSFloatingWindowLevel];
     [panel makeKeyAndOrderFront:nil];
     panel.releasedWhenClosed = NO;
     self.authPanel = panel;
+
+    qDebug() << "[MusicKitPlayer] Auth popup created at floating level";
+
+    // Re-raise after auth page transitions (Apple ID sign-in → Access Request)
+    // Can't use __weak (MRC), so capture the panel pointer directly.
+    // The delayed blocks only call methods if the panel is still visible.
+    NSPanel* panelRef = panel;
+    for (double delay : {0.5, 1.5, 3.0}) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            if (panelRef && [panelRef isVisible]) {
+                [NSApp activateIgnoringOtherApps:YES];
+                [panelRef makeKeyAndOrderFront:nil];
+            }
+        });
+    }
 
     return popup;
 }
@@ -165,6 +196,7 @@
 - (void)webViewDidClose:(WKWebView*)webView
 {
     if (self.authPanel) {
+        [self.authPanel setLevel:NSNormalWindowLevel];
         [self.authPanel orderOut:nil];
         [self.authPanel close];
         self.authPanel = nil;
@@ -175,6 +207,7 @@
 - (void)closeAuthPanel
 {
     if (self.authPanel) {
+        [self.authPanel setLevel:NSNormalWindowLevel];
         [self.authPanel orderOut:nil];
         [self.authPanel close];
         self.authPanel = nil;
@@ -280,7 +313,8 @@ void MusicKitPlayer::ensureWebView()
         NSArray* handlerNames = @[
             @"musicKitReady", @"playbackState", @"nowPlaying",
             @"playbackTime", @"error", @"authStatus", @"playbackStarted",
-            @"tokenExpired", @"playbackEnded", @"log", @"tokenInjectionResult"
+            @"tokenExpired", @"playbackEnded", @"log", @"tokenInjectionResult",
+            @"authWillPrompt"
         ];
         for (NSString* name in handlerNames) {
             [ucc addScriptMessageHandler:m_wk->handler name:name];
@@ -804,6 +838,7 @@ async function configureMusicKit() {
         log('[MusicKit] Bitrate set to HIGH (256kbps)');
 
         try {
+            msg('authWillPrompt', true);
             await music.authorize();
             log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
         } catch (authErr) {
