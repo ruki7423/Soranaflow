@@ -391,6 +391,10 @@ public:
     NSString*            tapUUID     = nil;
     int                  stallCount  = 0;
     bool                 recreating  = false;
+    int                  generation  = 0;       // Incremented on stop() to invalidate pending timers
+    uint64_t             lastCheckedFrames = 0;  // For activity monitoring
+    int                  inactiveChecks = 0;     // Consecutive checks with no frame progress
+    QTimer*              activityTimer = nullptr;
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -407,6 +411,9 @@ AudioProcessTap::AudioProcessTap(QObject* parent)
     : QObject(parent)
     , d(new Impl)
 {
+    d->activityTimer = new QTimer(this);
+    d->activityTimer->setInterval(5000);
+    connect(d->activityTimer, &QTimer::timeout, this, &AudioProcessTap::checkTapActivity);
 }
 
 AudioProcessTap::~AudioProcessTap()
@@ -628,6 +635,9 @@ bool AudioProcessTap::start()
             qDebug() << "[ProcessTap] Activating pre-warmed tap (instant)";
             d->ioData.dspActive.store(true, std::memory_order_release);
             d->active = true;
+            d->lastCheckedFrames = g_tapFrameCounter.load(std::memory_order_relaxed);
+            d->inactiveChecks = 0;
+            d->activityTimer->start();
             auto endTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
             qDebug() << "[ProcessTap] Activated in" << duration.count() << "ms (fast path)";
@@ -658,6 +668,9 @@ bool AudioProcessTap::start()
                 } else {
                     d->ioData.dspActive.store(true, std::memory_order_release);
                     d->active = true;
+                    d->lastCheckedFrames = g_tapFrameCounter.load(std::memory_order_relaxed);
+                    d->inactiveChecks = 0;
+                    d->activityTimer->start();
                     auto endTime = std::chrono::high_resolution_clock::now();
                     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
                     qDebug() << "[ProcessTap] IOProc started in" << duration.count() << "ms (medium path)";
@@ -942,6 +955,9 @@ bool AudioProcessTap::start()
 
         d->ioData.dspActive.store(true, std::memory_order_release);
         d->active = true;
+        d->lastCheckedFrames = g_tapFrameCounter.load(std::memory_order_relaxed);
+        d->inactiveChecks = 0;
+        d->activityTimer->start();
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
         qDebug() << "[ProcessTap] IOProc started in" << duration.count() << "ms (full creation),"
@@ -959,6 +975,12 @@ void AudioProcessTap::stop()
     if (!d->active && !d->prepared) return;
 
     qDebug() << "[ProcessTap] Stopping (full teardown)...";
+
+    // Invalidate any pending stall-recovery timers and reset state
+    d->generation++;
+    d->stallCount = 0;
+    d->activityTimer->stop();
+
     d->ioData.dspActive.store(false, std::memory_order_release);
 
     if (d->ioProcID && d->aggregateID != kAudioObjectUnknown) {
@@ -981,6 +1003,7 @@ void AudioProcessTap::stop()
     d->tapUUID = nil;
     d->active = false;
     d->prepared = false;
+    d->recreating = false;
 
     qDebug() << "[ProcessTap] Stopped";
     emit tapStopped();
@@ -994,6 +1017,9 @@ void AudioProcessTap::activate()
     if (d->prepared && d->ioProcID && d->aggregateID != kAudioObjectUnknown) {
         d->ioData.dspActive.store(true, std::memory_order_release);
         d->active = true;
+        d->lastCheckedFrames = g_tapFrameCounter.load(std::memory_order_relaxed);
+        d->inactiveChecks = 0;
+        d->activityTimer->start();
         qDebug() << "[ProcessTap] Activated (instant — IOProc was in standby)";
         emit tapStarted();
         return;
@@ -1008,6 +1034,7 @@ void AudioProcessTap::deactivate()
 {
     if (!d->active) return;
 
+    d->activityTimer->stop();
     d->ioData.dspActive.store(false, std::memory_order_release);
     d->active = false;
     qDebug() << "[ProcessTap] Deactivated (tap stays warm in standby)";
@@ -1027,9 +1054,13 @@ void AudioProcessTap::onPlaybackStall()
         qDebug() << "[ProcessTap] Recreating tap after" << delay
                  << "ms backoff (stall #" << d->stallCount << ")";
 
-        stop();
-        QTimer::singleShot(delay, this, [this]() {
-            d->recreating = false;
+        stop();  // Increments generation, resets stallCount/recreating
+        int gen = d->generation;  // Capture after stop() incremented it
+        QTimer::singleShot(delay, this, [this, gen]() {
+            if (d->generation != gen) {
+                qDebug() << "[ProcessTap] Stall recovery cancelled (tap was stopped externally)";
+                return;
+            }
             qDebug() << "[ProcessTap] Backoff complete, restarting tap";
             start();
         });
@@ -1042,5 +1073,24 @@ void AudioProcessTap::onPlaybackResumed()
         qDebug() << "[ProcessTap] Playback resumed, resetting stall counter from"
                  << d->stallCount;
         d->stallCount = 0;
+    }
+}
+
+void AudioProcessTap::checkTapActivity()
+{
+    if (!d->active) return;
+
+    uint64_t currentFrames = g_tapFrameCounter.load(std::memory_order_relaxed);
+    if (currentFrames == d->lastCheckedFrames) {
+        d->inactiveChecks++;
+        if (d->inactiveChecks >= 2) {  // 10 seconds with no IOProc frames
+            qWarning() << "[ProcessTap] IOProc inactive for"
+                       << (d->inactiveChecks * 5) << "seconds — triggering recovery";
+            d->inactiveChecks = 0;
+            onPlaybackStall();
+        }
+    } else {
+        d->lastCheckedFrames = currentFrames;
+        d->inactiveChecks = 0;
     }
 }

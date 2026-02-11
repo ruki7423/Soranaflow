@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Sorana Flow");
     app.setOrganizationName("SoranaFlow");
-    app.setApplicationVersion("1.4.0");
+    app.setApplicationVersion("1.4.1");
 
     // Set default font
     QFont defaultFont = app.font();
@@ -190,14 +190,8 @@ int main(int argc, char* argv[]) {
     // Load Apple Music developer credentials for REST API fallback
     {
         auto* am = AppleMusicManager::instance();
-#ifdef MUSICKIT_DEVELOPER_TOKEN
-        // Use embedded token (compiled in at build time)
-        am->loadDeveloperCredentials(
-            QStringLiteral("W5JMPJXB5H"),
-            QStringLiteral("4GW6686CH4"),
-            QString());  // Path not needed when token is embedded
-#else
-        // Search for .p8 key file in common locations (dev builds only)
+        // Search for .p8 key file (dev builds); falls back to embedded token
+        QString keyPath;
         QStringList keySearchPaths = {
             QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/AuthKey_4GW6686CH4.p8"),
             QCoreApplication::applicationDirPath() + QStringLiteral("/AuthKey_4GW6686CH4.p8"),
@@ -205,16 +199,16 @@ int main(int argc, char* argv[]) {
         };
         for (const QString& path : keySearchPaths) {
             if (QFile::exists(path)) {
-                am->loadDeveloperCredentials(
-                    QStringLiteral("W5JMPJXB5H"),
-                    QStringLiteral("4GW6686CH4"),
-                    path);
+                keyPath = path;
                 break;
             }
         }
-#endif
+        am->loadDeveloperCredentials(
+            QStringLiteral("W5JMPJXB5H"),
+            QStringLiteral("4GW6686CH4"),
+            keyPath);
         if (!am->hasDeveloperToken()) {
-            qDebug() << "AppleMusicManager: No developer token available — REST API fallback unavailable";
+            qWarning() << "[AppleMusicManager] ERROR: No developer token available";
         }
     }
 #endif

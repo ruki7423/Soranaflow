@@ -3,8 +3,8 @@
 #include <QObject>
 #include <QString>
 
-class QWebEngineView;
-class QWebChannel;
+// Opaque pointer for Objective-C++ WKWebView implementation
+struct MusicKitWebViewPrivate;
 
 class MusicKitPlayer : public QObject {
     Q_OBJECT
@@ -29,24 +29,24 @@ public:
     // Route WebView audio to the app's selected output device
     void updateOutputDevice();
 
-    // Clean shutdown — call before application exit to avoid WebEngine warnings
+    // Clean shutdown — call before application exit
     void cleanup();
 
     // Music User Token injection
     void injectMusicUserToken(const QString& token);
     void clearMusicUserToken();
 
-    // Called from JS via QWebChannel
-    Q_INVOKABLE void onMusicKitReady();
-    Q_INVOKABLE void onPlaybackStateChanged(bool playing);
-    Q_INVOKABLE void onNowPlayingChanged(const QString& title, const QString& artist,
-                                          const QString& album, double duration);
-    Q_INVOKABLE void onPlaybackTimeChanged(double currentTime, double totalTime);
-    Q_INVOKABLE void onError(const QString& error);
-    Q_INVOKABLE void onAuthStatusChanged(const QString& statusJson);
-    Q_INVOKABLE void onPlaybackStarted(const QString& infoJson);
-    Q_INVOKABLE void onTokenExpired();
-    Q_INVOKABLE void onPlaybackEnded();
+    // Called from JS via WKScriptMessageHandler
+    void onMusicKitReady();
+    void onPlaybackStateChanged(bool playing);
+    void onNowPlayingChanged(const QString& title, const QString& artist,
+                              const QString& album, double duration);
+    void onPlaybackTimeChanged(double currentTime, double totalTime);
+    void onError(const QString& error);
+    void onAuthStatusChanged(const QString& statusJson);
+    void onPlaybackStarted(const QString& infoJson);
+    void onTokenExpired();
+    void onPlaybackEnded();
 
 signals:
     void ready();
@@ -66,9 +66,9 @@ private:
     void ensureWebView();
     QString generateHTML();
     void runJS(const QString& js);
+    Q_INVOKABLE void webViewDidFinishLoad();
 
-    QWebEngineView* m_webView = nullptr;
-    QWebChannel* m_channel = nullptr;
+    MusicKitWebViewPrivate* m_wk = nullptr;
     bool m_ready = false;
     bool m_initialized = false;
     bool m_webViewReady = false;

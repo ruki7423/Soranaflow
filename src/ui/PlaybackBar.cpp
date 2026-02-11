@@ -233,7 +233,7 @@ void PlaybackBar::setupUI()
     progressLayout->setContentsMargins(0, 0, 0, 0);
     progressLayout->setSpacing(8);
 
-    QFont monoFont("monospace", 10);
+    QFont monoFont("Menlo", 10);
     monoFont.setStyleHint(QFont::Monospace);
 
     m_currentTimeLabel = new QLabel("0:00");

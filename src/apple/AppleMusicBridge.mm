@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -117,48 +118,73 @@ void AppleMusicManager::loadDeveloperCredentials(const QString& teamId,
                                                   const QString& privateKeyPath)
 {
 #ifdef MUSICKIT_DEVELOPER_TOKEN
-    // Use pre-generated token embedded at compile time (no .p8 needed)
+    // Tier 0: Compile-time token from cmake / deploy.sh
     d->developerToken = QStringLiteral(MUSICKIT_DEVELOPER_TOKEN);
-    qDebug() << "AppleMusicManager: Using embedded developer token ("
+    qDebug() << "[AppleMusicManager] Using compile-time developer token ("
              << d->developerToken.length() << "chars)";
     Q_UNUSED(teamId);
     Q_UNUSED(keyId);
     Q_UNUSED(privateKeyPath);
 #else
-    // Fallback: generate token from .p8 at runtime (dev builds only)
-    QFile keyFile(privateKeyPath);
-    if (!keyFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "AppleMusicManager: Cannot open private key file:" << privateKeyPath;
-        return;
-    }
+    // Tier 1: Try runtime generation from .p8 file (dev builds)
+    if (!privateKeyPath.isEmpty()) {
+        QFile keyFile(privateKeyPath);
+        if (keyFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QString pemContents = QString::fromUtf8(keyFile.readAll());
+            keyFile.close();
 
-    QString pemContents = QString::fromUtf8(keyFile.readAll());
-    keyFile.close();
+            if (!pemContents.isEmpty()) {
+                qDebug() << "[AppleMusicManager] Loaded private key from" << privateKeyPath;
 
-    if (pemContents.isEmpty()) {
-        qWarning() << "AppleMusicManager: Private key file is empty";
-        return;
-    }
+                @autoreleasepool {
+                    NSString* nsTeamId = teamId.toNSString();
+                    NSString* nsKeyId  = keyId.toNSString();
+                    NSString* nsPem    = pemContents.toNSString();
 
-    qDebug() << "AppleMusicManager: Loaded private key from" << privateKeyPath;
-
-    @autoreleasepool {
-        NSString* nsTeamId = teamId.toNSString();
-        NSString* nsKeyId  = keyId.toNSString();
-        NSString* nsPem    = pemContents.toNSString();
-
-        NSString* token = [MusicKitSwiftBridge generateDeveloperTokenWithTeamId:nsTeamId
-                                                                          keyId:nsKeyId
-                                                                  privateKeyPEM:nsPem];
-        if (token) {
-            d->developerToken = QString::fromNSString(token);
-            qDebug() << "AppleMusicManager: Developer token generated ("
-                     << d->developerToken.length() << "chars)";
+                    NSString* token = [MusicKitSwiftBridge generateDeveloperTokenWithTeamId:nsTeamId
+                                                                                      keyId:nsKeyId
+                                                                              privateKeyPEM:nsPem];
+                    if (token) {
+                        d->developerToken = QString::fromNSString(token);
+                        qDebug() << "[AppleMusicManager] Developer token generated from .p8 ("
+                                 << d->developerToken.length() << "chars)";
+                    } else {
+                        qWarning() << "[AppleMusicManager] Failed to generate token from .p8";
+                    }
+                }
+            }
         } else {
-            qWarning() << "AppleMusicManager: Failed to generate developer token";
+            qDebug() << "[AppleMusicManager] .p8 not found at:" << privateKeyPath;
         }
     }
+
+    // Tier 2: Embedded pre-generated token (distributed builds without .p8)
+    if (d->developerToken.isEmpty()) {
+        qDebug() << "[AppleMusicManager] .p8 not available — using embedded token";
+        d->developerToken = QStringLiteral(
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6IjRHVzY2ODZDSDQiLCJ0eXAiOiJKV1QifQ."
+            "eyJpc3MiOiJXNUpNUEpYQjVIIiwiaWF0IjoxNzcwNzI5MjUzLCJleHAiOjE3ODYyODEyNTN9."
+            "OskqwBYwLw_wbBSwz0fqZI9VjZSWW1w6rZaLzqMZJFMvhxdbQccR2KZMqHRhv6muuZ_Mcj5M8PKx2qbvYczcDg");
+    }
 #endif
+
+    // Token expiry check (applies to all tiers)
+    if (!d->developerToken.isEmpty()) {
+        QStringList parts = d->developerToken.split(QLatin1Char('.'));
+        if (parts.size() >= 2) {
+            QByteArray payload = QByteArray::fromBase64(
+                parts[1].toUtf8(), QByteArray::Base64UrlEncoding);
+            QJsonObject obj = QJsonDocument::fromJson(payload).object();
+            qint64 exp = obj[QStringLiteral("exp")].toInteger();
+            qint64 now = QDateTime::currentSecsSinceEpoch();
+            qint64 daysLeft = (exp - now) / 86400;
+            if (daysLeft < 30) {
+                qWarning() << "[AppleMusicManager] WARNING: Developer token expires in"
+                           << daysLeft << "days — rebuild with fresh token needed soon";
+            }
+            qDebug() << "[AppleMusicManager] Developer token valid for" << daysLeft << "days";
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

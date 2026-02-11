@@ -8,9 +8,12 @@
 #endif
 
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QMutex>
 #include <QRandomGenerator>
 #include <QSettings>
 #include <QTimer>
+#include <QtConcurrent>
 #include <algorithm>
 
 // ── Singleton ───────────────────────────────────────────────────────
@@ -34,11 +37,11 @@ PlaybackState::PlaybackState(QObject* parent)
     connectToAudioEngine();
     connectToMusicKitPlayer();
 
-    // Auto-save queue when it changes (debounced via queueChanged signal)
-    connect(this, &PlaybackState::queueChanged, this, &PlaybackState::saveQueueToSettings);
-    connect(this, &PlaybackState::trackChanged, this, [this](const Track&) {
-        saveQueueToSettings();
-    });
+    // Debounced async queue save — coalesces multiple changes into one write
+    m_saveTimer = new QTimer(this);
+    m_saveTimer->setSingleShot(true);
+    m_saveTimer->setInterval(500);
+    connect(m_saveTimer, &QTimer::timeout, this, &PlaybackState::doSave);
 
     // Autoplay manager
     m_autoplay = AutoplayManager::instance();
@@ -257,6 +260,7 @@ void PlaybackState::toggleShuffle()
         m_shuffledIndices.clear();
     }
     emit shuffleChanged(m_shuffle);
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -337,6 +341,7 @@ void PlaybackState::setCurrentTrackInfo(const Track& track)
         m_queue.insert(m_queueIndex, track);
     }
 
+    scheduleSave();
     emitQueueChangedDebounced();
     emit timeChanged(m_currentTime);
     emit trackChanged(m_currentTrack);
@@ -414,6 +419,7 @@ void PlaybackState::setQueue(const QVector<Track>& tracks)
     if (m_shuffle && !tracks.isEmpty()) {
         rebuildShuffleOrder();
     }
+    scheduleSave();
     emit queueChanged();
 
     // NOTE: Do NOT call scheduleGaplessPrepare() here.
@@ -426,6 +432,7 @@ void PlaybackState::setQueue(const QVector<Track>& tracks)
 void PlaybackState::addToQueue(const Track& track)
 {
     m_queue.append(track);
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -433,6 +440,7 @@ void PlaybackState::addToQueue(const Track& track)
 void PlaybackState::addToQueue(const QVector<Track>& tracks)
 {
     m_queue.append(tracks);
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -443,6 +451,7 @@ void PlaybackState::insertNext(const Track& track)
     if (insertPos < 0) insertPos = 0;
     if (insertPos > m_queue.size()) insertPos = m_queue.size();
     m_queue.insert(insertPos, track);
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -455,6 +464,7 @@ void PlaybackState::insertNext(const QVector<Track>& tracks)
     for (int i = 0; i < tracks.size(); ++i) {
         m_queue.insert(insertPos + i, tracks[i]);
     }
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -481,6 +491,7 @@ void PlaybackState::removeFromQueue(int index)
         }
     }
 
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -489,6 +500,7 @@ void PlaybackState::clearQueue()
 {
     m_queue.clear();
     m_queueIndex = -1;
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -499,6 +511,7 @@ void PlaybackState::clearUpcoming()
         // Keep tracks up to and including current
         m_queue.resize(m_queueIndex + 1);
     }
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -523,6 +536,7 @@ void PlaybackState::moveTo(int fromIndex, int toIndex)
     }
 
     if (m_shuffle) rebuildShuffleOrder();
+    scheduleSave();
     emitQueueChangedDebounced();
 }
 
@@ -558,9 +572,65 @@ void PlaybackState::saveQueueToSettings()
     qDebug() << "[Queue] Saved" << m_queue.size() << "tracks, index:" << m_queueIndex;
 }
 
+// ── scheduleSave (debounced — coalesces multiple changes) ───────────
+void PlaybackState::scheduleSave()
+{
+    if (m_restoring) return;
+    m_saveTimer->start();  // restarts the 500ms timer
+}
+
+// ── doSave (async — snapshot on main thread, write on worker) ───────
+void PlaybackState::doSave()
+{
+    // Snapshot queue data (fast — just copies QVector of value types)
+    QVector<Track> snapshot = m_queue;
+    int idx = m_queueIndex;
+    bool shuffle = m_shuffle;
+    int repeat = static_cast<int>(m_repeat);
+
+    QtConcurrent::run([snapshot, idx, shuffle, repeat]() {
+        static QMutex mutex;
+        QMutexLocker lock(&mutex);
+
+        QElapsedTimer timer;
+        timer.start();
+
+        QSettings settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"));
+
+        settings.beginWriteArray(QStringLiteral("queue/tracks"), snapshot.size());
+        for (int i = 0; i < snapshot.size(); ++i) {
+            settings.setArrayIndex(i);
+            const Track& t = snapshot[i];
+            settings.setValue(QStringLiteral("id"), t.id);
+            settings.setValue(QStringLiteral("title"), t.title);
+            settings.setValue(QStringLiteral("artist"), t.artist);
+            settings.setValue(QStringLiteral("album"), t.album);
+            settings.setValue(QStringLiteral("albumId"), t.albumId);
+            settings.setValue(QStringLiteral("duration"), t.duration);
+            settings.setValue(QStringLiteral("filePath"), t.filePath);
+            settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
+            settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
+            settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
+            settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
+            settings.setValue(QStringLiteral("bitrate"), t.bitrate);
+            settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
+        }
+        settings.endArray();
+
+        settings.setValue(QStringLiteral("queue/currentIndex"), idx);
+        settings.setValue(QStringLiteral("queue/shuffle"), shuffle);
+        settings.setValue(QStringLiteral("queue/repeat"), repeat);
+
+        qDebug() << "[Queue] Saved" << snapshot.size() << "tracks in"
+                 << timer.elapsed() << "ms (async, index:" << idx << ")";
+    });
+}
+
 // ── restoreQueueFromSettings ────────────────────────────────────────
 void PlaybackState::restoreQueueFromSettings()
 {
+    m_restoring = true;
+
     QSettings settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"));
 
     int count = settings.beginReadArray(QStringLiteral("queue/tracks"));
@@ -607,6 +677,8 @@ void PlaybackState::restoreQueueFromSettings()
     if (!m_currentTrack.id.isEmpty()) {
         emit trackChanged(m_currentTrack);
     }
+
+    m_restoring = false;
 }
 
 // ── playNextTrack (core next-track logic with repeat/shuffle) ───────
@@ -785,6 +857,7 @@ void PlaybackState::onGaplessTransition()
         m_currentTrack = m_queue.at(m_queueIndex);
         m_currentTime = 0;
         emit timeChanged(m_currentTime);
+        scheduleSave();
         emitQueueChangedDebounced();
         emit trackChanged(m_currentTrack);
 

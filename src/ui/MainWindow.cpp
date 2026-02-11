@@ -22,7 +22,9 @@
 #include "views/FolderBrowserView.h"
 #include "views/SearchResultsView.h"
 #include "../core/library/LibraryDatabase.h"
+#include "../core/MusicData.h"
 #include "../core/CoverArtLoader.h"
+#include "../core/ThemeManager.h"
 #ifdef Q_OS_MAC
 #include "../platform/macos/MacMediaIntegration.h"
 #endif
@@ -37,7 +39,7 @@
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QTimer>
-#include <QWebEngineView>
+#include <QPropertyAnimation>
 
 static bool isTextInputFocused()
 {
@@ -228,6 +230,22 @@ void MainWindow::setupUI()
 
     rightLayout->addWidget(m_viewStack, 1);
 
+    // Inline scan progress bar (hidden by default)
+    m_scanBar = new QWidget();
+    m_scanBar->setFixedHeight(32);
+    m_scanBar->setVisible(false);
+    auto* scanLay = new QHBoxLayout(m_scanBar);
+    scanLay->setContentsMargins(16, 0, 16, 0);
+    scanLay->setSpacing(12);
+    m_scanLabel = new QLabel;
+    m_scanLabel->setFixedWidth(220);
+    m_scanProgressBar = new QProgressBar;
+    m_scanProgressBar->setFixedHeight(4);
+    m_scanProgressBar->setTextVisible(false);
+    scanLay->addWidget(m_scanLabel);
+    scanLay->addWidget(m_scanProgressBar, 1);
+    rightLayout->addWidget(m_scanBar, 0);
+
     // PlaybackBar
     m_playbackBar = new PlaybackBar();
     rightLayout->addWidget(m_playbackBar, 0);
@@ -271,34 +289,71 @@ void MainWindow::connectSignals()
         }
     });
 
-    // ── Scan progress indicator ────────────────────────────────────────
+    // ── Scan progress bar ──────────────────────────────────────────────
     auto* scanner = LibraryScanner::instance();
     auto* db = LibraryDatabase::instance();
 
-    // Delayed scan indicator — only show if operation takes >500ms
+    // Delayed show — only display bar if scan takes >500ms (prevents flash)
     m_scanShowTimer = new QTimer(this);
     m_scanShowTimer->setSingleShot(true);
-    connect(m_scanShowTimer, &QTimer::timeout, this, [this]() {
-        showScanIndicator(m_pendingScanMsg);
+
+    // Auto-hide timer for completion toast
+    m_scanHideTimer = new QTimer(this);
+    m_scanHideTimer->setSingleShot(true);
+    connect(m_scanHideTimer, &QTimer::timeout, this, [this]() {
+        hideScanBar();
     });
 
     connect(scanner, &LibraryScanner::scanStarted, this, [this]() {
-        m_pendingScanMsg = QStringLiteral("Scanning library...");
+        // Start delay timer — bar appears after 500ms if still scanning
         m_scanShowTimer->start(500);
     });
-    connect(scanner, &LibraryScanner::scanFinished, this, [this](int) {
-        hideScanIndicator();
+    connect(m_scanShowTimer, &QTimer::timeout, this, [this]() {
+        showScanBar(0, 0);  // indeterminate until first progress signal
     });
+
+    connect(scanner, &LibraryScanner::scanProgress, this, [this](int current, int total) {
+        if (m_scanShowTimer->isActive()) {
+            // First progress arrived before 500ms — show bar now
+            m_scanShowTimer->stop();
+        }
+        showScanBar(current, total);
+    });
+
+    connect(scanner, &LibraryScanner::scanFinished, this, [this](int totalTracks) {
+        m_scanShowTimer->stop();
+        showScanComplete(totalTracks);
+        // Final reload with albums/artists (m_scanning is now false)
+        MusicDataProvider::instance()->reloadFromDatabase();
+    });
+
+    // Progressive playback — reload tracks every 5s during scan so user can browse/play
+    connect(scanner, &LibraryScanner::batchReady, this, [this](int processed, int total) {
+        if (!m_batchThrottle.isValid() || m_batchThrottle.elapsed() > 5000) {
+            m_batchThrottle.start();
+            qDebug() << "[ProgressiveScan] Batch ready:" << processed << "/" << total
+                     << "— triggering reload";
+            MusicDataProvider::instance()->reloadFromDatabase();
+        }
+    });
+
     connect(db, &LibraryDatabase::rebuildStarted, this, [this]() {
-        m_pendingScanMsg = QStringLiteral("Rebuilding library...");
-        if (!m_scanShowTimer->isActive() && (!m_scanOverlay || !m_scanOverlay->isVisible()))
+        if (!m_scanShowTimer->isActive() && (!m_scanBar || !m_scanBar->isVisible()))
             m_scanShowTimer->start(500);
-        else if (m_scanOverlay && m_scanOverlay->isVisible())
-            showScanIndicator(m_pendingScanMsg);
+        else if (m_scanBar && m_scanBar->isVisible()) {
+            m_scanLabel->setText(QStringLiteral("Rebuilding library..."));
+            m_scanProgressBar->setRange(0, 0);  // indeterminate
+        }
     });
     connect(db, &LibraryDatabase::rebuildFinished, this, [this]() {
-        hideScanIndicator();
+        hideScanBar();
     });
+
+    // Theme-aware styling
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() {
+        updateScanBarTheme();
+    });
+    updateScanBarTheme();
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -350,44 +405,74 @@ void MainWindow::initializeDeferred()
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  Scan progress indicator
+//  Inline scan progress bar
 // ═════════════════════════════════════════════════════════════════════
 
-void MainWindow::showScanIndicator(const QString& msg)
+void MainWindow::showScanBar(int current, int total)
 {
-    if (!m_scanOverlay) {
-        m_scanOverlay = new QWidget(this);
-        m_scanOverlay->setObjectName(QStringLiteral("scanOverlay"));
-        m_scanOverlay->setStyleSheet(QStringLiteral(
-            "QWidget#scanOverlay { background: rgba(0,0,0,0.7); border-radius: 6px; }"
-            "QLabel { color: white; font-size: 12px; }"
-            "QProgressBar { background: rgba(255,255,255,0.2); border: none; border-radius: 2px; max-height: 4px; }"
-            "QProgressBar::chunk { background: #FF6B35; border-radius: 2px; }"));
-        auto* lay = new QHBoxLayout(m_scanOverlay);
-        lay->setContentsMargins(12, 6, 12, 6);
-        lay->setSpacing(8);
-        m_scanStatusLabel = new QLabel;
-        m_scanProgress = new QProgressBar;
-        m_scanProgress->setRange(0, 0);  // indeterminate
-        m_scanProgress->setFixedHeight(4);
-        m_scanProgress->setTextVisible(false);
-        lay->addWidget(m_scanStatusLabel);
-        lay->addWidget(m_scanProgress, 1);
+    m_scanHideTimer->stop();
+    if (total > 0) {
+        m_scanProgressBar->setRange(0, total);
+        m_scanProgressBar->setValue(current);
+        int pct = static_cast<int>(100.0 * current / total);
+        m_scanLabel->setText(QStringLiteral("Scanning: %1 / %2 files (%3%)")
+                                 .arg(current).arg(total).arg(pct));
+    } else {
+        m_scanProgressBar->setRange(0, 0);  // indeterminate
+        m_scanLabel->setText(QStringLiteral("Scanning library..."));
     }
-    m_scanStatusLabel->setText(msg);
-    m_scanOverlay->setGeometry(0, height() - 40, width(), 40);
-    m_scanOverlay->show();
-    m_scanOverlay->raise();
-    qDebug() << "[MainWindow] Scan indicator:" << msg;
+    if (!m_scanBar->isVisible()) {
+        m_scanBar->setMaximumHeight(32);
+        m_scanBar->setVisible(true);
+        qDebug() << "[MainWindow] Scan bar shown";
+    }
 }
 
-void MainWindow::hideScanIndicator()
+void MainWindow::showScanComplete(int totalTracks)
+{
+    m_scanProgressBar->setRange(0, 100);
+    m_scanProgressBar->setValue(100);
+    m_scanLabel->setText(QStringLiteral("Library scan complete \u2014 %1 tracks").arg(totalTracks));
+    if (!m_scanBar->isVisible()) {
+        m_scanBar->setMaximumHeight(32);
+        m_scanBar->setVisible(true);
+    }
+    m_scanHideTimer->start(3000);
+    qDebug() << "[MainWindow] Scan complete:" << totalTracks << "tracks";
+}
+
+void MainWindow::hideScanBar()
 {
     if (m_scanShowTimer) m_scanShowTimer->stop();
-    if (m_scanOverlay && m_scanOverlay->isVisible()) {
-        m_scanOverlay->hide();
-        qDebug() << "[MainWindow] Scan indicator hidden";
+    if (m_scanHideTimer) m_scanHideTimer->stop();
+    if (m_scanBar && m_scanBar->isVisible()) {
+        auto* anim = new QPropertyAnimation(m_scanBar, "maximumHeight");
+        anim->setDuration(300);
+        anim->setStartValue(32);
+        anim->setEndValue(0);
+        connect(anim, &QPropertyAnimation::finished, this, [this]() {
+            m_scanBar->setVisible(false);
+            m_scanBar->setMaximumHeight(32);
+        });
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+        qDebug() << "[MainWindow] Scan bar hiding (animated)";
     }
+}
+
+void MainWindow::updateScanBarTheme()
+{
+    if (!m_scanBar) return;
+    auto c = ThemeManager::instance()->colors();
+    m_scanBar->setStyleSheet(
+        QStringLiteral("QWidget { background: %1; border-top: 1px solid %2; }")
+            .arg(c.backgroundSecondary, c.borderSubtle));
+    m_scanLabel->setStyleSheet(
+        QStringLiteral("QLabel { color: %1; font-size: 12px; border: none; background: transparent; }")
+            .arg(c.foregroundSecondary));
+    m_scanProgressBar->setStyleSheet(
+        QStringLiteral("QProgressBar { background: %1; border: none; border-radius: 2px; }"
+                       "QProgressBar::chunk { background: %2; border-radius: 2px; }")
+            .arg(c.progressTrack, c.accent));
 }
 
 // ═════════════════════════════════════════════════════════════════════

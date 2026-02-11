@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <algorithm>
+#include <set>
 
 namespace fs = std::filesystem;
 
@@ -37,6 +38,32 @@ void VST3Host::scanPlugins()
         scanDirectory(std::string(home) + "/Library/Audio/Plug-Ins/VST3");
     }
     scanDirectory("/Library/Audio/Plug-Ins/VST3");
+
+    // Dedup by canonical path (resolves symlinks between user/system dirs)
+    std::set<std::string> seen;
+    auto it = m_plugins.begin();
+    while (it != m_plugins.end()) {
+        std::error_code ec;
+        std::string canonical = fs::weakly_canonical(it->path, ec).string();
+        if (ec) canonical = it->path;
+
+        if (seen.count(canonical)) {
+            qDebug() << "[VST3] Skipping duplicate:" << QString::fromStdString(it->name)
+                     << "at" << QString::fromStdString(it->path);
+            it = m_plugins.erase(it);
+        } else {
+            seen.insert(canonical);
+            ++it;
+        }
+    }
+
+    // Sort by name (once, after all directories scanned + deduped)
+    std::sort(m_plugins.begin(), m_plugins.end(),
+              [](const VST3PluginInfo& a, const VST3PluginInfo& b) {
+                  return a.name < b.name;
+              });
+
+    qDebug() << "[VST3] Scan complete:" << m_plugins.size() << "unique plugins";
 }
 
 void VST3Host::scanDirectory(const std::string& dir)
@@ -75,12 +102,6 @@ void VST3Host::scanDirectory(const std::string& dir)
 
         m_plugins.push_back(std::move(info));
     }
-
-    // Sort by name
-    std::sort(m_plugins.begin(), m_plugins.end(),
-              [](const VST3PluginInfo& a, const VST3PluginInfo& b) {
-                  return a.name < b.name;
-              });
 }
 
 std::shared_ptr<IDSPProcessor> VST3Host::createProcessor(int pluginIndex)

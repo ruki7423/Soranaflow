@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
-project(SoranaFlow VERSION 1.4.0 LANGUAGES CXX)
+project(SoranaFlow VERSION 1.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,7 @@ if(MUSICKIT_DEVELOPER_TOKEN)
 endif()
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg SvgWidgets Sql Network WebEngineWidgets WebChannel Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg SvgWidgets Sql Network Concurrent)
 
 # Find FFmpeg via pkg-config
 find_package(PkgConfig REQUIRED)
@@ -257,7 +257,7 @@ if(APPLE)
         src/apple/AppleMusicManager.h
         src/apple/AppleMusicBridge.mm
         src/apple/MusicKitPlayer.h
-        src/apple/MusicKitPlayer.cpp
+        src/apple/MusicKitPlayer.mm
     )
     set_source_files_properties(src/apple/AppleMusicBridge.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
@@ -443,9 +443,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::SvgWidgets
     Qt6::Sql
     Qt6::Network
-    Qt6::WebEngineWidgets
-    Qt6::WebChannel
     Qt6::Concurrent
+    "-framework WebKit"
     PkgConfig::AVFORMAT
     PkgConfig::AVCODEC
     PkgConfig::AVUTIL

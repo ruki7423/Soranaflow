@@ -309,7 +309,7 @@ void AlbumDetailView::updateDisplay()
             auto* db = LibraryDatabase::instance();
             db->backupTrackMetadata(t.id);
             db->updateTrack(updated);
-            db->rebuildAlbumsAndArtists();
+            db->updateAlbumsAndArtistsForTrack(updated);
 
             if (!result.releaseGroupMbid.isEmpty())
                 MetadataService::instance()->fetchAlbumArt(result.releaseGroupMbid, true);
@@ -325,8 +325,11 @@ void AlbumDetailView::updateDisplay()
     });
 
     disconnect(m_trackTable, &TrackTableView::undoMetadataRequested, nullptr, nullptr);
-    connect(m_trackTable, &TrackTableView::undoMetadataRequested, this, [this](const Track&) {
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
+    connect(m_trackTable, &TrackTableView::undoMetadataRequested, this, [](const Track& t) {
+        auto* db = LibraryDatabase::instance();
+        auto fresh = db->trackById(t.id);
+        if (fresh.has_value())
+            db->updateAlbumsAndArtistsForTrack(fresh.value());
         MusicDataProvider::instance()->reloadFromDatabase();
     });
 

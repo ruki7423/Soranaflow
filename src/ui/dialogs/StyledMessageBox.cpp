@@ -173,14 +173,14 @@ void StyledMessageBox::setIcon(Icon icon)
 
     switch (icon) {
     case Icon::Question: {
-        QFont f(QStringLiteral("SF Pro Display"), 20, QFont::DemiBold);
+        QFont f(QStringLiteral(".AppleSystemUIFont"), 20, QFont::DemiBold);
         p.setFont(f);
         p.setPen(color);
         p.drawText(QRect(0, 0, 32, 32), Qt::AlignCenter, QStringLiteral("?"));
         break;
     }
     case Icon::Warning: {
-        QFont f(QStringLiteral("SF Pro Display"), 22, QFont::Bold);
+        QFont f(QStringLiteral(".AppleSystemUIFont"), 22, QFont::Bold);
         p.setFont(f);
         p.setPen(color);
         p.drawText(QRect(0, 0, 32, 32), Qt::AlignCenter, QStringLiteral("!"));
@@ -195,7 +195,7 @@ void StyledMessageBox::setIcon(Icon icon)
         break;
     }
     case Icon::Info: {
-        QFont f(QStringLiteral("SF Pro Display"), 20, QFont::DemiBold);
+        QFont f(QStringLiteral(".AppleSystemUIFont"), 20, QFont::DemiBold);
         p.setFont(f);
         p.setPen(color);
         p.drawText(QRect(0, 0, 32, 32), Qt::AlignCenter, QStringLiteral("i"));

@@ -15,6 +15,7 @@
 #include <QFileInfo>
 #include "../dialogs/StyledMessageBox.h"
 #include <QGraphicsOpacityEffect>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <algorithm>
 #include <QRandomGenerator>
@@ -378,7 +379,7 @@ void LibraryView::setupUI()
             auto* db = LibraryDatabase::instance();
             db->backupTrackMetadata(t.id);
             db->updateTrack(updated);
-            db->rebuildAlbumsAndArtists();
+            db->updateAlbumsAndArtistsForTrack(updated);
 
             if (!result.releaseGroupMbid.isEmpty())
                 MetadataService::instance()->fetchAlbumArt(result.releaseGroupMbid, true);
@@ -394,8 +395,11 @@ void LibraryView::setupUI()
     });
 
     connect(m_trackTable, &TrackTableView::undoMetadataRequested,
-            this, [this](const Track&) {
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
+            this, [](const Track& t) {
+        auto* db = LibraryDatabase::instance();
+        auto fresh = db->trackById(t.id);
+        if (fresh.has_value())
+            db->updateAlbumsAndArtistsForTrack(fresh.value());
         MusicDataProvider::instance()->reloadFromDatabase();
     });
 
@@ -419,9 +423,14 @@ void LibraryView::setupUI()
 
 void LibraryView::populateTracks()
 {
+    QElapsedTimer t; t.start();
     auto indexes = MusicDataProvider::instance()->allTrackIndexes();
+    qDebug() << "[TIMING] LibraryView allTrackIndexes():" << t.elapsed() << "ms";
+    t.restart();
     m_trackTable->setIndexes(std::move(indexes));
+    qDebug() << "[TIMING] LibraryView setIndexes():" << t.elapsed() << "ms";
     m_countLabel->setText(QStringLiteral("%1 tracks").arg(m_trackTable->visibleCount()));
+    qDebug() << "[TIMING] LibraryView populateTracks DONE — user can now play";
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -594,7 +603,7 @@ void LibraryView::addTracksFromFiles(const QStringList& files)
         if (!trackOpt.has_value()) continue;
         db->insertTrack(trackOpt.value());
     }
-    db->rebuildAlbumsAndArtists();
+    // insertTrack now handles album/artist creation incrementally
     MusicDataProvider::instance()->reloadFromDatabase();
 }
 
@@ -672,6 +681,7 @@ void LibraryView::refreshTheme()
 
 void LibraryView::onLibraryUpdated()
 {
+    qDebug() << "[TIMING] LibraryView::onLibraryUpdated triggered";
     populateTracks();
 
     // Re-apply active filter if one is set

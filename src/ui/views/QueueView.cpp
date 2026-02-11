@@ -480,7 +480,7 @@ QWidget* QueueView::createQueueItem(const Track& track, int index, bool isCurren
     durationLabel->setFixedWidth(50);
     durationLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     durationLabel->setStyleSheet(
-        QStringLiteral("color: %1; font-size: 12px; font-family: monospace; border: none;")
+        QStringLiteral("color: %1; font-size: 12px; font-family: 'Menlo', 'Courier New'; border: none;")
             .arg(c.foregroundMuted));
     itemLayout->addWidget(durationLabel);
 

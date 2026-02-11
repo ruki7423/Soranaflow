@@ -1,6 +1,8 @@
 #include "MusicData.h"
 #include "library/LibraryDatabase.h"
+#include "library/LibraryScanner.h"
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QtConcurrent>
 
@@ -247,7 +249,8 @@ void MusicDataProvider::reloadFromDatabase()
 {
     // Atomic re-entrancy guard (thread-safe, replaces static bool)
     if (m_reloading.exchange(true)) {
-        qDebug() << "MusicDataProvider: Skipping - reload already in progress";
+        m_pendingReload.store(true);
+        qDebug() << "MusicDataProvider: Skipping - reload already in progress (pending)";
         return;
     }
 
@@ -264,6 +267,8 @@ void MusicDataProvider::reloadFromDatabase()
     // Skip allTracks() — LibraryView uses allTrackIndexes() directly.
     // allTracks() is lazy-loaded from DB on demand when needed.
     QtConcurrent::run([this]() {
+        QElapsedTimer mdpTimer; mdpTimer.start();
+        qDebug() << "[TIMING] MDP reloadFromDatabase (async) START";
         auto* db = LibraryDatabase::instance();
         if (!db) {
             m_reloading.store(false);
@@ -271,9 +276,20 @@ void MusicDataProvider::reloadFromDatabase()
         }
 
         int trackCount = db->trackCount();
-        QVector<Album>    dbAlbums    = db->allAlbums();
-        QVector<Artist>   dbArtists   = db->allArtists();
-        QVector<Playlist> dbPlaylists = db->allPlaylists();
+
+        // Skip album/artist queries during scan — they're always 0
+        // (rebuildAlbumsAndArtists runs only after scan completes)
+        bool scanning = LibraryScanner::instance()->isScanning();
+        QVector<Album>    dbAlbums;
+        QVector<Artist>   dbArtists;
+        QVector<Playlist> dbPlaylists;
+        if (!scanning) {
+            dbAlbums    = db->allAlbums();
+            dbArtists   = db->allArtists();
+            dbPlaylists = db->allPlaylists();
+        }
+        qDebug() << "[TIMING] MDP async DB queries:" << mdpTimer.elapsed() << "ms"
+                 << (scanning ? "(scan — albums/artists skipped)" : "");
 
         qDebug() << "MusicDataProvider::reloadFromDatabase (async) — tracks:" << trackCount
                  << "albums:" << dbAlbums.size() << "artists:" << dbArtists.size();
@@ -286,6 +302,9 @@ void MusicDataProvider::reloadFromDatabase()
                 }
                 m_reloading.store(false);
                 emit libraryUpdated();
+                if (m_pendingReload.exchange(false)) {
+                    reloadFromDatabase();
+                }
             }, Qt::QueuedConnection);
             return;
         }
@@ -314,13 +333,19 @@ void MusicDataProvider::reloadFromDatabase()
             qDebug() << "MusicDataProvider: Reloaded"
                      << m_albums.size() << "albums," << m_artists.size() << "artists";
             m_reloading.store(false);
+            qDebug() << "[TIMING] MDP reloadFromDatabase DONE — emitting libraryUpdated";
             emit libraryUpdated();
+            if (m_pendingReload.exchange(false)) {
+                reloadFromDatabase();
+            }
         }, Qt::QueuedConnection);
     });
 }
 
 void MusicDataProvider::loadFromDatabase()
 {
+    QElapsedTimer t; t.start();
+    qDebug() << "[TIMING] MDP loadFromDatabase (sync) START";
     auto* db = LibraryDatabase::instance();
     if (!db) {
         qDebug() << "MusicDataProvider: LibraryDatabase is null!";
@@ -375,6 +400,7 @@ void MusicDataProvider::loadFromDatabase()
 
     // Pre-warm lightweight track index (activates string pooling + mmap cache)
     db->allTrackIndexes();
+    qDebug() << "[TIMING] MDP loadFromDatabase (sync) TOTAL:" << t.elapsed() << "ms";
 }
 
 // ═════════════════════════════════════════════════════════════════════

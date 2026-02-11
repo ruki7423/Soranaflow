@@ -7,6 +7,8 @@
 #include <QStack>
 #include <QLabel>
 #include <QProgressBar>
+#include <QElapsedTimer>
+#include <QPropertyAnimation>
 #include "AppSidebar.h"
 #include "PlaybackBar.h"
 
@@ -112,14 +114,17 @@ private:
     QWidget* m_previousView = nullptr;
     bool m_initialized = false;
 
-    // Scan progress indicator
-    QWidget* m_scanOverlay = nullptr;
-    QLabel* m_scanStatusLabel = nullptr;
-    QProgressBar* m_scanProgress = nullptr;
+    // Inline scan progress bar
+    QWidget* m_scanBar = nullptr;
+    QLabel* m_scanLabel = nullptr;
+    QProgressBar* m_scanProgressBar = nullptr;
     QTimer* m_scanShowTimer = nullptr;
-    QString m_pendingScanMsg;
-    void showScanIndicator(const QString& msg);
-    void hideScanIndicator();
+    QTimer* m_scanHideTimer = nullptr;
+    QElapsedTimer m_batchThrottle;
+    void showScanBar(int current, int total);
+    void showScanComplete(int totalTracks);
+    void hideScanBar();
+    void updateScanBarTheme();
 
     // Global navigation history
     QStack<int> m_viewHistory;

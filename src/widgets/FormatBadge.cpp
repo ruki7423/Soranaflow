@@ -50,7 +50,7 @@ FormatBadge::FormatBadge(AudioFormat format,
         m_specsLabel->setStyleSheet(
             QStringLiteral("QLabel {"
                            "  color: %1;"
-                           "  font-family: monospace;"
+                           "  font-family: 'Menlo', 'Courier New';"
                            "  font-size: 11px;"
                            "}").arg(c.foregroundMuted));
         layout->addWidget(m_specsLabel);

@@ -193,6 +193,7 @@ private:
     bool m_useMockData = true;
     bool m_firstLoadDone = false;
     std::atomic<bool> m_reloading{false};
+    std::atomic<bool> m_pendingReload{false};
 };
 
 // ── Utility Functions ───────────────────────────────────────────────

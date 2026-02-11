@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QThread>
 #include <QElapsedTimer>
+#include <QtConcurrent>
 #include <atomic>
 
 class LibraryScanner : public QObject {
@@ -26,6 +27,7 @@ public slots:
 signals:
     void scanStarted();
     void scanProgress(int current, int total);
+    void batchReady(int processed, int total);
     void scanFinished(int tracksFound);
     void scanError(const QString& message);
     void fileAdded(const QString& filePath);

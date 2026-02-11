@@ -6,7 +6,7 @@
 QWidget {
     background-color: #FAFAFA;
     color: rgba(0, 0, 0, 0.87);
-    font-family: ".AppleSystemUIFont", "Helvetica Neue", "Segoe UI", "Roboto", Arial, sans-serif;
+    font-family: ".AppleSystemUIFont", "Helvetica Neue", Arial;
     font-size: 14px;
 }
 
@@ -673,13 +673,13 @@ QWidget#TrackRow QLabel#TrackAlbum {
 QWidget#TrackRow QLabel#TrackDuration {
     color: rgba(0, 0, 0, 0.35);
     font-size: 12px;
-    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-family: "Menlo", "Courier New";
 }
 
 QWidget#TrackRow QLabel#TrackNumber {
     color: rgba(0, 0, 0, 0.3);
     font-size: 13px;
-    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-family: "Menlo", "Courier New";
 }
 
 /* ==================== QTabWidget ==================== */
@@ -947,7 +947,7 @@ QWidget#ColumnHeader QLabel {
 QLabel#TimeLabel {
     color: rgba(0, 0, 0, 0.35);
     font-size: 12px;
-    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-family: "Menlo", "Courier New";
 }
 
 /* ==================== Muted Labels ==================== */

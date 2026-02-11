@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QThread>
 
@@ -82,27 +83,49 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
     // Run heavy scanning work on a background thread
     m_workerThread = QThread::create([this, folders]() {
+        QElapsedTimer pipelineTimer; pipelineTimer.start();
+        QElapsedTimer stepTimer;
+        qDebug() << "[TIMING] === SCAN PIPELINE START ===" << QDateTime::currentDateTime().toString();
+
         // Build ignore extensions set
         QSet<QString> ignoreExts;
         for (const QString& ext : Settings::instance()->ignoreExtensions())
             ignoreExts.insert(ext.toLower());
 
-        // Collect all audio files first
-        QStringList allFiles;
-        for (const QString& folder : folders) {
-            QDirIterator it(folder, QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                if (m_stopRequested) break;
-                it.next();
-                QFileInfo fi = it.fileInfo();
-                if (!fi.isFile()) continue;
-                QString suffix = fi.suffix().toLower();
-                if (ignoreExts.contains(suffix)) continue;
-                if (s_supportedExtensions.contains(suffix)) {
-                    allFiles.append(fi.absoluteFilePath());
+        // Collect all audio files — parallel walk across folders
+        stepTimer.start();
+        QList<QStringList> perFolderFiles = QtConcurrent::blockingMapped(
+            folders, [this, &ignoreExts](const QString& folder) -> QStringList {
+                QElapsedTimer folderTimer; folderTimer.start();
+                QStringList files;
+                QFileInfo folderInfo(folder);
+                if (!folderInfo.exists() || !folderInfo.isReadable()) {
+                    qDebug() << "[SCAN] Folder not accessible, skipping:" << folder;
+                    return files;
                 }
-            }
+                QDirIterator it(folder, QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                    if (m_stopRequested) break;
+                    it.next();
+                    QFileInfo fi = it.fileInfo();
+                    if (!fi.isFile()) continue;
+                    QString suffix = fi.suffix().toLower();
+                    if (ignoreExts.contains(suffix)) continue;
+                    if (s_supportedExtensions.contains(suffix)) {
+                        files.append(fi.absoluteFilePath());
+                    }
+                }
+                qDebug() << "[SCAN] Walked" << folder << ":" << files.size()
+                         << "files in" << folderTimer.elapsed() << "ms";
+                return files;
+            });
+
+        QStringList allFiles;
+        for (const auto& list : perFolderFiles) {
+            allFiles.append(list);
         }
+        qDebug() << "[TIMING] Directory walk:" << stepTimer.elapsed() << "ms —"
+                 << allFiles.size() << "files from" << folders.size() << "folders";
 
         if (m_stopRequested) {
             QMetaObject::invokeMethod(this, [this]() {
@@ -113,7 +136,6 @@ void LibraryScanner::scanFolders(const QStringList& folders)
         }
 
         int total = allFiles.size();
-        int tracksFound = 0;
         int newCount = 0;
         int updatedCount = 0;
         int skippedCount = 0;
@@ -121,61 +143,153 @@ void LibraryScanner::scanFolders(const QStringList& folders)
         qDebug() << "LibraryScanner: Found" << total << "audio files to process";
 
         auto* db = LibraryDatabase::instance();
-        db->beginTransaction();
-        int insertsSinceCommit = 0;
 
-        for (int i = 0; i < allFiles.size(); ++i) {
+        // ── Phase 1: Classify files (batch hash lookup) ──────────────
+        stepTimer.start();
+
+        // Single DB query → in-memory hash for O(1) skip checks
+        auto knownTracks = db->allTrackFileMeta();  // path → (size, mtime)
+
+        QStringList filesToProcess;
+        filesToProcess.reserve(total);
+
+        for (const QString& filePath : allFiles) {
             if (m_stopRequested) break;
 
-            const QString& filePath = allFiles[i];
-
-            auto existingTrack = db->trackByPath(filePath);
-            if (existingTrack.has_value()) {
+            auto it = knownTracks.find(filePath);
+            if (it != knownTracks.end()) {
                 QFileInfo fi(filePath);
                 qint64 currentSize = fi.size();
                 qint64 currentMtime = fi.lastModified().toSecsSinceEpoch();
 
-                if (existingTrack->fileSize == currentSize
-                    && existingTrack->fileMtime == currentMtime
-                    && existingTrack->fileSize > 0) {
+                if (it.value().first == currentSize
+                    && it.value().second == currentMtime
+                    && it.value().first > 0) {
                     // Unchanged — skip
                     m_knownFiles.insert(filePath);
-                    tracksFound++;
                     skippedCount++;
                 } else {
-                    // Changed — re-parse
+                    // Changed — remove old entry, queue for re-parse
                     db->removeTrackByPath(filePath);
-                    processFile(filePath);
-                    tracksFound++;
+                    filesToProcess.append(filePath);
                     updatedCount++;
-                    if (++insertsSinceCommit >= 500) {
-                        db->commitTransaction();
-                        db->beginTransaction();
-                        insertsSinceCommit = 0;
-                    }
                 }
             } else {
-                processFile(filePath);
-                tracksFound++;
+                filesToProcess.append(filePath);
                 newCount++;
-                // Batch-commit every 500 inserts to limit transaction size
-                if (++insertsSinceCommit >= 500) {
-                    db->commitTransaction();
-                    db->beginTransaction();
-                    insertsSinceCommit = 0;
-                }
-            }
-
-            // Emit progress on main thread periodically
-            if (i % 20 == 0 || i == allFiles.size() - 1) {
-                int current = i + 1;
-                QMetaObject::invokeMethod(this, [this, current, total]() {
-                    emit scanProgress(current, total);
-                }, Qt::QueuedConnection);
             }
         }
 
-        db->commitTransaction();
+        qDebug() << "[TIMING] Phase 1 (classify):" << filesToProcess.size()
+                 << "to process," << skippedCount << "skipped in"
+                 << stepTimer.elapsed() << "ms";
+
+        // ── Phase 2: Parallel metadata read + serial DB insert ───────
+        const int BATCH_SIZE = 100;
+        int totalNew = filesToProcess.size();
+        int processedCount = 0;
+
+        // Split files by storage type — external USB/HDD can't handle
+        // concurrent random reads, so reduce parallelism for /Volumes/
+        QStringList localFiles, externalFiles;
+        for (const QString& f : filesToProcess) {
+            if (f.startsWith(QLatin1String("/Volumes/")))
+                externalFiles.append(f);
+            else
+                localFiles.append(f);
+        }
+
+        QThreadPool pool;
+        int localThreads = qMin(QThread::idealThreadCount(), 8);
+        int extThreads = qMin(2, localThreads);
+
+        qDebug() << "[SCAN] Split:" << localFiles.size() << "local (threads:"
+                 << localThreads << ")," << externalFiles.size()
+                 << "external (threads:" << extThreads << ")";
+
+        auto processOneFile = [](const QString& path) -> Track {
+            auto opt = MetadataReader::readTrack(path);
+            if (opt.has_value()) {
+                Track t = std::move(opt.value());
+                QFileInfo fi(path);
+                t.fileSize = fi.size();
+                t.fileMtime = fi.lastModified().toSecsSinceEpoch();
+                return t;
+            }
+            return Track{};  // empty filePath = failed
+        };
+
+        stepTimer.restart();
+        qint64 tagLibReadMs = 0;
+
+        // Batch-process a file list with the given thread count
+        auto scanGroup = [&](const QStringList& files, int threads, const char* label) {
+            if (files.isEmpty()) return;
+            pool.setMaxThreadCount(threads);
+            QElapsedTimer groupTimer; groupTimer.start();
+
+            for (int i = 0; i < files.size(); i += BATCH_SIZE) {
+                if (m_stopRequested) break;
+
+                QStringList chunk = files.mid(i, BATCH_SIZE);
+
+                QElapsedTimer tagLibTimer;
+                tagLibTimer.start();
+                QList<Track> batchTracks = QtConcurrent::blockingMapped(
+                    &pool, chunk, processOneFile);
+                tagLibReadMs += tagLibTimer.elapsed();
+
+                // Serial DB insert (batch transaction)
+                db->beginTransaction();
+                for (const Track& track : batchTracks) {
+                    if (!track.filePath.isEmpty()) {
+                        db->insertTrack(track);
+                        m_knownFiles.insert(track.filePath);
+                    }
+                }
+                db->commitTransaction();
+
+                processedCount += chunk.size();
+
+                // Progressive reload on main thread
+                int p = processedCount, t = total;
+                QMetaObject::invokeMethod(this, [this, p, t]() {
+                    emit batchReady(p, t);
+                }, Qt::QueuedConnection);
+
+                // Progress update
+                QMetaObject::invokeMethod(this, [this, p, t]() {
+                    emit scanProgress(p, t);
+                }, Qt::QueuedConnection);
+
+                qDebug() << "[SCAN]" << processedCount << "/" << totalNew
+                         << "files (" << stepTimer.elapsed() << "ms)";
+            }
+
+            int perFile = (files.size() > 0) ? (int)(groupTimer.elapsed() / files.size()) : 0;
+            qDebug() << "[TIMING] Phase 2" << label << ":" << files.size()
+                     << "files in" << groupTimer.elapsed() << "ms"
+                     << "(" << perFile << "ms/file," << threads << "threads)";
+        };
+
+        // Local SSD first (full parallelism), then external (reduced)
+        scanGroup(localFiles, localThreads, "local");
+        scanGroup(externalFiles, extThreads, "external");
+
+        int perFileTotal = (totalNew > 0) ? (int)(tagLibReadMs / totalNew) : 0;
+        qDebug() << "[TIMING] Phase 2 TagLib-only:" << totalNew
+                 << "files in" << tagLibReadMs << "ms"
+                 << "(" << perFileTotal << "ms/file)";
+
+        int perFile = (totalNew > 0) ? (int)(stepTimer.elapsed() / totalNew) : 0;
+        qDebug() << "[TIMING] Phase 2 (parallel scan):" << totalNew
+                 << "files in" << stepTimer.elapsed() << "ms"
+                 << "(" << perFile << "ms/file)";
+
+        qDebug() << "[TIMING] File scan total:" << pipelineTimer.elapsed() << "ms —"
+                 << "scanned:" << (newCount + updatedCount)
+                 << "skipped:" << skippedCount
+                 << "new:" << newCount << "updated:" << updatedCount;
 
         qDebug() << "[LibraryScanner] Scan complete —"
                  << "scanned:" << (newCount + updatedCount)
@@ -183,13 +297,22 @@ void LibraryScanner::scanFolders(const QStringList& folders)
                  << "new:" << newCount
                  << "updated:" << updatedCount;
 
-        // Rebuild album/artist tables from track data
-        db->rebuildAlbumsAndArtists();
+        // Rebuild album/artist tables only if tracks changed
+        if ((newCount + updatedCount) > 0) {
+            stepTimer.start();
+            db->rebuildAlbumsAndArtists();
+            qDebug() << "[TIMING] rebuildAlbumsAndArtists:" << stepTimer.elapsed() << "ms";
 
-        // Rebuild FTS5 full-text search index
-        db->rebuildFTSIndex();
+            stepTimer.restart();
+            db->rebuildFTSIndex();
+            qDebug() << "[TIMING] rebuildFTSIndex:" << stepTimer.elapsed() << "ms";
+        } else {
+            qDebug() << "[SCAN] No changes — skipping rebuild";
+        }
 
-        int finalCount = tracksFound;
+        qDebug() << "[TIMING] === SCAN WORKER THREAD DONE ===" << pipelineTimer.elapsed() << "ms total";
+
+        int finalCount = skippedCount + processedCount;
         QMetaObject::invokeMethod(this, [this, finalCount, folders]() {
             // Set up file watching if enabled (must be on main thread)
             if (m_watchEnabled) {
@@ -329,9 +452,11 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
         emit fileRemoved(removed);
     }
 
-    // Trigger rebuild
-    QTimer::singleShot(500, this, [this]() {
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
+    // Incremental: insertTrack/removeTrackByPath already handle album/artist updates.
+    // Just emit databaseChanged after a short debounce.
+    QTimer::singleShot(500, this, []() {
+        LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
+        emit LibraryDatabase::instance()->databaseChanged();
     });
 }
 
@@ -342,15 +467,15 @@ void LibraryScanner::onFileChanged(const QString& path)
     QFileInfo fi(path);
     if (fi.exists()) {
         // File was modified — remove old entry and re-read metadata
+        // removeTrackByPath now handles album stats + orphan cleanup incrementally
         LibraryDatabase::instance()->removeTrackByPath(path);
         m_knownFiles.remove(path);
+        // processFile → insertTrack now handles findOrCreate + stats incrementally
         processFile(path);
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
     } else {
-        // File was deleted
+        // File was deleted — removeTrackByPath handles cleanup incrementally
         LibraryDatabase::instance()->removeTrackByPath(path);
         m_knownFiles.remove(path);
         emit fileRemoved(path);
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
     }
 }

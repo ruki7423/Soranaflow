@@ -5,6 +5,7 @@
 #include <QString>
 #include <QDateTime>
 #include <QVector>
+#include <QHash>
 #include <QMutex>
 #include <optional>
 #include <atomic>
@@ -23,6 +24,7 @@ public:
 
     // ── Tracks ───────────────────────────────────────────────────────
     bool trackExists(const QString& filePath) const;
+    QHash<QString, QPair<qint64, qint64>> allTrackFileMeta() const;  // path → (size, mtime)
     void removeDuplicates();
     void clearAllData(bool preservePlaylists = true);
     bool insertTrack(const Track& track);
@@ -95,6 +97,15 @@ public:
     // ── Rebuild helpers ──────────────────────────────────────────────
     void rebuildAlbumsAndArtists();
 
+    // ── Incremental album/artist management ─────────────────────────
+    QString findOrCreateArtist(const QString& artistName);
+    QString findOrCreateAlbum(const QString& albumTitle, const QString& artistName, const QString& artistId);
+    void updateAlbumStatsIncremental(const QString& albumId);
+    void updateAlbumsAndArtistsForTrack(const Track& track);
+    void cleanOrphanedAlbumsAndArtists();
+    void clearIncrementalCaches();
+    void refreshAlbumMetadataFromTracks(const QString& albumId);
+
     // ── Database backup / rollback ───────────────────────────────────
     bool createBackup();
     bool restoreFromBackup();
@@ -121,4 +132,11 @@ private:
     QString m_dbPath;
     mutable QRecursiveMutex m_dbMutex;
     std::atomic<bool> m_rebuildPending{false};
+
+    // Batch mode: skip incremental album/artist work during bulk scan
+    bool m_batchMode = false;
+
+    // Incremental caches
+    QHash<QString, QString> m_artistNameToIdCache;  // lowercase name → artistId
+    QHash<QString, QString> m_albumKeyToIdCache;     // "album||artist" → albumId
 };

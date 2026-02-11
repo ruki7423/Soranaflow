@@ -38,6 +38,7 @@ signals:
 private:
     explicit AudioProcessTap(QObject* parent = nullptr);
     ~AudioProcessTap();
+    void checkTapActivity();
 
     class Impl;
     Impl* d;

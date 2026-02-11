@@ -255,6 +255,11 @@ void LibraryDatabase::createIndexes()
     // Migration: add file_size and file_mtime for mtime-based scan skip
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN file_size INTEGER DEFAULT 0"));
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN file_mtime INTEGER DEFAULT 0"));
+
+    // Covering index for batch skip-check query (path+size+mtime in one B-tree scan)
+    q.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_path_size_mtime "
+        "ON tracks(file_path, file_size, file_mtime)"));
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -357,9 +362,26 @@ bool LibraryDatabase::trackExists(const QString& filePath) const
     return false;
 }
 
+QHash<QString, QPair<qint64, qint64>> LibraryDatabase::allTrackFileMeta() const
+{
+    QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
+    QHash<QString, QPair<qint64, qint64>> result;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT file_path, file_size, file_mtime FROM tracks"));
+    result.reserve(10000);
+    while (q.next()) {
+        result.insert(q.value(0).toString(),
+                      qMakePair(q.value(1).toLongLong(), q.value(2).toLongLong()));
+    }
+    qDebug() << "[TIMING] allTrackFileMeta:" << result.size() << "entries in" << t.elapsed() << "ms";
+    return result;
+}
+
 void LibraryDatabase::removeDuplicates()
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     qDebug() << "=== LibraryDatabase::removeDuplicates ===";
 
     QSqlQuery countBefore(m_db);
@@ -416,6 +438,7 @@ void LibraryDatabase::removeDuplicates()
     if (countAfter.next()) after = countAfter.value(0).toInt();
     qDebug() << "  Tracks after cleanup:" << after;
     qDebug() << "  Total removed:" << (before - after);
+    qDebug() << "[TIMING] removeDuplicates:" << t.elapsed() << "ms";
     qDebug() << "=== Duplicate removal complete ===";
 
     if (before != after) {
@@ -440,6 +463,8 @@ void LibraryDatabase::clearAllData(bool preservePlaylists)
     q.exec(QStringLiteral("DELETE FROM artists"));
     q.exec(QStringLiteral("VACUUM"));
 
+    clearIncrementalCaches();
+
     qDebug() << "=== clearAllData complete ===";
     emit databaseChanged();
 }
@@ -447,23 +472,41 @@ void LibraryDatabase::clearAllData(bool preservePlaylists)
 bool LibraryDatabase::insertTrack(const Track& track)
 {
     QMutexLocker lock(&m_dbMutex);
+
+    // Incremental: ensure album/artist rows exist and get IDs
+    // Skip during batch mode (scanner bulk insert) — rebuildAlbumsAndArtists handles it
+    QString artistId = track.artistId;
+    QString albumId = track.albumId;
+
+    if (!m_batchMode) {
+        if (!track.artist.trimmed().isEmpty() && artistId.isEmpty()) {
+            artistId = findOrCreateArtist(track.artist);
+        }
+        if (!track.album.trimmed().isEmpty() && albumId.isEmpty()) {
+            albumId = findOrCreateAlbum(track.album, track.artist, artistId);
+        }
+    }
+
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
+    if (!q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO tracks "
         "(id, title, artist, album, album_id, artist_id, duration, format, "
         "sample_rate, bit_depth, bitrate, cover_url, track_number, disc_number, file_path, "
         "recording_mbid, artist_mbid, album_mbid, release_group_mbid, channel_count, "
         "file_size, file_mtime) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ));
+    ))) {
+        qWarning() << "LibraryDatabase::insertTrack PREPARE failed:" << q.lastError().text();
+        return false;
+    }
 
     QString id = track.id.isEmpty() ? generateId() : track.id;
     q.addBindValue(id);
     q.addBindValue(track.title);
     q.addBindValue(track.artist);
     q.addBindValue(track.album);
-    q.addBindValue(track.albumId);
-    q.addBindValue(track.artistId);
+    q.addBindValue(albumId);
+    q.addBindValue(artistId);
     q.addBindValue(track.duration);
     q.addBindValue(audioFormatToString(track.format));
     q.addBindValue(track.sampleRate);
@@ -485,6 +528,12 @@ bool LibraryDatabase::insertTrack(const Track& track)
         qWarning() << "LibraryDatabase::insertTrack failed:" << q.lastError().text();
         return false;
     }
+
+    // Update album stats after successful insert (skip in batch mode)
+    if (!m_batchMode && !albumId.isEmpty()) {
+        updateAlbumStatsIncremental(albumId);
+    }
+
     return true;
 }
 
@@ -608,19 +657,45 @@ bool LibraryDatabase::updateTrackMetadata(const QString& trackId,
 bool LibraryDatabase::removeTrack(const QString& id)
 {
     QMutexLocker lock(&m_dbMutex);
+
+    // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
+    std::optional<Track> existing;
+    if (!m_batchMode)
+        existing = trackById(id);
+
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("DELETE FROM tracks WHERE id = ?"));
     q.addBindValue(id);
-    return q.exec();
+    bool ok = q.exec();
+
+    if (!m_batchMode && ok && existing.has_value()) {
+        if (!existing->albumId.isEmpty())
+            updateAlbumStatsIncremental(existing->albumId);
+        cleanOrphanedAlbumsAndArtists();
+    }
+    return ok;
 }
 
 bool LibraryDatabase::removeTrackByPath(const QString& filePath)
 {
     QMutexLocker lock(&m_dbMutex);
+
+    // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
+    std::optional<Track> existing;
+    if (!m_batchMode)
+        existing = trackByPath(filePath);
+
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("DELETE FROM tracks WHERE file_path = ?"));
     q.addBindValue(filePath);
-    return q.exec();
+    bool ok = q.exec();
+
+    if (!m_batchMode && ok && existing.has_value()) {
+        if (!existing->albumId.isEmpty())
+            updateAlbumStatsIncremental(existing->albumId);
+        cleanOrphanedAlbumsAndArtists();
+    }
+    return ok;
 }
 
 std::optional<Track> LibraryDatabase::trackById(const QString& id) const
@@ -650,18 +725,21 @@ std::optional<Track> LibraryDatabase::trackByPath(const QString& filePath) const
 QVector<Track> LibraryDatabase::allTracks() const
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     QVector<Track> result;
     QSqlQuery q(m_db);
     q.exec(QStringLiteral("SELECT * FROM tracks ORDER BY artist, album, disc_number, track_number"));
     while (q.next()) {
         result.append(trackFromQuery(q));
     }
+    qDebug() << "[TIMING] allTracks (FULL):" << result.size() << "tracks in" << t.elapsed() << "ms";
     return result;
 }
 
 QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     QVector<TrackIndex> result;
     StringPool pool;  // deduplicates artist/album names (~60% memory savings)
 
@@ -689,6 +767,7 @@ QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
         ti.hasR128      = (ti.r128Loudness != 0.0);
         result.append(std::move(ti));
     }
+    qDebug() << "[TIMING] allTrackIndexes:" << result.size() << "tracks in" << t.elapsed() << "ms";
     qDebug() << "[LibraryDB] Loaded" << result.size() << "track indexes,"
              << "unique strings:" << pool.uniqueCount();
     return result;
@@ -727,6 +806,7 @@ QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const
 void LibraryDatabase::rebuildFTSIndex()
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     QSqlQuery q(m_db);
     m_db.transaction();
     q.exec(QStringLiteral("DELETE FROM tracks_fts"));
@@ -735,6 +815,7 @@ void LibraryDatabase::rebuildFTSIndex()
         "SELECT rowid, title, artist, album FROM tracks"
     ));
     m_db.commit();
+    qDebug() << "[TIMING] rebuildFTSIndex internal:" << t.elapsed() << "ms";
     qDebug() << "[LibraryDB] FTS5 index rebuilt";
 }
 
@@ -836,6 +917,7 @@ bool LibraryDatabase::updateAlbum(const Album& album)
 QVector<Album> LibraryDatabase::allAlbums() const
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     QVector<Album> result;
     QSqlQuery q(m_db);
     q.exec(QStringLiteral("SELECT * FROM albums ORDER BY artist, title"));
@@ -864,6 +946,7 @@ QVector<Album> LibraryDatabase::allAlbums() const
         result.append(a);
     }
 
+    qDebug() << "[TIMING] allAlbums:" << result.size() << "in" << t.elapsed() << "ms";
     qDebug() << "LibraryDatabase::allAlbums returning" << result.size() << "albums";
     return result;
 }
@@ -935,6 +1018,7 @@ bool LibraryDatabase::updateArtist(const Artist& artist)
 QVector<Artist> LibraryDatabase::allArtists() const
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer t; t.start();
     QVector<Artist> result;
     QSqlQuery q(m_db);
     q.exec(QStringLiteral("SELECT * FROM artists ORDER BY name"));
@@ -957,6 +1041,7 @@ QVector<Artist> LibraryDatabase::allArtists() const
         result.append(a);
     }
 
+    qDebug() << "[TIMING] allArtists:" << result.size() << "in" << t.elapsed() << "ms";
     qDebug() << "LibraryDatabase::allArtists returning" << result.size() << "artists";
     return result;
 }
@@ -1482,8 +1567,8 @@ bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const
 }
 
 // ── Transaction helpers ──────────────────────────────────────────────
-bool LibraryDatabase::beginTransaction() { QMutexLocker lock(&m_dbMutex); return m_db.transaction(); }
-bool LibraryDatabase::commitTransaction() { QMutexLocker lock(&m_dbMutex); return m_db.commit(); }
+bool LibraryDatabase::beginTransaction() { QMutexLocker lock(&m_dbMutex); m_batchMode = true; return m_db.transaction(); }
+bool LibraryDatabase::commitTransaction() { QMutexLocker lock(&m_dbMutex); m_batchMode = false; return m_db.commit(); }
 
 // ── Database backup / rollback ───────────────────────────────────────
 
@@ -1542,6 +1627,193 @@ QDateTime LibraryDatabase::backupTimestamp() const
     return info.exists() ? info.lastModified() : QDateTime();
 }
 
+// ── Incremental Album/Artist Management ──────────────────────────────
+
+QString LibraryDatabase::findOrCreateArtist(const QString& artistName)
+{
+    QMutexLocker lock(&m_dbMutex);
+    if (artistName.trimmed().isEmpty()) return {};
+
+    QString normalizedName = artistName.trimmed().toLower();
+
+    // 1. Check cache
+    auto it = m_artistNameToIdCache.constFind(normalizedName);
+    if (it != m_artistNameToIdCache.constEnd())
+        return it.value();
+
+    // 2. Check DB
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM artists WHERE LOWER(TRIM(name)) = ?"));
+    q.addBindValue(normalizedName);
+    if (q.exec() && q.next()) {
+        QString id = q.value(0).toString();
+        m_artistNameToIdCache.insert(normalizedName, id);
+        return id;
+    }
+
+    // 3. Create new artist with hash-based ID (matches doRebuildInternal formula)
+    QString artistId = QStringLiteral("artist_") +
+        QString::number(qHash(normalizedName), 16).rightJustified(8, QLatin1Char('0'));
+
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO artists (id, name, cover_url, genres) VALUES (?, ?, '', '')"));
+    ins.addBindValue(artistId);
+    ins.addBindValue(artistName.trimmed());
+    if (!ins.exec()) {
+        qWarning() << "[LibraryDB] findOrCreateArtist INSERT failed:" << ins.lastError().text();
+    }
+
+    m_artistNameToIdCache.insert(normalizedName, artistId);
+    return artistId;
+}
+
+QString LibraryDatabase::findOrCreateAlbum(const QString& albumTitle, const QString& artistName, const QString& artistId)
+{
+    QMutexLocker lock(&m_dbMutex);
+    if (albumTitle.trimmed().isEmpty()) return {};
+
+    QString key = albumTitle.trimmed().toLower() + QStringLiteral("||") + artistName.trimmed().toLower();
+
+    // 1. Check cache
+    auto it = m_albumKeyToIdCache.constFind(key);
+    if (it != m_albumKeyToIdCache.constEnd())
+        return it.value();
+
+    // 2. Check DB
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM albums WHERE LOWER(TRIM(title)) = ? AND artist_id = ?"));
+    q.addBindValue(albumTitle.trimmed().toLower());
+    q.addBindValue(artistId);
+    if (q.exec() && q.next()) {
+        QString id = q.value(0).toString();
+        m_albumKeyToIdCache.insert(key, id);
+        return id;
+    }
+
+    // 3. Create new album with hash-based ID (matches doRebuildInternal formula)
+    QString albumId = QStringLiteral("album_") +
+        QString::number(qHash(key), 16).rightJustified(8, QLatin1Char('0'));
+
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO albums (id, title, artist, artist_id, year, cover_url, format, total_tracks, duration, genres) "
+        "VALUES (?, ?, ?, ?, 0, '', '', 0, 0, '')"));
+    ins.addBindValue(albumId);
+    ins.addBindValue(albumTitle.trimmed());
+    ins.addBindValue(artistName.trimmed());
+    ins.addBindValue(artistId);
+    if (!ins.exec()) {
+        qWarning() << "[LibraryDB] findOrCreateAlbum INSERT failed:" << ins.lastError().text();
+    }
+
+    m_albumKeyToIdCache.insert(key, albumId);
+    return albumId;
+}
+
+void LibraryDatabase::updateAlbumStatsIncremental(const QString& albumId)
+{
+    QMutexLocker lock(&m_dbMutex);
+    if (albumId.isEmpty()) return;
+
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "UPDATE albums SET "
+        "  total_tracks = (SELECT COUNT(*) FROM tracks WHERE album_id = ?), "
+        "  duration = (SELECT COALESCE(SUM(duration), 0) FROM tracks WHERE album_id = ?), "
+        "  year = (SELECT MIN(year) FROM tracks WHERE album_id = ? AND year > 0) "
+        "WHERE id = ?"));
+    q.addBindValue(albumId);
+    q.addBindValue(albumId);
+    q.addBindValue(albumId);
+    q.addBindValue(albumId);
+    if (!q.exec()) {
+        qWarning() << "[LibraryDB] updateAlbumStatsIncremental failed:" << q.lastError().text();
+    }
+}
+
+void LibraryDatabase::updateAlbumsAndArtistsForTrack(const Track& track)
+{
+    QMutexLocker lock(&m_dbMutex);
+
+    QString artistId;
+    QString albumId;
+
+    if (!track.artist.trimmed().isEmpty()) {
+        artistId = findOrCreateArtist(track.artist);
+    }
+    if (!track.album.trimmed().isEmpty()) {
+        albumId = findOrCreateAlbum(track.album, track.artist, artistId);
+    }
+
+    // Update track's album_id and artist_id to match current names
+    if (!track.id.isEmpty()) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("UPDATE tracks SET album_id = ?, artist_id = ? WHERE id = ?"));
+        q.addBindValue(albumId);
+        q.addBindValue(artistId);
+        q.addBindValue(track.id);
+        q.exec();
+    }
+
+    if (!albumId.isEmpty()) {
+        updateAlbumStatsIncremental(albumId);
+        refreshAlbumMetadataFromTracks(albumId);
+    }
+
+    cleanOrphanedAlbumsAndArtists();
+}
+
+void LibraryDatabase::cleanOrphanedAlbumsAndArtists()
+{
+    QMutexLocker lock(&m_dbMutex);
+
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral(
+        "DELETE FROM albums WHERE id NOT IN "
+        "(SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL AND album_id != '')"));
+    int albumsRemoved = q.numRowsAffected();
+
+    q.exec(QStringLiteral(
+        "DELETE FROM artists WHERE id NOT IN "
+        "(SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL AND artist_id != '')"));
+    int artistsRemoved = q.numRowsAffected();
+
+    if (albumsRemoved > 0 || artistsRemoved > 0) {
+        qDebug() << "[LibraryDB] Cleaned orphaned:" << albumsRemoved << "albums," << artistsRemoved << "artists";
+    }
+}
+
+void LibraryDatabase::clearIncrementalCaches()
+{
+    m_artistNameToIdCache.clear();
+    m_albumKeyToIdCache.clear();
+    qDebug() << "[LibraryDB] Incremental caches cleared";
+}
+
+void LibraryDatabase::refreshAlbumMetadataFromTracks(const QString& albumId)
+{
+    QMutexLocker lock(&m_dbMutex);
+    if (albumId.isEmpty()) return;
+
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "UPDATE albums SET "
+        "  cover_url = COALESCE("
+        "    (SELECT cover_url FROM tracks WHERE album_id = ? AND cover_url IS NOT NULL AND cover_url != '' LIMIT 1), "
+        "    cover_url), "
+        "  format = COALESCE("
+        "    (SELECT format FROM tracks WHERE album_id = ? LIMIT 1), "
+        "    format) "
+        "WHERE id = ?"));
+    q.addBindValue(albumId);
+    q.addBindValue(albumId);
+    q.addBindValue(albumId);
+    if (!q.exec()) {
+        qWarning() << "[LibraryDB] refreshAlbumMetadataFromTracks failed:" << q.lastError().text();
+    }
+}
+
 // ── Rebuild Albums & Artists from Tracks ─────────────────────────────
 void LibraryDatabase::rebuildAlbumsAndArtists()
 {
@@ -1596,11 +1868,17 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
 void LibraryDatabase::doRebuildInternal()
 {
     QMutexLocker lock(&m_dbMutex);
+    QElapsedTimer rebuildTimer; rebuildTimer.start();
+    QElapsedTimer stepTimer;
+
     // Auto-backup before destructive rebuild
+    stepTimer.start();
     createBackup();
+    qDebug() << "[TIMING] doRebuild createBackup:" << stepTimer.elapsed() << "ms";
 
     qDebug() << "LibraryDatabase::rebuildAlbumsAndArtists - starting rebuild...";
 
+    stepTimer.restart();
     m_db.transaction();
 
     // Clear existing albums and artists to avoid stale duplicates
@@ -1631,6 +1909,7 @@ void LibraryDatabase::doRebuildInternal()
             }
         }
     }
+    qDebug() << "[TIMING] doRebuild DELETE+SELECT DISTINCT:" << stepTimer.elapsed() << "ms";
     qDebug() << "  Unique artists found:" << artistNameToId.size();
 
     // Assign consistent album IDs by (normalized album name + normalized artist name)
@@ -1657,6 +1936,7 @@ void LibraryDatabase::doRebuildInternal()
     qDebug() << "  Unique albums found:" << albumKeyToId.size();
 
     // Update all tracks with consistent album_id and artist_id
+    stepTimer.restart();
     for (auto it = artistNameToId.constBegin(); it != artistNameToId.constEnd(); ++it) {
         QSqlQuery updateQ(m_db);
         updateQ.prepare(QStringLiteral(
@@ -1686,7 +1966,10 @@ void LibraryDatabase::doRebuildInternal()
         }
     }
 
+    qDebug() << "[TIMING] doRebuild UPDATE track IDs:" << stepTimer.elapsed() << "ms";
+
     // Build and insert albums with all fields (coverUrl, stats)
+    stepTimer.restart();
     int albumCount = 0;
     int artistCount = 0;
     {
@@ -1746,8 +2029,13 @@ void LibraryDatabase::doRebuildInternal()
         artistCount++;
     }
 
+    qDebug() << "[TIMING] doRebuild INSERT albums+artists:" << stepTimer.elapsed() << "ms";
+
+    stepTimer.restart();
     m_db.commit();
+    qDebug() << "[TIMING] doRebuild COMMIT:" << stepTimer.elapsed() << "ms";
 
     qDebug() << "[LibraryDatabase] rebuildAlbumsAndArtists — inserted"
              << albumCount << "albums," << artistCount << "artists";
+    qDebug() << "[TIMING] doRebuildInternal TOTAL:" << rebuildTimer.elapsed() << "ms";
 }

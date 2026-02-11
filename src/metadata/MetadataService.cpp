@@ -401,13 +401,7 @@ void MetadataService::handleFingerprintResult(const QString& trackId,
                                        newRecMbid, newArtMbid, newAlbMbid, newRgMbid);
     qDebug() << "  DB updateTrackMetadata returned:" << ok << "for id:" << track.id;
 
-    // Only rebuild albums/artists for single-track identification, not during batch
-    // (batch calls rebuildAlbumsAndArtists once at the end)
-    if (!m_isFingerprintBatch) {
-        db->rebuildAlbumsAndArtists();
-    }
-
-    // Build an updated Track object for signals (read fresh from DB if possible)
+    // Build an updated Track object for signals and incremental update
     Track updated = track;
     updated.title = newTitle;
     updated.artist = newArtist;
@@ -416,6 +410,12 @@ void MetadataService::handleFingerprintResult(const QString& trackId,
     updated.artistMbid = newArtMbid;
     updated.albumMbid = newAlbMbid;
     updated.releaseGroupMbid = newRgMbid;
+
+    // Incremental: update albums/artists for single-track identification only
+    // (batch handles cleanup once at the end)
+    if (!m_isFingerprintBatch) {
+        db->updateAlbumsAndArtistsForTrack(updated);
+    }
 
     emit metadataUpdated(updated.id, updated);
 
@@ -477,8 +477,8 @@ void MetadataService::processNextFingerprint()
         m_isProcessingTrack = false;
         m_currentProcessingTrackId.clear();
         m_fingerprintQueue.clear();
-        qDebug() << "[Batch] Batch fingerprint complete, rebuilding albums/artists";
-        LibraryDatabase::instance()->rebuildAlbumsAndArtists();
+        qDebug() << "[Batch] Batch fingerprint complete, cleaning orphaned albums/artists";
+        LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
         MusicDataProvider::instance()->reloadFromDatabase();
         emit fetchComplete();
         return;
