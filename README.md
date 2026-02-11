@@ -102,13 +102,18 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 10 (v1.0.0 → v1.4.2) |
+| GitHub Releases | 11 (v1.0.0 → v1.4.3) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.4.3 — Auto-Scan on Folder Add
+
+- Auto-scan now triggers immediately after adding a music folder
+- Previously required manual "Scan Now" click after adding folders
 
 ### v1.4.2 — Scan & Auth Performance
 
