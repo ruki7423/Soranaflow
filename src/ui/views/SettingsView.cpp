@@ -1579,6 +1579,11 @@ void SettingsView::onAddFolderClicked()
 #endif
         Settings::instance()->addLibraryFolder(folder);
         rebuildFolderList();
+
+        // Auto-scan all folders including newly added one
+        QStringList folders = Settings::instance()->libraryFolders();
+        LibraryScanner::instance()->scanFolders(folders);
+        qDebug() << "[Settings] Folder added — auto-scan triggered:" << folder;
     }
 }
 
