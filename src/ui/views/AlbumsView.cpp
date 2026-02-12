@@ -249,10 +249,11 @@ void AlbumsView::reloadAlbums()
         }
     }
 
+    // Single allTracks() fetch — reused for albumMap + trackPaths
+    const QVector<Track> tracks = MusicDataProvider::instance()->allTracks();
+
     // ── Step 3: If still empty, build from tracks as last resort ────
     if (albums.isEmpty()) {
-        QVector<Track> tracks = MusicDataProvider::instance()->allTracks();
-
         QMap<QString, Album> albumMap;
         for (const Track& t : tracks) {
             if (t.album.isEmpty()) continue;
@@ -283,8 +284,6 @@ void AlbumsView::reloadAlbums()
     // (allAlbums() returns albums without tracks to save memory)
     m_albumTrackPaths.clear();
     {
-        const auto tracks = MusicDataProvider::instance()->allTracks();
-
         // Fast path: match by albumId (populated after rebuildAlbumsAndArtists)
         for (const auto& t : tracks) {
             if (!t.albumId.isEmpty() && !t.filePath.isEmpty()

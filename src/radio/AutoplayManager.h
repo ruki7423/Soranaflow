@@ -29,7 +29,7 @@ private:
     void onSimilarArtistsFetched(const QStringList& artists);
     void onFetchError(const QString& error);
     void tryLocalFallback();
-    Track pickFromArtist(const QString& artist);
+    // pickFromArtist removed — inlined into callers to avoid redundant allTracks() copies
     bool isRecentlyPlayed(const QString& trackId);
     void addToRecentlyPlayed(const QString& trackId);
 

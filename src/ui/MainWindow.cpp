@@ -331,20 +331,25 @@ void MainWindow::connectSignals()
         showScanBar(current, total);
     });
 
+    // Debounce timer for library reloads — coalesces rapid signals into one reload
+    m_libraryReloadTimer = new QTimer(this);
+    m_libraryReloadTimer->setSingleShot(true);
+    m_libraryReloadTimer->setInterval(2000);
+    connect(m_libraryReloadTimer, &QTimer::timeout, this, &MainWindow::doLibraryReload);
+
     connect(scanner, &LibraryScanner::scanFinished, this, [this](int totalTracks) {
         m_scanShowTimer->stop();
+        m_libraryReloadTimer->stop();  // Cancel pending debounce
         showScanComplete(totalTracks);
         // Final reload with albums/artists (m_scanning is now false)
         MusicDataProvider::instance()->reloadFromDatabase();
     });
 
-    // Progressive playback — reload tracks every 5s during scan so user can browse/play
+    // Progressive playback — debounce reloads during scan (max 1 per 2s)
     connect(scanner, &LibraryScanner::batchReady, this, [this](int processed, int total) {
-        if (!m_batchThrottle.isValid() || m_batchThrottle.elapsed() > 5000) {
-            m_batchThrottle.start();
-            qDebug() << "[ProgressiveScan] Batch ready:" << processed << "/" << total
-                     << "— triggering reload";
-            MusicDataProvider::instance()->reloadFromDatabase();
+        Q_UNUSED(processed); Q_UNUSED(total);
+        if (!m_libraryReloadTimer->isActive()) {
+            m_libraryReloadTimer->start();
         }
     });
 
@@ -365,6 +370,16 @@ void MainWindow::connectSignals()
         updateScanBarTheme();
     });
     updateScanBarTheme();
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  doLibraryReload — debounced library reload during scan
+// ═════════════════════════════════════════════════════════════════════
+
+void MainWindow::doLibraryReload()
+{
+    qDebug() << "[ProgressiveScan] Debounced reload firing";
+    MusicDataProvider::instance()->reloadFromDatabase();
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QDir>
+#include <QLockFile>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QTimer>
@@ -162,6 +163,13 @@ int main(int argc, char* argv[]) {
     app.setOrganizationName("SoranaFlow");
     app.setApplicationName("Sorana Flow");
     app.setApplicationVersion("1.4.5");
+
+    // Single-instance guard — prevent duplicate launches
+    QLockFile lockFile(QDir::tempPath() + QStringLiteral("/soranaflow.lock"));
+    if (!lockFile.tryLock(100)) {
+        qWarning() << "SoranaFlow is already running — exiting duplicate instance.";
+        return 1;
+    }
 
     // Set default font
     QFont defaultFont = app.font();

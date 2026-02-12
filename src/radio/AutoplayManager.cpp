@@ -57,11 +57,22 @@ void AutoplayManager::onSimilarTracksFetched(const QList<QPair<QString, QString>
 
     const auto allTracks = MusicDataProvider::instance()->allTracks();
 
+    // Build hash map for O(1) lookup: "artist||title" → track index
+    QHash<QString, int> trackMap;
+    trackMap.reserve(allTracks.size());
+    for (int i = 0; i < allTracks.size(); ++i) {
+        const Track& t = allTracks[i];
+        QString key = t.artist.toLower() + QStringLiteral("||") + t.title.toLower();
+        if (!trackMap.contains(key))
+            trackMap.insert(key, i);
+    }
+
     for (const auto& [simArtist, simTitle] : tracks) {
-        for (const Track& t : allTracks) {
-            if (t.artist.compare(simArtist, Qt::CaseInsensitive) == 0 &&
-                t.title.compare(simTitle, Qt::CaseInsensitive) == 0 &&
-                !isRecentlyPlayed(t.id)) {
+        QString key = simArtist.toLower() + QStringLiteral("||") + simTitle.toLower();
+        auto it = trackMap.find(key);
+        if (it != trackMap.end()) {
+            const Track& t = allTracks[it.value()];
+            if (!isRecentlyPlayed(t.id)) {
                 qDebug() << "[Autoplay] Stage 0 match:" << t.artist << "-" << t.title;
                 addToRecentlyPlayed(t.id);
                 emit trackRecommended(t);
@@ -80,12 +91,23 @@ void AutoplayManager::onSimilarArtistsFetched(const QStringList& artists)
 {
     if (m_fallbackStage != 1) return;
 
+    // Single allTracks() fetch for all artist comparisons
+    const auto allTracks = MusicDataProvider::instance()->allTracks();
+
     for (const QString& simArtist : artists) {
-        Track pick = pickFromArtist(simArtist);
-        if (!pick.id.isEmpty()) {
-            qDebug() << "[Autoplay] Stage 1 match:" << pick.artist << "-" << pick.title;
-            addToRecentlyPlayed(pick.id);
-            emit trackRecommended(pick);
+        QVector<int> candidates;
+        for (int i = 0; i < allTracks.size(); ++i) {
+            if (allTracks[i].artist.compare(simArtist, Qt::CaseInsensitive) == 0 &&
+                !isRecentlyPlayed(allTracks[i].id)) {
+                candidates.append(i);
+            }
+        }
+        if (!candidates.isEmpty()) {
+            int idx = candidates[QRandomGenerator::global()->bounded(candidates.size())];
+            const Track& t = allTracks[idx];
+            qDebug() << "[Autoplay] Stage 1 match:" << t.artist << "-" << t.title;
+            addToRecentlyPlayed(t.id);
+            emit trackRecommended(t);
             return;
         }
     }
@@ -98,16 +120,7 @@ void AutoplayManager::onSimilarArtistsFetched(const QStringList& artists)
 // ── Stage 2: Local library fallback ─────────────────────────────────
 void AutoplayManager::tryLocalFallback()
 {
-    // First: try same artist
-    Track pick = pickFromArtist(m_currentArtist);
-    if (!pick.id.isEmpty()) {
-        qDebug() << "[Autoplay] Stage 2 same-artist match:" << pick.artist << "-" << pick.title;
-        addToRecentlyPlayed(pick.id);
-        emit trackRecommended(pick);
-        return;
-    }
-
-    // Second: random from full library
+    // Single allTracks() fetch for both same-artist and random fallback
     const auto allTracks = MusicDataProvider::instance()->allTracks();
     if (allTracks.isEmpty()) {
         qDebug() << "[Autoplay] No tracks in library";
@@ -115,7 +128,26 @@ void AutoplayManager::tryLocalFallback()
         return;
     }
 
-    // Collect non-recently-played candidates
+    // First: try same artist (inline — avoids extra allTracks copy in pickFromArtist)
+    {
+        QVector<int> artistCandidates;
+        for (int i = 0; i < allTracks.size(); ++i) {
+            if (allTracks[i].artist.compare(m_currentArtist, Qt::CaseInsensitive) == 0 &&
+                !isRecentlyPlayed(allTracks[i].id)) {
+                artistCandidates.append(i);
+            }
+        }
+        if (!artistCandidates.isEmpty()) {
+            int idx = artistCandidates[QRandomGenerator::global()->bounded(artistCandidates.size())];
+            const Track& t = allTracks[idx];
+            qDebug() << "[Autoplay] Stage 2 same-artist match:" << t.artist << "-" << t.title;
+            addToRecentlyPlayed(t.id);
+            emit trackRecommended(t);
+            return;
+        }
+    }
+
+    // Second: random from full library
     QVector<int> candidates;
     for (int i = 0; i < allTracks.size(); ++i) {
         if (!isRecentlyPlayed(allTracks[i].id))
@@ -152,25 +184,7 @@ void AutoplayManager::onFetchError(const QString& error)
     }
 }
 
-// ── pickFromArtist ──────────────────────────────────────────────────
-Track AutoplayManager::pickFromArtist(const QString& artist)
-{
-    const auto allTracks = MusicDataProvider::instance()->allTracks();
-    QVector<int> candidates;
-
-    for (int i = 0; i < allTracks.size(); ++i) {
-        if (allTracks[i].artist.compare(artist, Qt::CaseInsensitive) == 0 &&
-            !isRecentlyPlayed(allTracks[i].id)) {
-            candidates.append(i);
-        }
-    }
-
-    if (candidates.isEmpty())
-        return Track();
-
-    int idx = candidates[QRandomGenerator::global()->bounded(candidates.size())];
-    return allTracks[idx];
-}
+// pickFromArtist removed — logic inlined into onSimilarArtistsFetched and tryLocalFallback
 
 // ── Recently played tracking ────────────────────────────────────────
 bool AutoplayManager::isRecentlyPlayed(const QString& trackId)

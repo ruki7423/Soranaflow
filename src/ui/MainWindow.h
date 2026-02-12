@@ -122,6 +122,8 @@ private:
     QTimer* m_scanShowTimer = nullptr;
     QTimer* m_scanHideTimer = nullptr;
     QElapsedTimer m_batchThrottle;
+    QTimer* m_libraryReloadTimer = nullptr;
+    void doLibraryReload();
     void showScanBar(int current, int total);
     void showScanComplete(int totalTracks);
     void hideScanBar();
