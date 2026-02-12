@@ -161,7 +161,7 @@ int main(int argc, char* argv[]) {
     app.setOrganizationDomain("soranaflow.com");
     app.setOrganizationName("SoranaFlow");
     app.setApplicationName("Sorana Flow");
-    app.setApplicationVersion("1.4.3");
+    app.setApplicationVersion("1.4.4");
 
     // Set default font
     QFont defaultFont = app.font();
