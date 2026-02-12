@@ -43,6 +43,14 @@ PlaybackState::PlaybackState(QObject* parent)
     m_saveTimer->setInterval(500);
     connect(m_saveTimer, &QTimer::timeout, this, &PlaybackState::doSave);
 
+    // Debounced volume save — avoids QSettings write on every slider tick
+    m_volumeSaveTimer = new QTimer(this);
+    m_volumeSaveTimer->setSingleShot(true);
+    m_volumeSaveTimer->setInterval(300);
+    connect(m_volumeSaveTimer, &QTimer::timeout, this, [this]() {
+        Settings::instance()->setVolume(m_volume);
+    });
+
     // Autoplay manager
     m_autoplay = AutoplayManager::instance();
     m_autoplay->setEnabled(Settings::instance()->autoplayEnabled());
@@ -245,7 +253,7 @@ void PlaybackState::setVolume(int vol)
     m_volume = clamped;
     AudioEngine::instance()->setVolume(m_volume / 100.0f);
     MusicKitPlayer::instance()->setVolume(m_volume / 100.0);
-    Settings::instance()->setVolume(m_volume);
+    m_volumeSaveTimer->start();  // debounce — save after 300ms idle
     emit volumeChanged(m_volume);
 }
 

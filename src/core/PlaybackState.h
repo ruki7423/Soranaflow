@@ -80,6 +80,7 @@ private:
 
     QTimer* m_queueChangeDebounce = nullptr;
     QTimer* m_saveTimer = nullptr;
+    QTimer* m_volumeSaveTimer = nullptr;
     bool m_restoring = false;
     bool m_playing = false;
     int m_currentTime = 0;

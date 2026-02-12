@@ -669,20 +669,24 @@ void PlaybackBar::updateRepeatButton()
 // ── Helper: Update Volume Icon ─────────────────────────────────────
 void PlaybackBar::updateVolumeIcon()
 {
-    auto* tm = ThemeManager::instance();
-
+    // Compute icon tier: 0=muted/zero, 1=low, 2=high
+    int tier;
     if (m_isMuted) {
-        m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-x.svg"));
-        return;
+        tier = 0;
+    } else {
+        int vol = m_volumeSlider->value();
+        tier = (vol == 0) ? 0 : (vol < 50) ? 1 : 2;
     }
 
-    int vol = m_volumeSlider->value();
-    if (vol == 0) {
-        m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-x.svg"));
-    } else if (vol < 50) {
-        m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-1.svg"));
-    } else {
-        m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-2.svg"));
+    if (tier == m_volumeIconTier)
+        return;  // same icon — skip expensive SVG parse + render
+    m_volumeIconTier = tier;
+
+    auto* tm = ThemeManager::instance();
+    switch (tier) {
+    case 0:  m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-x.svg")); break;
+    case 1:  m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-1.svg")); break;
+    default: m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-2.svg")); break;
     }
 }
 
@@ -1035,7 +1039,9 @@ void PlaybackBar::refreshTheme()
     }
 
     m_volumeHideFill = -1;             // force re-apply with new theme colors
+    m_volumeIconTier = -1;             // force icon re-render with new theme colors
     updateVolumeSliderStyle();
+    updateVolumeIcon();
 }
 
 // ── eventFilter — artist click on subtitle label ────────────────────
