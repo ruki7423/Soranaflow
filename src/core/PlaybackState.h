@@ -55,6 +55,7 @@ public slots:
     void clearUpcoming();
     void saveQueueToSettings();
     void restoreQueueFromSettings();
+    void flushPendingSaves();
 
 signals:
     void playStateChanged(bool playing);

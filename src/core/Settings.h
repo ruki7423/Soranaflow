@@ -229,6 +229,7 @@ public:
     QVariant value(const QString& key, const QVariant& defaultValue = QVariant()) const;
     void setValue(const QString& key, const QVariant& value);
     void remove(const QString& key);
+    void sync() { m_settings.sync(); }
 
     // INI file path — use to create local QSettings(IniFormat) in other files
     static QString settingsPath();

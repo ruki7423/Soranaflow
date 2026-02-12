@@ -413,6 +413,11 @@ int main(int argc, char* argv[]) {
 
         std::signal(SIGSEGV, shutdownCrashHandler);
         std::signal(SIGABRT, shutdownCrashHandler);
+        // Flush debounced saves before anything shuts down
+        PlaybackState::instance()->flushPendingSaves();
+        Settings::instance()->sync();
+        qDebug() << "[SHUTDOWN] Settings flushed and synced";
+
         window.performQuit();
         AudioDeviceManager::instance()->stopMonitoring();
 #ifdef Q_OS_MACOS

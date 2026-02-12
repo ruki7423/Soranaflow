@@ -634,6 +634,21 @@ void PlaybackState::doSave()
     });
 }
 
+// ── flushPendingSaves ───────────────────────────────────────────────
+void PlaybackState::flushPendingSaves()
+{
+    if (m_volumeSaveTimer->isActive()) {
+        m_volumeSaveTimer->stop();
+        Settings::instance()->setVolume(m_volume);
+        qDebug() << "[Shutdown] Flushed pending volume save:" << m_volume;
+    }
+    if (m_saveTimer->isActive()) {
+        m_saveTimer->stop();
+        doSave();
+        qDebug() << "[Shutdown] Flushed pending queue save";
+    }
+}
+
 // ── restoreQueueFromSettings ────────────────────────────────────────
 void PlaybackState::restoreQueueFromSettings()
 {

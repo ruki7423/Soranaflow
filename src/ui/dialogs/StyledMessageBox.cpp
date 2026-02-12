@@ -81,7 +81,6 @@ void StyledMessageBox::setupUi()
     m_messageLabel = new QLabel(container);
     m_messageLabel->setAlignment(Qt::AlignCenter);
     m_messageLabel->setWordWrap(true);
-    m_messageLabel->setMaximumWidth(300);
     // Set font via setFont() so font() returns correct size for sizeHint/layout
     QFont msgFont = m_messageLabel->font();
     msgFont.setPixelSize(14);
@@ -102,7 +101,6 @@ void StyledMessageBox::setupUi()
     layout->addWidget(m_buttonContainer);
 
     setMinimumWidth(380);
-    setMinimumHeight(280);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -286,6 +284,7 @@ bool StyledMessageBox::confirm(QWidget* parent, const QString& title,
     box.setMessage(message);
     box.addButton(ButtonType::No, false);
     box.addButton(ButtonType::Yes, true);
+    box.setFixedWidth(380);
     box.adjustSize();
     if (parent) box.move(parent->geometry().center() - box.rect().center());
     box.exec();
@@ -300,6 +299,7 @@ bool StyledMessageBox::confirmDelete(QWidget* parent, const QString& itemName)
     box.setMessage(QStringLiteral("This action cannot be undone."));
     box.addButton(ButtonType::Cancel, false);
     box.addButton(ButtonType::Delete, true);
+    box.setFixedWidth(380);
     box.adjustSize();
     if (parent) box.move(parent->geometry().center() - box.rect().center());
     box.exec();
@@ -314,6 +314,7 @@ void StyledMessageBox::info(QWidget* parent, const QString& title,
     box.setTitle(title);
     box.setMessage(message);
     box.addButton(ButtonType::Ok, true);
+    box.setFixedWidth(380);
     box.adjustSize();
     if (parent) box.move(parent->geometry().center() - box.rect().center());
     box.exec();
@@ -327,6 +328,7 @@ void StyledMessageBox::warning(QWidget* parent, const QString& title,
     box.setTitle(title);
     box.setMessage(message);
     box.addButton(ButtonType::Ok, true);
+    box.setFixedWidth(380);
     box.adjustSize();
     if (parent) box.move(parent->geometry().center() - box.rect().center());
     box.exec();
@@ -340,6 +342,7 @@ void StyledMessageBox::error(QWidget* parent, const QString& title,
     box.setTitle(title);
     box.setMessage(message);
     box.addButton(ButtonType::Ok, true);
+    box.setFixedWidth(380);
     box.adjustSize();
     if (parent) box.move(parent->geometry().center() - box.rect().center());
     box.exec();
