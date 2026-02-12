@@ -30,6 +30,7 @@ static void shutdownCrashHandler(int sig)
     _exit(0);
 #endif
 }
+#include "core/CrashHandler.h"
 #include "core/MusicData.h"
 #include "core/ThemeManager.h"
 #include "core/PlaybackState.h"
@@ -91,6 +92,7 @@ static void loadLanguage(QApplication& app, const QString& lang)
 }
 
 int main(int argc, char* argv[]) {
+    CrashHandler::install();  // must be first — captures crash backtraces
     std::cout << "[STARTUP] Sorana Flow initializing..." << std::endl;
 
     // Disable macOS window restoration + reduce native widget overhead
@@ -169,6 +171,18 @@ int main(int argc, char* argv[]) {
     if (!lockFile.tryLock(100)) {
         qWarning() << "SoranaFlow is already running — exiting duplicate instance.";
         return 1;
+    }
+
+    // Check for previous crash
+    {
+        QString crashLog = CrashHandler::crashLogPath();
+        if (QFile::exists(crashLog)) {
+            qWarning() << "[STARTUP] Previous crash detected:" << crashLog;
+            QString prevPath = crashLog;
+            prevPath.replace(QStringLiteral(".log"), QStringLiteral("_prev.log"));
+            QFile::remove(prevPath);
+            QFile::rename(crashLog, prevPath);
+        }
     }
 
     // Set default font

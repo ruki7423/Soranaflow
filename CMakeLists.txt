@@ -86,6 +86,8 @@ set(CORE_SOURCES
     src/core/PlaybackState.cpp
     src/core/Settings.h
     src/core/Settings.cpp
+    src/core/CrashHandler.h
+    src/core/CrashHandler.cpp
     src/core/CoverArtLoader.h
     src/core/CoverArtLoader.cpp
     src/core/lyrics/LyricsProvider.h

@@ -94,6 +94,31 @@ bool LibraryDatabase::open()
 
     qDebug() << "[LibraryDB] Dual-connection: WAL + mmap 256MB + cache 64MB (read/write split)";
 
+    // Integrity check — detect corruption early
+    {
+        QSqlQuery check(m_readDb);
+        if (check.exec(QStringLiteral("PRAGMA quick_check")) && check.next()) {
+            QString result = check.value(0).toString();
+            if (result != QStringLiteral("ok")) {
+                qWarning() << "[LibraryDB] Integrity check FAILED:" << result;
+                m_readDb.close();
+                m_db.close();
+                QString backupPath = m_dbPath + QStringLiteral(".corrupt.")
+                    + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
+                QFile::rename(m_dbPath, backupPath);
+                qWarning() << "[LibraryDB] Corrupt DB backed up to:" << backupPath;
+                // Reopen — creates fresh DB, scanner will repopulate
+                m_db.open();
+                QSqlQuery p2(m_db);
+                p2.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+                p2.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+                m_readDb.open();
+            } else {
+                qDebug() << "[LibraryDB] Integrity check: OK";
+            }
+        }
+    }
+
     createTables();
     createIndexes();
 
