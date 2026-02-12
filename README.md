@@ -102,13 +102,20 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 12 (v1.0.0 → v1.4.4) |
+| GitHub Releases | 13 (v1.0.0 → v1.4.5) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.4.5 — Performance & Reliability
+
+- Volume slider: fixed drag lag — SVG icon tier caching + debounced settings save
+- Language dialog: fixed text truncation
+- Settings: fixed not saving on quit — flush debounce timers before shutdown
+- Security: API keys moved to build-time injection (no keys in source)
 
 ### v1.4.4 — Apple Music & Stability
 
@@ -117,8 +124,6 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 - Sidebar: Library Folders collapsible with scroll support
 - Improved uninstaller with admin privileges and Apple Music data cleanup
 - Database: fixed connection warnings on quit
-- Volume slider: eliminated visual lag during drag
-- Language dialog: fixed text truncation
 
 ### v1.4.3 — Auto-Scan on Folder Add
 
