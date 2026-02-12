@@ -102,13 +102,20 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 14 (v1.0.0 → v1.4.6) |
+| GitHub Releases | 15 (v1.0.0 → v1.5.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.5.0 — Architecture Refactoring
+
+- Eliminated all synchronous DB calls from the main thread (swap-on-complete caching)
+- SVG icon cache: 102 uncached renders → QHash lookup with theme-change invalidation
+- Crash handler: POSIX sigaction + backtrace to crash.log, previous-crash detection on startup
+- DB integrity: PRAGMA quick_check on open, auto-backup corrupt databases
 
 ### v1.4.6 — Freeze Hotfix
 
