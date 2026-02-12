@@ -1,4 +1,5 @@
 #include "BookmarkManager.h"
+#include "../../core/Settings.h"
 #include <QSettings>
 #include <QDebug>
 
@@ -41,7 +42,7 @@ bool BookmarkManager::saveBookmark(const QString& folderPath)
 
         QByteArray data = QByteArray::fromNSData(bookmarkData);
 
-        QSettings settings;
+        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
         settings.setValue(bookmarkKey(folderPath), data);
         settings.sync();  // Force write to disk immediately
 
@@ -54,7 +55,7 @@ bool BookmarkManager::saveBookmark(const QString& folderPath)
 void BookmarkManager::restoreAllBookmarks()
 {
     @autoreleasepool {
-        QSettings settings;
+        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
         settings.beginGroup(QStringLiteral("SecurityBookmarks"));
         const QStringList keys = settings.childKeys();
         settings.endGroup();
@@ -100,13 +101,13 @@ void BookmarkManager::restoreAllBookmarks()
 
 bool BookmarkManager::hasBookmark(const QString& folderPath) const
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     return settings.contains(bookmarkKey(folderPath));
 }
 
 void BookmarkManager::removeBookmark(const QString& folderPath)
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     settings.remove(bookmarkKey(folderPath));
     qDebug() << "BookmarkManager: Removed bookmark for" << folderPath;
 }

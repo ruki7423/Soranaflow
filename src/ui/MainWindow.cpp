@@ -34,6 +34,7 @@
 #include <QResizeEvent>
 #include <QKeyEvent>
 #include <QApplication>
+#include <QMenuBar>
 #include <QThread>
 #include <QLineEdit>
 #include <QTextEdit>
@@ -135,6 +136,16 @@ MainWindow::MainWindow(QWidget* parent)
     searchShortcutF->setContext(Qt::ApplicationShortcut);
     connect(searchShortcutF, &QShortcut::activated, this, [this]() {
         m_sidebar->focusSearch();
+    });
+
+    // Cmd+Q / Ctrl+Q → real quit (not just hide)
+    QMenu* fileMenu = menuBar()->addMenu(tr("File"));
+    QAction* quitAction = fileMenu->addAction(tr("Quit Sorana Flow"));
+    quitAction->setShortcut(QKeySequence::Quit);
+    connect(quitAction, &QAction::triggered, this, [this]() {
+        qDebug() << "[MainWindow] Cmd+Q — real quit requested";
+        m_reallyQuit = true;
+        close();
     });
 
     // Global Escape: install app-level event filter to catch Escape
@@ -907,26 +918,45 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 // ── closeEvent ─────────────────────────────────────────────────────
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    qDebug() << "[MainWindow] closeEvent — hiding window, playback continues";
     Settings::instance()->setWindowGeometry(saveGeometry());
-    hide();
-    event->ignore();  // Do NOT quit — just hide
+
+    if (m_reallyQuit) {
+        qDebug() << "[MainWindow] closeEvent — real quit (Cmd+Q)";
+        event->accept();
+        qApp->quit();
+    } else {
+        qDebug() << "[MainWindow] closeEvent — hiding window, playback continues";
+        hide();
+        event->ignore();
+    }
 }
 
 // ── performQuit — full cleanup, called from aboutToQuit ────────────
 void MainWindow::performQuit()
 {
     qDebug() << "=== MainWindow performQuit START ===";
+
+    // Stop scanner thread first (it writes to DB)
+    LibraryScanner::instance()->stopScan();
+    qDebug() << "[SHUTDOWN] Scanner stop requested";
+
     VST3Host::instance()->closeAllEditors();
     QThread::msleep(50);
+
 #ifdef Q_OS_MAC
     MacMediaIntegration::instance().clearNowPlaying();
+    qDebug() << "[SHUTDOWN] MacMedia cleared";
 #endif
+
+    // Stop MusicKit BEFORE audio engine (WKWebView stopLoading prevents hang)
+    MusicKitPlayer::instance()->cleanup();
+
     auto* engine = AudioEngine::instance();
     engine->blockSignals(true);
     engine->stop();
     engine->blockSignals(false);
-    MusicKitPlayer::instance()->cleanup();
+    qDebug() << "[SHUTDOWN] AudioEngine stopped";
+
     QThread::msleep(100);
     VST3Host::instance()->unloadAll();
     QThread::msleep(50);

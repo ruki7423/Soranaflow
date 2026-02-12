@@ -4,6 +4,7 @@
 #include "../Settings.h"
 
 #include <QCoreApplication>
+#include <QtConcurrent>
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -322,22 +323,31 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
         int finalCount = skippedCount + processedCount;
         QMetaObject::invokeMethod(this, [this, finalCount, folders]() {
-            // Set up file watching if enabled (must be on main thread)
-            if (m_watchEnabled) {
-                for (const QString& folder : folders) {
-                    m_watcher->addPath(folder);
-                    QDirIterator dirIt(folder, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-                    while (dirIt.hasNext()) {
-                        dirIt.next();
-                        m_watcher->addPath(dirIt.filePath());
-                    }
-                }
-            }
-
             m_scanning = false;
             m_scanCooldown.start();  // Start 5-second cooldown for directory change events
             qDebug() << "LibraryScanner: Scan complete." << finalCount << "tracks found";
             emit scanFinished(finalCount);
+
+            // Set up file watching AFTER scanFinished (async, non-blocking)
+            if (m_watchEnabled) {
+                QtConcurrent::run([this, folders]() {
+                    QStringList dirs;
+                    for (const QString& folder : folders) {
+                        dirs << folder;
+                        QDirIterator dirIt(folder, QDir::Dirs | QDir::NoDotAndDotDot,
+                                           QDirIterator::Subdirectories);
+                        while (dirIt.hasNext()) {
+                            dirIt.next();
+                            dirs << dirIt.filePath();
+                        }
+                    }
+                    qDebug() << "[Scanner] Collected" << dirs.size() << "dirs for file watcher";
+                    QMetaObject::invokeMethod(this, [this, dirs]() {
+                        m_watcher->addPaths(dirs);
+                        qDebug() << "[Scanner] File watchers set up:" << dirs.size() << "dirs";
+                    }, Qt::QueuedConnection);
+                });
+            }
         }, Qt::QueuedConnection);
     });
 

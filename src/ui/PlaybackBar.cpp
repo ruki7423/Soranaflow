@@ -689,8 +689,12 @@ void PlaybackBar::updateVolumeIcon()
 // ── Helper: Update Volume Slider Style (0 = no fill) ────────────────
 void PlaybackBar::updateVolumeSliderStyle()
 {
+    int hideFill = m_volumeSlider->value() == 0 ? 1 : 0;
+    if (hideFill == m_volumeHideFill)
+        return;                         // no visual change — skip expensive setStyleSheet
+    m_volumeHideFill = hideFill;
+
     auto c = ThemeManager::instance()->colors();
-    bool hideFill = m_volumeSlider->value() == 0;
     QString subPageColor = hideFill ? c.volumeTrack : c.volumeFill;
     QString subPageHoverColor = hideFill ? c.volumeTrack : c.accent;
 
@@ -1030,6 +1034,7 @@ void PlaybackBar::refreshTheme()
                 .arg(accentColor.name(QColor::HexArgb)));
     }
 
+    m_volumeHideFill = -1;             // force re-apply with new theme colors
     updateVolumeSliderStyle();
 }
 

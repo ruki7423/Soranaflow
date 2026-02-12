@@ -158,8 +158,9 @@ int main(int argc, char* argv[]) {
 #endif
 
     QApplication app(argc, argv);
-    app.setApplicationName("Sorana Flow");
+    app.setOrganizationDomain("soranaflow.com");
     app.setOrganizationName("SoranaFlow");
+    app.setApplicationName("Sorana Flow");
     app.setApplicationVersion("1.4.3");
 
     // Set default font
@@ -319,6 +320,12 @@ int main(int argc, char* argv[]) {
             QObject::connect(LibraryDatabase::instance(), &LibraryDatabase::databaseChanged,
                              MusicDataProvider::instance(), &MusicDataProvider::reloadFromDatabase);
 
+            // Reload again after scan finishes — m_scanning is now false,
+            // so albums/artists will be loaded (databaseChanged fires while
+            // scan is still flagged as running, causing albums to be skipped)
+            QObject::connect(LibraryScanner::instance(), &LibraryScanner::scanFinished,
+                             MusicDataProvider::instance(), &MusicDataProvider::reloadFromDatabase);
+
             MusicDataProvider::instance()->reloadFromDatabase();
 
             // Set queue from loaded tracks only if no queue was restored
@@ -394,13 +401,27 @@ int main(int argc, char* argv[]) {
     // Safe shutdown: stop audio engine before Qt event loop ends
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [&window]() {
         qDebug() << "=== aboutToQuit: safe shutdown ===";
+
+        // Safety net: force exit if shutdown hangs longer than 5 seconds
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            qWarning() << "[SHUTDOWN] Timeout after 5s — forcing exit";
+            _exit(0);
+        }).detach();
+
         std::signal(SIGSEGV, shutdownCrashHandler);
         std::signal(SIGABRT, shutdownCrashHandler);
         window.performQuit();
         AudioDeviceManager::instance()->stopMonitoring();
 #ifdef Q_OS_MACOS
         AudioProcessTap::instance()->stop();
+        qDebug() << "[SHUTDOWN] ProcessTap stopped";
 #endif
+        // Close DB explicitly before QCoreApplication destructs
+        // (prevents "QSqlDatabase requires a QCoreApplication" warning)
+        LibraryDatabase::instance()->close();
+        qDebug() << "[SHUTDOWN] Database closed";
+
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         qDebug() << "=== aboutToQuit: shutdown complete ===";
     });

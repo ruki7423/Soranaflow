@@ -20,107 +20,221 @@ echo "  → Compiling AppleScript..."
 
 osacompile -o "$OUTPUT_APP" <<'APPLESCRIPT'
 -- Sorana Flow Uninstaller
--- Works on macOS 13.0+
+-- macOS 13.0+
 
 on run
     set appName to "Sorana Flow"
     set appPath to "/Applications/Sorana Flow.app"
 
-    -- Check if app is running
-    tell application "System Events"
-        set isRunning to (exists (processes whose name is "SoranaFlow"))
-    end tell
+    -- Check if app is running (graceful: if System Events access is denied, skip the check)
+    set isRunning to false
+    try
+        tell application "System Events"
+            set isRunning to (exists (processes whose name is "SoranaFlow"))
+        end tell
+    end try
 
     if isRunning then
-        display dialog appName & " is currently running." & return & return & ¬
+        display dialog "Sorana Flow가 실행 중입니다." & return & ¬
+            "Sorana Flow is currently running." & return & return & ¬
+            "앱을 종료한 후 다시 시도해 주세요." & return & ¬
             "Please quit the app before uninstalling." ¬
-            buttons {"OK"} default button "OK" ¬
+            buttons {"확인 / OK"} default button "확인 / OK" ¬
             with title "Sorana Flow Uninstaller" with icon caution
         return
     end if
 
     -- Confirmation dialog
     set userChoice to display dialog ¬
-        "This will completely uninstall " & appName & " and remove all associated data:" & return & return & ¬
-        "  • Application from /Applications" & return & ¬
-        "  • Library database and settings" & return & ¬
-        "  • Album art and artist image caches" & return & ¬
-        "  • Saved window state" & return & return & ¬
+        "Sorana Flow 및 관련 데이터를 삭제합니다:" & return & ¬
+        "This will uninstall Sorana Flow and remove all associated data:" & return & return & ¬
+        "  • /Applications/Sorana Flow.app" & return & ¬
+        "  • 설정 및 라이브러리 / Settings & library database" & return & ¬
+        "  • 캐시 / Caches" & return & ¬
+        "  • 로그 / Logs" & return & ¬
+        "  • 저장된 윈도우 상태 / Saved window state" & return & return & ¬
+        "관리자 암호가 필요할 수 있습니다." & return & ¬
+        "You may be prompted for your administrator password." & return & return & ¬
+        "음악 파일은 삭제되지 않습니다." & return & ¬
         "Your music files will NOT be touched." ¬
-        buttons {"Cancel", "Uninstall"} default button "Cancel" ¬
+        buttons {"취소 / Cancel", "삭제 / Uninstall"} default button "취소 / Cancel" ¬
         with title "Sorana Flow Uninstaller" with icon caution
 
-    if button returned of userChoice is "Cancel" then
+    if button returned of userChoice is "취소 / Cancel" then
         return
     end if
 
-    -- Paths to remove
     set homePath to POSIX path of (path to home folder)
     set removedItems to {}
+    set failedItems to {}
 
-    -- 1. App bundle
-    set appExists to (do shell script "test -d " & quoted form of appPath & " && echo yes || echo no")
-    if appExists is "yes" then
-        do shell script "rm -rf " & quoted form of appPath
-        set end of removedItems to "Application bundle"
+    -- 1. App bundle: /Applications/Sorana Flow.app (requires admin privileges)
+    if myExists(appPath, "d") then
+        try
+            do shell script "rm -rf " & quoted form of appPath with administrator privileges
+            set end of removedItems to "Application bundle"
+        on error errMsg
+            try
+                do shell script "rm -rf " & quoted form of appPath
+                set end of removedItems to "Application bundle"
+            on error
+                set end of failedItems to "Application bundle (" & errMsg & ")"
+            end try
+        end try
     end if
 
-    -- 2. Application Support data (library.db)
-    set dataPath to homePath & "Library/Application Support/SoranaFlow"
-    set dataExists to (do shell script "test -d " & quoted form of dataPath & " && echo yes || echo no")
-    if dataExists is "yes" then
-        do shell script "rm -rf " & quoted form of dataPath
-        set end of removedItems to "Library database"
+    -- 2. Application Support: ~/Library/Application Support/SoranaFlow/
+    set p to homePath & "Library/Application Support/SoranaFlow"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "Settings & library (Application Support)"
+        on error errMsg
+            set end of failedItems to "Application Support (" & errMsg & ")"
+        end try
     end if
 
-    -- 3. Preferences (settings, bookmarks, Tidal tokens)
-    set prefsPath to homePath & "Library/Preferences/com.soranaflow.app.plist"
-    set prefsExists to (do shell script "test -f " & quoted form of prefsPath & " && echo yes || echo no")
-    if prefsExists is "yes" then
-        do shell script "rm -f " & quoted form of prefsPath
-        -- Also clear cached preferences from cfprefsd
-        do shell script "defaults delete com.soranaflow.app 2>/dev/null || true"
-        set end of removedItems to "Preferences and settings"
+    -- 3. Cache: ~/Library/Caches/SoranaFlow/
+    set p to homePath & "Library/Caches/SoranaFlow"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "Caches (SoranaFlow)"
+        on error errMsg
+            set end of failedItems to "Caches SoranaFlow (" & errMsg & ")"
+        end try
     end if
 
-    -- 4. Caches (album art, artist images)
-    set cachePath to homePath & "Library/Caches/SoranaFlow"
-    set cacheExists to (do shell script "test -d " & quoted form of cachePath & " && echo yes || echo no")
-    if cacheExists is "yes" then
-        do shell script "rm -rf " & quoted form of cachePath
-        set end of removedItems to "Caches (album art, artist images)"
+    -- 4. Cache: ~/Library/Caches/com.soranaflow.app/
+    set p to homePath & "Library/Caches/com.soranaflow.app"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "Caches (com.soranaflow.app)"
+        on error errMsg
+            set end of failedItems to "Caches com.soranaflow.app (" & errMsg & ")"
+        end try
     end if
 
-    -- 5. Saved Application State
-    set statePath to homePath & "Library/Saved Application State/com.soranaflow.app.savedState"
-    set stateExists to (do shell script "test -d " & quoted form of statePath & " && echo yes || echo no")
-    if stateExists is "yes" then
-        do shell script "rm -rf " & quoted form of statePath
-        set end of removedItems to "Saved application state"
+    -- 5. Saved Application State: ~/Library/Saved Application State/com.soranaflow.app.savedState/
+    set p to homePath & "Library/Saved Application State/com.soranaflow.app.savedState"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "Saved application state"
+        on error errMsg
+            set end of failedItems to "Saved state (" & errMsg & ")"
+        end try
+    end if
+
+    -- 6. Logs: ~/Library/Logs/SoranaFlow/
+    set p to homePath & "Library/Logs/SoranaFlow"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "Logs"
+        on error errMsg
+            set end of failedItems to "Logs (" & errMsg & ")"
+        end try
+    end if
+
+    -- 7. Preferences: ~/Library/Preferences/com.soranaflow.app.plist (Sparkle only)
+    -- SAFE: Only this clean plist. NEVER touch polluted plists
+    -- (com.soranaflow.Sorana Flow.plist, com.soranaflow.SoranaFlow.plist)
+    set p to homePath & "Library/Preferences/com.soranaflow.app.plist"
+    if myExists(p, "f") then
+        try
+            do shell script "rm -f " & quoted form of p
+            set end of removedItems to "Preferences (com.soranaflow.app.plist)"
+        on error errMsg
+            set end of failedItems to "Preferences (" & errMsg & ")"
+        end try
+    end if
+
+    -- 8. HTTP Storages: ~/Library/HTTPStorages/com.soranaflow.app/
+    set p to homePath & "Library/HTTPStorages/com.soranaflow.app"
+    if myExists(p, "d") then
+        try
+            do shell script "rm -rf " & quoted form of p
+            set end of removedItems to "HTTP storages"
+        on error errMsg
+            set end of failedItems to "HTTP storages (" & errMsg & ")"
+        end try
     end if
 
     -- Completion dialog
-    if (count of removedItems) is 0 then
-        display dialog appName & " was not found on this system." & return & return & ¬
+    if (count of removedItems) is 0 and (count of failedItems) is 0 then
+        display dialog "Sorana Flow가 이 시스템에서 발견되지 않았습니다." & return & ¬
+            "Sorana Flow was not found on this system." & return & return & ¬
+            "삭제된 항목이 없습니다." & return & ¬
             "Nothing was removed." ¬
-            buttons {"OK"} default button "OK" ¬
+            buttons {"확인 / OK"} default button "확인 / OK" ¬
             with title "Sorana Flow Uninstaller"
     else
-        set itemList to ""
-        repeat with anItem in removedItems
-            set itemList to itemList & "  ✓ " & anItem & return
-        end repeat
+        set msg to ""
 
-        display dialog appName & " has been uninstalled." & return & return & ¬
-            "Removed:" & return & itemList & return & ¬
-            "Your music files were not modified." ¬
-            buttons {"OK"} default button "OK" ¬
-            with title "Sorana Flow Uninstaller"
+        if (count of removedItems) > 0 then
+            set itemList to ""
+            repeat with anItem in removedItems
+                set itemList to itemList & "  ✓ " & anItem & return
+            end repeat
+            set msg to "삭제 완료 / Removed:" & return & itemList
+        end if
+
+        if (count of failedItems) > 0 then
+            set failList to ""
+            repeat with anItem in failedItems
+                set failList to failList & "  ✗ " & anItem & return
+            end repeat
+            set msg to msg & return & "삭제 실패 / Failed:" & return & failList
+        end if
+
+        if (count of failedItems) is 0 then
+            display dialog "Sorana Flow가 삭제되었습니다." & return & ¬
+                "Sorana Flow has been uninstalled." & return & return & ¬
+                msg & return & ¬
+                "음악 파일은 변경되지 않았습니다." & return & ¬
+                "Your music files were not modified." ¬
+                buttons {"확인 / OK"} default button "확인 / OK" ¬
+                with title "Sorana Flow Uninstaller"
+        else
+            display dialog "일부 항목을 삭제하지 못했습니다." & return & ¬
+                "Some items could not be removed." & return & return & ¬
+                msg & return & ¬
+                "수동으로 삭제해 주세요." & return & ¬
+                "Please remove failed items manually." ¬
+                buttons {"확인 / OK"} default button "확인 / OK" ¬
+                with title "Sorana Flow Uninstaller" with icon caution
+        end if
     end if
 end run
+
+on myExists(posixPath, fileType)
+    try
+        set cmd to "test -" & fileType & " " & quoted form of posixPath & " && echo yes || echo no"
+        set result to do shell script cmd
+        return result is "yes"
+    on error
+        return false
+    end try
+end myExists
 APPLESCRIPT
 
 echo "  ✓ AppleScript compiled"
+
+# ── Rename binary from "applet" to proper name ────────────────────
+# osacompile always creates Contents/MacOS/applet. macOS TCC (Full Disk
+# Access, Automation, etc.) shows this binary name. Rename it so the
+# user sees "SoranaFlow Uninstaller" instead of "applet".
+echo "  → Renaming binary..."
+mv "$OUTPUT_APP/Contents/MacOS/applet" "$OUTPUT_APP/Contents/MacOS/SoranaFlow Uninstaller"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable 'SoranaFlow Uninstaller'" \
+    "$OUTPUT_APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName 'Sorana Flow Uninstaller'" \
+    "$OUTPUT_APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier 'com.soranaflow.uninstaller'" \
+    "$OUTPUT_APP/Contents/Info.plist"
+echo "  ✓ Binary renamed to 'SoranaFlow Uninstaller'"
 
 # ── Copy app icon to uninstaller ────────────────────────────────────
 if [ -d "$SOURCE_APP" ]; then
@@ -140,4 +254,5 @@ echo "  Uninstaller built successfully"
 echo "═══════════════════════════════════════════════════"
 echo ""
 echo "  Output: $OUTPUT_APP"
+echo "  Binary: $OUTPUT_APP/Contents/MacOS/SoranaFlow Uninstaller"
 echo ""

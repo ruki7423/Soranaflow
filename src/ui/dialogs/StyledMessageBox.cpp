@@ -81,10 +81,13 @@ void StyledMessageBox::setupUi()
     m_messageLabel = new QLabel(container);
     m_messageLabel->setAlignment(Qt::AlignCenter);
     m_messageLabel->setWordWrap(true);
-    m_messageLabel->setMinimumHeight(40);
     m_messageLabel->setMaximumWidth(300);
+    // Set font via setFont() so font() returns correct size for sizeHint/layout
+    QFont msgFont = m_messageLabel->font();
+    msgFont.setPixelSize(14);
+    m_messageLabel->setFont(msgFont);
     m_messageLabel->setStyleSheet(QStringLiteral(
-        "font-size: 14px; color: %1; background: transparent; padding: 4px 0px;"
+        "color: %1; background: transparent; padding: 4px 0px;"
     ).arg(tc.foregroundSecondary));
     layout->addWidget(m_messageLabel, 0, Qt::AlignCenter);
     layout->addSpacing(28);

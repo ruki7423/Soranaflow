@@ -227,6 +227,7 @@ struct MusicKitWebViewPrivate {
 
     ~MusicKitWebViewPrivate() {
         if (webView) {
+            [webView stopLoading];
             [webView.configuration.userContentController removeAllScriptMessageHandlers];
             [webView removeFromSuperview];
             webView = nil;
@@ -254,7 +255,15 @@ MusicKitPlayer::MusicKitPlayer(QObject* parent)
 // ── cleanup — explicit shutdown before app exit ─────────────────────
 void MusicKitPlayer::cleanup()
 {
+    if (m_cleanedUp) return;
+    m_cleanedUp = true;
+    qDebug() << "[MusicKitPlayer] cleanup START";
     if (m_wk) {
+        // Stop loading FIRST — prevents WKWebView dealloc from blocking
+        // on active network requests or media buffering
+        if (m_wk->webView)
+            [m_wk->webView stopLoading];
+
         if (m_ready)
             runJS(QStringLiteral("if(music) music.stop()"));
 
@@ -268,6 +277,7 @@ void MusicKitPlayer::cleanup()
     m_ready = false;
     m_initialized = false;
     m_webViewReady = false;
+    qDebug() << "[MusicKitPlayer] cleanup DONE";
 }
 
 // ── Destructor ──────────────────────────────────────────────────────
@@ -379,8 +389,10 @@ void MusicKitPlayer::play(const QString& songId)
         m_pendingSongId = songId;
         if (m_pendingUserToken.isEmpty()) {
             qDebug() << "[MusicKitPlayer] No token yet — queuing song, waiting for token";
+            emit playbackStateChanged(false); // signal UI: not playing yet
             return;
         }
+        qDebug() << "[MusicKitPlayer] Token available, creating WebView for queued song";
         ensureWebView();
         return;
     }
@@ -540,7 +552,10 @@ void MusicKitPlayer::injectMusicUserToken(const QString& token)
         qDebug() << "[MusicKitPlayer] WebView is null, storing token";
         m_pendingUserToken = token;
         if (!m_initialized) {
-            qDebug() << "[MusicKitPlayer] Token received — creating WebView with token in HTML";
+            if (!m_pendingSongId.isEmpty())
+                qDebug() << "[MusicKitPlayer] Token received — creating WebView (pending song:" << m_pendingSongId << ")";
+            else
+                qDebug() << "[MusicKitPlayer] Token received — creating WebView with token in HTML";
             ensureWebView();
         }
         return;
@@ -837,13 +852,41 @@ async function configureMusicKit() {
         music.bitrate = MusicKit.PlaybackBitrate.HIGH;
         log('[MusicKit] Bitrate set to HIGH (256kbps)');
 
-        try {
-            msg('authWillPrompt', true);
-            await music.authorize();
-            log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
-        } catch (authErr) {
-            log('[MusicKit] authorize() error (non-fatal): ' + authErr);
+        // If token was in configure() but isAuthorized is still false,
+        // try setting it directly on the instance
+        if (!music.isAuthorized && __musicUserToken) {
+            try {
+                music.musicUserToken = __musicUserToken;
+                log('[MusicKit] Set musicUserToken directly on instance (length: ' + __musicUserToken.length + ')');
+            } catch (tokenErr) {
+                log('[MusicKit] musicUserToken direct set failed (read-only): ' + tokenErr);
+            }
         }
+
+        if (music.isAuthorized) {
+            log('[MusicKit] Already authorized — skipping authorize()');
+        } else if (__musicUserToken) {
+            // Token present but isAuthorized still false — authorize() may succeed silently
+            log('[MusicKit] Token present but not yet authorized — calling authorize()');
+            try {
+                msg('authWillPrompt', true);
+                await music.authorize();
+                log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
+            } catch (authErr) {
+                log('[MusicKit] authorize() error (non-fatal): ' + authErr);
+            }
+        } else {
+            // No token at all — first-time user, authorize popup expected
+            log('[MusicKit] No token — calling authorize() for first-time setup');
+            try {
+                msg('authWillPrompt', true);
+                await music.authorize();
+                log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
+            } catch (authErr) {
+                log('[MusicKit] authorize() error (non-fatal): ' + authErr);
+            }
+        }
+        log('[MusicKit] Auth check done — isAuthorized: ' + music.isAuthorized);
 
         // Event listeners
         music.addEventListener('playbackStateDidChange', function(event) {
@@ -990,8 +1033,27 @@ async function playSong(songId) {
         log('[MusicKit] Setting queue...');
         await music.setQueue({ song: songId });
         log('[MusicKit] Calling music.play()...');
-        await music.play();
+        try {
+            await music.play();
+        } catch (playErr) {
+            log('[MusicKit] play() failed: ' + playErr + ' — retrying in 1s...');
+            await new Promise(function(r) { setTimeout(r, 1000); });
+            await music.play();
+        }
         log('[MusicKit] music.play() returned, state: ' + music.playbackState);
+
+        // Stall recovery: if stuck in loading/stalled after 5s, retry play
+        setTimeout(function() {
+            if (!music) return;
+            var st = music.playbackState;
+            if (st === MusicKit.PlaybackStates.stalled ||
+                st === MusicKit.PlaybackStates.loading) {
+                log('[MusicKit] Stall detected after 5s (state=' + st + ') — auto-recovering');
+                music.play().catch(function(e) {
+                    log('[MusicKit] Stall recovery failed: ' + e);
+                });
+            }
+        }, 5000);
 
     } catch (err) {
         log('[MusicKit] PLAY ERROR: ' + err.name + ': ' + err.message);

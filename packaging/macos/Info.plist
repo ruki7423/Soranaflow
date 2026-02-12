@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.soranaflow.app</string>
     <key>CFBundleVersion</key>
-    <string>1.4.3</string>
+    <string>@MACOSX_BUNDLE_BUNDLE_VERSION@</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.4.3</string>
+    <string>@MACOSX_BUNDLE_SHORT_VERSION_STRING@</string>
     <key>CFBundleExecutable</key>
     <string>SoranaFlow</string>
     <key>CFBundleIconFile</key>

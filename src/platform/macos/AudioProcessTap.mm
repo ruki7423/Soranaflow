@@ -62,27 +62,65 @@ static AudioObjectID translatePIDToProcessObject(pid_t pid)
     return processObj;
 }
 
-static QVector<pid_t> findChildPids(pid_t parentPid)
+static QVector<pid_t> findDescendantPids(pid_t rootPid)
 {
-    QVector<pid_t> children;
+    // Collect ALL PIDs on the system once
     int bufSize = proc_listallpids(nullptr, 0);
-    if (bufSize <= 0) return children;
+    if (bufSize <= 0) return {};
 
     std::vector<pid_t> allPids(bufSize);
     int count = proc_listallpids(allPids.data(), bufSize * (int)sizeof(pid_t));
-    if (count <= 0) return children;
+    if (count <= 0) return {};
+
+    // Get our UID for matching XPC services
+    uid_t myUid = getuid();
+
+    // Build parent→children map AND collect WebKit XPC services
+    QHash<pid_t, QVector<pid_t>> childMap;
+    QVector<pid_t> webkitXpcPids;
 
     for (int i = 0; i < count; ++i) {
+        if (allPids[i] <= 0) continue;
         struct proc_bsdinfo info;
         int ret = proc_pidinfo(allPids[i], PROC_PIDTBSDINFO, 0,
                                &info, sizeof(info));
-        if (ret == (int)sizeof(info)
-            && info.pbi_ppid == (uint32_t)parentPid)
-        {
-            children.append(allPids[i]);
+        if (ret != (int)sizeof(info)) continue;
+
+        childMap[info.pbi_ppid].append(allPids[i]);
+
+        // WebKit XPC services are parented by launchd (PID 1) but run as our user.
+        // Find them by path and UID match.
+        if (info.pbi_ppid == 1 && info.pbi_uid == myUid) {
+            char pathBuf[PROC_PIDPATHINFO_MAXSIZE];
+            if (proc_pidpath(allPids[i], pathBuf, sizeof(pathBuf)) > 0) {
+                QString path = QString::fromUtf8(pathBuf);
+                if (path.contains(QStringLiteral("WebKit.GPU")) ||
+                    path.contains(QStringLiteral("WebKit.WebContent")))
+                {
+                    webkitXpcPids.append(allPids[i]);
+                    fprintf(stderr, "[ProcessTap] Found WebKit XPC PID: %d — %s\n",
+                            allPids[i], pathBuf);
+                }
+            }
         }
     }
-    return children;
+
+    // BFS to collect all descendants (children, grandchildren, etc.)
+    QVector<pid_t> result;
+    QVector<pid_t> queue = childMap.value(rootPid);
+    while (!queue.isEmpty()) {
+        pid_t pid = queue.takeFirst();
+        result.append(pid);
+        queue.append(childMap.value(pid));
+    }
+
+    // Add WebKit XPC services (not descendants but related)
+    for (pid_t xpc : webkitXpcPids) {
+        if (!result.contains(xpc))
+            result.append(xpc);
+    }
+
+    return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -94,7 +132,7 @@ struct TapIOData {
     DSPPipeline*       pipeline  = nullptr;
     std::vector<float> interleaved;      // pre-allocated
     int                channels  = 2;
-    std::atomic<bool>  dspActive{false}; // when false, IOProc writes silence (standby)
+    std::atomic<bool>  dspActive{false}; // when false, IOProc does passthrough (standby)
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -195,11 +233,28 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
     if (!outOutputData || outOutputData->mNumberBuffers == 0)
         return noErr;
 
-    // ── Standby mode: DSP inactive → write silence and return ────────
+    // ── Standby mode: DSP inactive → passthrough (copy input to output) ──
     if (!io->dspActive.load(std::memory_order_relaxed)) {
-        for (UInt32 i = 0; i < outOutputData->mNumberBuffers; ++i)
-            memset(outOutputData->mBuffers[i].mData, 0,
-                   outOutputData->mBuffers[i].mDataByteSize);
+        // CATapMuted: we must write to output or user hears nothing
+        if (inInputData && inInputData->mNumberBuffers > 0) {
+            UInt32 bufs = std::min(inInputData->mNumberBuffers,
+                                   outOutputData->mNumberBuffers);
+            for (UInt32 i = 0; i < bufs; ++i) {
+                UInt32 bytes = std::min(inInputData->mBuffers[i].mDataByteSize,
+                                        outOutputData->mBuffers[i].mDataByteSize);
+                memcpy(outOutputData->mBuffers[i].mData,
+                       inInputData->mBuffers[i].mData, bytes);
+            }
+            // Zero any remaining output buffers
+            for (UInt32 i = bufs; i < outOutputData->mNumberBuffers; ++i)
+                memset(outOutputData->mBuffers[i].mData, 0,
+                       outOutputData->mBuffers[i].mDataByteSize);
+        } else {
+            for (UInt32 i = 0; i < outOutputData->mNumberBuffers; ++i)
+                memset(outOutputData->mBuffers[i].mData, 0,
+                       outOutputData->mBuffers[i].mDataByteSize);
+        }
+        g_tapFrameCounter.fetch_add(1, std::memory_order_relaxed);
         return noErr;
     }
 
@@ -234,8 +289,18 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
         const UInt32 totalSamples = framesPerBuf * (UInt32)ch;
 
         float* buf = io->interleaved.data();
-        if (io->interleaved.size() < totalSamples)
-            return noErr;  // safety — buffer too small (should never happen)
+        if (io->interleaved.size() < totalSamples) {
+            // Safety — buffer too small: passthrough raw input to output
+            UInt32 bufs = std::min(inInputData->mNumberBuffers,
+                                    outOutputData->mNumberBuffers);
+            for (UInt32 i = 0; i < bufs; ++i) {
+                UInt32 bytes = std::min(inInputData->mBuffers[i].mDataByteSize,
+                                        outOutputData->mBuffers[i].mDataByteSize);
+                memcpy(outOutputData->mBuffers[i].mData,
+                       inInputData->mBuffers[i].mData, bytes);
+            }
+            return noErr;
+        }
 
         // Interleave input channels
         for (UInt32 f = 0; f < framesPerBuf; ++f)
@@ -274,10 +339,11 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
             }
         }
 
-        // Write SILENCE to output (CATapUnmuted: audio plays via direct path)
-        for (UInt32 c = 0; c < outOutputData->mNumberBuffers; ++c)
-            memset(outOutputData->mBuffers[c].mData, 0,
-                   outOutputData->mBuffers[c].mDataByteSize);
+        // CATapMuted: de-interleave DSP-processed audio back to output buffers
+        for (UInt32 f = 0; f < framesPerBuf; ++f)
+            for (int c = 0; c < ch; ++c)
+                static_cast<float*>(outOutputData->mBuffers[c].mData)[f] =
+                    buf[f * ch + c];
 
         // ── Audio flow diagnostic: check input and DSP-processed peaks ──────
         {
@@ -339,9 +405,15 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
             fprintf(stderr, "[ProcessTap] WARNING: DSP pipeline is null, audio passing through unprocessed\n");
         }
 
-        // Write SILENCE to output (CATapUnmuted: audio plays via direct path)
-        memset(outOutputData->mBuffers[0].mData, 0,
-               outOutputData->mBuffers[0].mDataByteSize);
+        // CATapMuted: write DSP-processed audio to output
+        if (io->pipeline && io->interleaved.size() >= totalSamples) {
+            memcpy(outOutputData->mBuffers[0].mData,
+                   io->interleaved.data(),
+                   frames * ch * sizeof(float));
+        } else {
+            // No DSP pipeline — passthrough: copy original input to output
+            memcpy(outOutputData->mBuffers[0].mData, inBuf, bytes);
+        }
 
         // ── DSP Verification: detect audio and count frames ─────────────
         g_tapFrameCounter.fetch_add(frames, std::memory_order_relaxed);
@@ -364,12 +436,19 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
             }
         }
     }
-    // ── Unexpected layout — write silence ────────────────
+    // ── Unexpected layout — passthrough best-effort ────────────────
     else {
-        for (UInt32 i = 0; i < outOutputData->mNumberBuffers; ++i) {
+        UInt32 bufs = std::min(inInputData->mNumberBuffers,
+                               outOutputData->mNumberBuffers);
+        for (UInt32 i = 0; i < bufs; ++i) {
+            UInt32 bytes = std::min(inInputData->mBuffers[i].mDataByteSize,
+                                    outOutputData->mBuffers[i].mDataByteSize);
+            memcpy(outOutputData->mBuffers[i].mData,
+                   inInputData->mBuffers[i].mData, bytes);
+        }
+        for (UInt32 i = bufs; i < outOutputData->mNumberBuffers; ++i)
             memset(outOutputData->mBuffers[i].mData, 0,
                    outOutputData->mBuffers[i].mDataByteSize);
-        }
     }
 
     return noErr;
@@ -469,7 +548,7 @@ void AudioProcessTap::prepareForPlayback()
 
         // ── 1. Create CATapDescription (per-process → global fallback) ──
         pid_t myPid = getpid();
-        QVector<pid_t> children = findChildPids(myPid);
+        QVector<pid_t> children = findDescendantPids(myPid);
 
         NSMutableArray* processObjects = [NSMutableArray array];
         AudioObjectID myObj = translatePIDToProcessObject(myPid);
@@ -491,7 +570,7 @@ void AudioProcessTap::prepareForPlayback()
             tapDesc = [[CATapDescription alloc]
                 initStereoMixdownOfProcesses:processObjects];
             qDebug() << "[ProcessTap] Prepare: per-process tap,"
-                     << (int)processObjects.count << "processes";
+                     << (int)processObjects.count << "processes (self + descendants)";
         } else {
             tapDesc = [[CATapDescription alloc]
                 initStereoGlobalTapButExcludeProcesses:@[]];
@@ -499,7 +578,8 @@ void AudioProcessTap::prepareForPlayback()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        tapDesc.muteBehavior = CATapUnmuted;
+        tapDesc.muteBehavior = CATapMuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapMuted (DSP routes to output)";
 
         NSUUID* uuid = [NSUUID UUID];
         tapDesc.UUID = uuid;
@@ -698,7 +778,7 @@ bool AudioProcessTap::start()
 
         // ── 1. Create CATapDescription (per-process → global fallback) ──
         pid_t myPid = getpid();
-        QVector<pid_t> children = findChildPids(myPid);
+        QVector<pid_t> children = findDescendantPids(myPid);
 
         NSMutableArray* processObjects = [NSMutableArray array];
         AudioObjectID myObj = translatePIDToProcessObject(myPid);
@@ -720,7 +800,7 @@ bool AudioProcessTap::start()
             tapDesc = [[CATapDescription alloc]
                 initStereoMixdownOfProcesses:processObjects];
             qDebug() << "[ProcessTap] Per-process tap:"
-                     << (int)processObjects.count << "processes";
+                     << (int)processObjects.count << "processes (self + descendants)";
         } else {
             tapDesc = [[CATapDescription alloc]
                 initStereoGlobalTapButExcludeProcesses:@[]];
@@ -728,9 +808,9 @@ bool AudioProcessTap::start()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        // CATapUnmuted: monitoring mode — audio goes direct to speakers
-        // We get a low-level copy for visualization/metering only
-        tapDesc.muteBehavior = CATapUnmuted;
+        // CATapMuted: DSP mode — original audio muted, IOProc routes processed audio to output
+        tapDesc.muteBehavior = CATapMuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapMuted (DSP routes to output)";
 
         // Generate a stable UUID for the tap
         NSUUID* uuid = [NSUUID UUID];

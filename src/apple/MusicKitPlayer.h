@@ -73,6 +73,7 @@ private:
     bool m_ready = false;
     bool m_initialized = false;
     bool m_webViewReady = false;
+    bool m_cleanedUp = false;
     QString m_pendingSongId;
     QString m_pendingUserToken;
 };

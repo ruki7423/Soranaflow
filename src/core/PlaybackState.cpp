@@ -543,7 +543,7 @@ void PlaybackState::moveTo(int fromIndex, int toIndex)
 // ── saveQueueToSettings ─────────────────────────────────────────────
 void PlaybackState::saveQueueToSettings()
 {
-    QSettings settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"));
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
 
     settings.beginWriteArray(QStringLiteral("queue/tracks"), m_queue.size());
     for (int i = 0; i < m_queue.size(); ++i) {
@@ -595,7 +595,7 @@ void PlaybackState::doSave()
         QElapsedTimer timer;
         timer.start();
 
-        QSettings settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"));
+        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
 
         settings.beginWriteArray(QStringLiteral("queue/tracks"), snapshot.size());
         for (int i = 0; i < snapshot.size(); ++i) {
@@ -631,7 +631,7 @@ void PlaybackState::restoreQueueFromSettings()
 {
     m_restoring = true;
 
-    QSettings settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"));
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
 
     int count = settings.beginReadArray(QStringLiteral("queue/tracks"));
     QVector<Track> tracks;

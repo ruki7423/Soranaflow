@@ -126,20 +126,30 @@ bool LibraryDatabase::open()
 
 void LibraryDatabase::close()
 {
+    bool readWasOpen = false, writeWasOpen = false;
     {
         QMutexLocker lock(&m_readMutex);
         if (m_readDb.isOpen()) {
             m_readDb.close();
+            readWasOpen = true;
         }
+        m_readDb = QSqlDatabase();  // drop reference before removeDatabase
     }
     {
         QMutexLocker lock(&m_writeMutex);
         if (m_db.isOpen()) {
             m_db.close();
+            writeWasOpen = true;
         }
+        m_db = QSqlDatabase();      // drop reference before removeDatabase
     }
-    QSqlDatabase::removeDatabase(QStringLiteral("library_read"));
-    QSqlDatabase::removeDatabase(QStringLiteral("library_write"));
+    // Only remove connections if they were actually open —
+    // prevents "QSqlDatabase requires QCoreApplication" when
+    // static destructor runs after QCoreApplication is gone
+    if (readWasOpen)
+        QSqlDatabase::removeDatabase(QStringLiteral("library_read"));
+    if (writeWasOpen)
+        QSqlDatabase::removeDatabase(QStringLiteral("library_write"));
 }
 
 // ── createTables ────────────────────────────────────────────────────
@@ -1748,10 +1758,8 @@ void LibraryDatabase::updateAlbumStatsIncremental(const QString& albumId)
     q.prepare(QStringLiteral(
         "UPDATE albums SET "
         "  total_tracks = (SELECT COUNT(*) FROM tracks WHERE album_id = ?), "
-        "  duration = (SELECT COALESCE(SUM(duration), 0) FROM tracks WHERE album_id = ?), "
-        "  year = (SELECT MIN(year) FROM tracks WHERE album_id = ? AND year > 0) "
+        "  duration = (SELECT COALESCE(SUM(duration), 0) FROM tracks WHERE album_id = ?) "
         "WHERE id = ?"));
-    q.addBindValue(albumId);
     q.addBindValue(albumId);
     q.addBindValue(albumId);
     q.addBindValue(albumId);

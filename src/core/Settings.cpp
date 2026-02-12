@@ -1,4 +1,35 @@
 #include "Settings.h"
+#include <QDir>
+#include <QFile>
+#include <QProcess>
+#include <QStandardPaths>
+
+// ── Settings INI path ───────────────────────────────────────────────
+// ~/Library/Application Support/SoranaFlow/settings.ini
+// Avoids ~/Library/Preferences/ entirely — no plist pollution possible.
+QString Settings::settingsPath()
+{
+    QDir dir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+             + QStringLiteral("/SoranaFlow"));
+    if (!dir.exists()) dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("settings.ini"));
+}
+
+// ── Allowlist: returns true if key belongs to our app ────────────────
+static bool isAppKey(const QString& key)
+{
+    return key.startsWith(QStringLiteral("audio/")) ||
+           key.startsWith(QStringLiteral("appearance/")) ||
+           key.startsWith(QStringLiteral("playback/")) ||
+           key.startsWith(QStringLiteral("library/")) ||
+           key.startsWith(QStringLiteral("dsp/")) ||
+           key.startsWith(QStringLiteral("vst/")) ||
+           key.startsWith(QStringLiteral("window/")) ||
+           key.startsWith(QStringLiteral("general/")) ||
+           key.startsWith(QStringLiteral("appleMusic/")) ||
+           key.startsWith(QStringLiteral("trackTable/")) ||
+           key.startsWith(QStringLiteral("SecurityBookmarks"));
+}
 
 // ── Singleton ───────────────────────────────────────────────────────
 Settings* Settings::instance()
@@ -10,8 +41,132 @@ Settings* Settings::instance()
 // ── Constructor ─────────────────────────────────────────────────────
 Settings::Settings(QObject* parent)
     : QObject(parent)
-    , m_settings(QStringLiteral("SoranaFlow"), QStringLiteral("SoranaFlow"))
+    , m_settings(settingsPath(), QSettings::IniFormat)
 {
+    qDebug() << "[Settings] INI path:" << m_settings.fileName();
+
+    // ── Migration: plist domains → INI (one-time) ───────────────────
+    // Priority: clean plist first (v1.4.4), then polluted domains.
+    // Only copies keys that don't already exist in the INI file.
+    if (!m_settings.contains(QStringLiteral("migration/iniMigrated"))) {
+        struct PlistDomain { const char* org; const char* app; };
+        PlistDomain domains[] = {
+            { "soranaflow", "app" },           // clean plist (v1.4.4)
+            { "SoranaFlow", "Sorana Flow" },   // polluted (original)
+            { "SoranaFlow", "SoranaFlow" },    // polluted (v1.4.3)
+        };
+
+        int totalCopied = 0;
+        for (const auto& d : domains) {
+            QSettings plist(QLatin1String(d.org), QLatin1String(d.app));
+            if (!plist.contains(QStringLiteral("library/folders"))
+                && !plist.contains(QStringLiteral("audio/volume")))
+                continue;
+
+            int copied = 0;
+            for (const QString& key : plist.allKeys()) {
+                if (isAppKey(key) && !m_settings.contains(key)) {
+                    m_settings.setValue(key, plist.value(key));
+                    ++copied;
+                }
+            }
+            if (copied > 0)
+                qDebug() << "[Settings] Migrated" << copied << "keys from"
+                         << QLatin1String(d.org) << "/" << QLatin1String(d.app);
+            totalCopied += copied;
+        }
+        if (totalCopied > 0)
+            qDebug() << "[Settings] Total migrated to INI:" << totalCopied << "keys";
+
+        m_settings.setValue(QStringLiteral("migration/iniMigrated"), true);
+    }
+
+    // ── Gapless fixup ───────────────────────────────────────────────
+    // Previous migration may have copied playback/gapless=false.
+    // Audiophile default should be true (gapless on).
+    if (!m_settings.contains(QStringLiteral("migration/gaplessFixed"))) {
+        if (!m_settings.value(QStringLiteral("playback/gapless"), true).toBool()) {
+            m_settings.setValue(QStringLiteral("playback/gapless"), true);
+            qDebug() << "[Settings] Gapless fixup: false → true";
+        }
+        m_settings.setValue(QStringLiteral("migration/gaplessFixed"), true);
+    }
+
+    // ── Purge app keys from ALL old plists ──────────────────────────
+    // CRITICAL: Polluted plists contain BOTH app keys and macOS system
+    // keys. Cleanup tools (CleanMyMac) deleting these break system prefs.
+    // Remove our keys so only system keys remain — safe to delete.
+    // Also purge the clean plist since we've moved to INI.
+    if (!m_settings.contains(QStringLiteral("migration/purgedAllPlists"))) {
+        struct OldDomain { const char* org; const char* app; const char* cfDomain; };
+        OldDomain oldDomains[] = {
+            { "soranaflow", "app",         "com.soranaflow.app" },
+            { "SoranaFlow", "Sorana Flow", "com.soranaflow.Sorana Flow" },
+            { "SoranaFlow", "SoranaFlow",  "com.soranaflow.SoranaFlow" },
+        };
+        for (const auto& od : oldDomains) {
+            QSettings old(QLatin1String(od.org), QLatin1String(od.app));
+            int removed = 0;
+            for (const QString& key : old.allKeys()) {
+                if (isAppKey(key) || key.startsWith(QStringLiteral("migration/"))) {
+                    old.remove(key);
+                    ++removed;
+                }
+            }
+            old.sync();
+            if (removed > 0)
+                qDebug() << "[Settings] Purged" << removed << "app keys from" << od.cfDomain;
+        }
+        // QSettings::remove() can't handle NSData keys (SecurityBookmarks,
+        // trackTable). Use 'defaults delete' as fallback for stubborn keys.
+        QProcess::execute(QStringLiteral("/bin/bash"), {QStringLiteral("-c"),
+            QStringLiteral(
+                "for domain in 'com.soranaflow.app' 'com.soranaflow.Sorana Flow' 'com.soranaflow.SoranaFlow'; do "
+                "  for key in $(defaults read \"$domain\" 2>/dev/null | "
+                "    grep -oE '\"(SecurityBookmarks|trackTable|migration)\\.[^\"]+\"' | tr -d '\"'); do "
+                "    defaults delete \"$domain\" \"$key\" 2>/dev/null; "
+                "  done; "
+                "done")
+        });
+
+        m_settings.setValue(QStringLiteral("migration/purgedAllPlists"), true);
+    }
+
+    // ── Delete polluted plist FILES ─────────────────────────────────
+    // These files have "soranaflow" in the name → third-party cleaners
+    // (CleanMyMac, AppCleaner) pattern-match and delete them, which
+    // destroys macOS system keys inside. The system keys are copies
+    // from GlobalPreferences → safe to delete the entire file.
+    // Sequence: defaults delete (twice, with sleep) → rm -f → killall
+    // cfprefsd needs time between delete and kill to flush its cache.
+    if (!m_settings.contains(QStringLiteral("migration/deletedPollutedPlists"))) {
+        QProcess::execute(QStringLiteral("/bin/bash"), {QStringLiteral("-c"),
+            QStringLiteral(
+                "cd ~/Library/Preferences; "
+                "for d in 'com.soranaflow.Sorana Flow' 'com.soranaflow.SoranaFlow' "
+                "  'com.sorana.flow' 'com.sorana.SoranaFlow' "
+                "  'com.sorana-audio.Sorana Flow' 'com.soranaflow.musickit-test' "
+                "  'com.soranaflow.app'; do "
+                "  defaults delete \"$d\" 2>/dev/null; "
+                "done; "
+                "sleep 1; "
+                "for d in 'com.soranaflow.Sorana Flow' 'com.soranaflow.SoranaFlow' "
+                "  'com.sorana.flow' 'com.sorana.SoranaFlow' "
+                "  'com.sorana-audio.Sorana Flow' 'com.soranaflow.musickit-test' "
+                "  'com.soranaflow.app'; do "
+                "  defaults delete \"$d\" 2>/dev/null; "
+                "  rm -f \"$d.plist\" 2>/dev/null; "
+                "done; "
+                "sleep 1; "
+                "killall cfprefsd 2>/dev/null; true")
+        });
+
+        m_settings.setValue(QStringLiteral("migration/deletedPollutedPlists"), true);
+        m_settings.sync();
+        qDebug() << "[Settings] Polluted plists cleanup complete";
+    }
+
+    m_settings.sync();
 }
 
 // ── Library Folders ─────────────────────────────────────────────────
@@ -742,4 +897,20 @@ QPoint Settings::windowPosition() const
 void Settings::setWindowPosition(const QPoint& pos)
 {
     m_settings.setValue(QStringLiteral("window/position"), pos);
+}
+
+// ── Generic access ──────────────────────────────────────────────────
+QVariant Settings::value(const QString& key, const QVariant& defaultValue) const
+{
+    return m_settings.value(key, defaultValue);
+}
+
+void Settings::setValue(const QString& key, const QVariant& val)
+{
+    m_settings.setValue(key, val);
+}
+
+void Settings::remove(const QString& key)
+{
+    m_settings.remove(key);
 }

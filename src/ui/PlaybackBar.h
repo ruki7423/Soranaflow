@@ -78,5 +78,6 @@ private:
 
     bool m_isMuted = false;
     bool m_queueVisible = false;
+    int m_volumeHideFill = -1;  // -1 = unset, forces first setStyleSheet call
     QString m_currentTrackPath;
 };

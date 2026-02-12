@@ -46,6 +46,7 @@ private:
     void updateNavStyles();
 
     bool m_collapsed = false;
+    bool m_foldersCollapsed = false;
     int m_activeIndex = 0;
     QVBoxLayout* m_mainLayout;
     QWidget* m_logoBar;
@@ -59,5 +60,8 @@ private:
     QVBoxLayout* m_libLayout = nullptr;
     QPropertyAnimation* m_collapseAnim;
     QLabel* m_logoLabel;
+    QLabel* m_folderArrow = nullptr;
+    QWidget* m_folderListContainer = nullptr;
+    QScrollArea* m_folderScrollArea = nullptr;
     QPushButton* m_collapsedSearchBtn = nullptr;
 };

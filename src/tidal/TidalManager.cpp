@@ -1,4 +1,5 @@
 #include "TidalManager.h"
+#include "../core/Settings.h"
 
 #include <QDebug>
 #include <QNetworkRequest>
@@ -904,7 +905,7 @@ void TidalManager::logout()
     m_userLoggedIn = false;
 
     // Clear saved tokens
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     settings.remove(QStringLiteral("Tidal/accessToken"));
     settings.remove(QStringLiteral("Tidal/refreshToken"));
     settings.remove(QStringLiteral("Tidal/tokenExpiry"));
@@ -916,7 +917,7 @@ void TidalManager::logout()
 
 void TidalManager::saveTokens()
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     settings.setValue(QStringLiteral("Tidal/accessToken"), m_userAccessToken);
     settings.setValue(QStringLiteral("Tidal/refreshToken"), m_userRefreshToken);
     settings.setValue(QStringLiteral("Tidal/tokenExpiry"), m_userTokenExpiry);
@@ -928,7 +929,7 @@ void TidalManager::saveTokens()
 
 void TidalManager::loadTokens()
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     m_userAccessToken = settings.value(QStringLiteral("Tidal/accessToken")).toString();
     m_userRefreshToken = settings.value(QStringLiteral("Tidal/refreshToken")).toString();
     m_userTokenExpiry = settings.value(QStringLiteral("Tidal/tokenExpiry")).toDateTime();

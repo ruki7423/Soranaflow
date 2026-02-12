@@ -1,7 +1,9 @@
 #include "AppleMusicManager.h"
 #include "MusicKitPlayer.h"
+#include "Settings.h"
 
 #include <QDebug>
+#include <QTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -55,14 +57,28 @@ AppleMusicManager::AppleMusicManager(QObject* parent)
     , d(new AppleMusicManagerPrivate)
     , m_network(new QNetworkAccessManager(this))
 {
-    // Do NOT auto-detect auth status — require manual Connect
-    d->authStatus = NotDetermined;
-    qDebug() << "[AppleMusicManager] Initialized — manual Connect required";
-
     // Detect storefront from locale (e.g., "us", "jp", "gb")
     QString country = QLocale::system().name().section('_', 1).toLower();
     d->storefront = country.isEmpty() ? QStringLiteral("us") : country;
     qDebug() << "AppleMusicManager: Storefront:" << d->storefront;
+
+    // Restore persisted token from previous session
+    QString savedToken = Settings::instance()->value(QStringLiteral("appleMusic/userToken")).toString();
+    if (!savedToken.isEmpty()) {
+        qDebug() << "[AppleMusicManager] Restored saved token, length:" << savedToken.length();
+        m_musicUserToken = savedToken;
+        d->authStatus = Authorized;
+
+        // Inject into MusicKitPlayer (triggers WebView pre-warm)
+        QTimer::singleShot(0, this, [this, savedToken]() {
+            MusicKitPlayer::instance()->injectMusicUserToken(savedToken);
+            emit authorizationStatusChanged(d->authStatus);
+            emit musicUserTokenReady(savedToken);
+        });
+    } else {
+        d->authStatus = NotDetermined;
+        qDebug() << "[AppleMusicManager] No saved token — manual Connect required";
+    }
 }
 
 AppleMusicManager::~AppleMusicManager()
@@ -195,6 +211,7 @@ void AppleMusicManager::disconnectAppleMusic()
 {
     qDebug() << "[AppleMusicManager] Disconnecting Apple Music";
     m_musicUserToken.clear();
+    Settings::instance()->remove(QStringLiteral("appleMusic/userToken"));
     d->authStatus = NotDetermined;
     emit authorizationStatusChanged(d->authStatus);
 
@@ -291,6 +308,10 @@ void AppleMusicManager::requestMusicUserToken()
                 qDebug() << "[AppleMusicManager] Music User Token obtained, length:" << tokenStr.length();
 
                 m_musicUserToken = tokenStr;
+
+                // Persist token so reconnect is instant on next launch
+                Settings::instance()->setValue(QStringLiteral("appleMusic/userToken"), tokenStr);
+                qDebug() << "[AppleMusicManager] Token persisted to Settings";
 
                 // Token success implies authorized — update status so UI shows "Connected"
                 if (d->authStatus != Authorized) {

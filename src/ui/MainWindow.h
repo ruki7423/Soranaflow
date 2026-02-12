@@ -113,6 +113,7 @@ private:
 
     QWidget* m_previousView = nullptr;
     bool m_initialized = false;
+    bool m_reallyQuit = false;
 
     // Inline scan progress bar
     QWidget* m_scanBar = nullptr;

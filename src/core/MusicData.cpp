@@ -277,19 +277,12 @@ void MusicDataProvider::reloadFromDatabase()
 
         int trackCount = db->trackCount();
 
-        // Skip album/artist queries during scan — they're always 0
-        // (rebuildAlbumsAndArtists runs only after scan completes)
-        bool scanning = LibraryScanner::instance()->isScanning();
-        QVector<Album>    dbAlbums;
-        QVector<Artist>   dbArtists;
-        QVector<Playlist> dbPlaylists;
-        if (!scanning) {
-            dbAlbums    = db->allAlbums();
-            dbArtists   = db->allArtists();
-            dbPlaylists = db->allPlaylists();
-        }
-        qDebug() << "[TIMING] MDP async DB queries:" << mdpTimer.elapsed() << "ms"
-                 << (scanning ? "(scan — albums/artists skipped)" : "");
+        // Always query albums/artists — keep cached data if DB returns 0
+        // (during scan the tables may be temporarily empty after DELETE)
+        QVector<Album>    dbAlbums    = db->allAlbums();
+        QVector<Artist>   dbArtists   = db->allArtists();
+        QVector<Playlist> dbPlaylists = db->allPlaylists();
+        qDebug() << "[TIMING] MDP async DB queries:" << mdpTimer.elapsed() << "ms";
 
         qDebug() << "MusicDataProvider::reloadFromDatabase (async) — tracks:" << trackCount
                  << "albums:" << dbAlbums.size() << "artists:" << dbArtists.size();
@@ -326,9 +319,20 @@ void MusicDataProvider::reloadFromDatabase()
                 QWriteLocker l(&m_lock);
                 m_useMockData = false;
                 m_tracks.clear();  // Clear cached tracks — lazy-loaded on demand
-                m_albums    = std::move(albums);
-                m_artists   = std::move(artists);
-                m_playlists = std::move(playlists);
+                // Keep cached albums/artists if DB returned 0 (scan in progress)
+                if (!albums.isEmpty()) {
+                    m_albums = std::move(albums);
+                } else if (!m_albums.isEmpty()) {
+                    qDebug() << "[MDP] Keeping cached" << m_albums.size() << "albums (DB returned 0)";
+                }
+                if (!artists.isEmpty()) {
+                    m_artists = std::move(artists);
+                } else if (!m_artists.isEmpty()) {
+                    qDebug() << "[MDP] Keeping cached" << m_artists.size() << "artists (DB returned 0)";
+                }
+                if (!playlists.isEmpty()) {
+                    m_playlists = std::move(playlists);
+                }
             }
             qDebug() << "MusicDataProvider: Reloaded"
                      << m_albums.size() << "albums," << m_artists.size() << "artists";

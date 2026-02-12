@@ -203,15 +203,31 @@ void AppSidebar::setupUI()
             "QScrollArea { background: transparent; border: none; }") +
             ThemeManager::instance()->scrollbarStyle());
 
-        m_mainLayout->addWidget(m_navScroll, 1);
+        m_navScroll->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        m_mainLayout->addWidget(m_navScroll, 0);
     }
 
     // ── 4. Library Folders Section ──────────────────────────────────
     {
         m_librarySection = new QWidget(this);
-        m_libLayout = new QVBoxLayout(m_librarySection);
-        m_libLayout->setContentsMargins(12, 8, 12, 8);
-        m_libLayout->setSpacing(2);
+        auto* sectionLayout = new QVBoxLayout(m_librarySection);
+        sectionLayout->setContentsMargins(12, 8, 12, 8);
+        sectionLayout->setSpacing(0);
+
+        // Clickable header with collapse arrow
+        auto* folderHeader = new QWidget(m_librarySection);
+        folderHeader->setObjectName(QStringLiteral("folderHeader"));
+        folderHeader->setCursor(Qt::PointingHandCursor);
+        auto* headerLayout = new QHBoxLayout(folderHeader);
+        headerLayout->setContentsMargins(0, 0, 0, 4);
+        headerLayout->setSpacing(4);
+
+        m_folderArrow = new QLabel(m_librarySection);
+        m_folderArrow->setFixedWidth(11);
+        QFont arrowFont = m_folderArrow->font();
+        arrowFont.setPixelSize(9);
+        m_folderArrow->setFont(arrowFont);
+        m_folderArrow->setStyleSheet(QStringLiteral("color: %1;").arg(c.foregroundMuted));
 
         auto* sectionLabel = new QLabel(tr("LIBRARY FOLDERS"), m_librarySection);
         sectionLabel->setObjectName(QStringLiteral("librarySectionLabel"));
@@ -219,14 +235,51 @@ void AppSidebar::setupUI()
         sectionFont.setPixelSize(11);
         sectionFont.setBold(true);
         sectionLabel->setFont(sectionFont);
-        sectionLabel->setStyleSheet(QStringLiteral("color: %1; padding-bottom: 4px;").arg(c.foregroundMuted));
+        sectionLabel->setStyleSheet(QStringLiteral("color: %1;").arg(c.foregroundMuted));
 
-        m_libLayout->addWidget(sectionLabel);
+        headerLayout->addWidget(m_folderArrow);
+        headerLayout->addWidget(sectionLabel);
+        headerLayout->addStretch();
+
+        folderHeader->setStyleSheet(QStringLiteral(
+            "#folderHeader:hover { background: rgba(255,255,255,0.05); border-radius: 4px; }"));
+        folderHeader->installEventFilter(this);
+
+        sectionLayout->addWidget(folderHeader);
+
+        // Container for folder buttons
+        m_folderListContainer = new QWidget;
+        m_libLayout = new QVBoxLayout(m_folderListContainer);
+        m_libLayout->setContentsMargins(0, 0, 0, 0);
+        m_libLayout->setSpacing(2);
+
+        // Scroll area wraps folder list for overflow
+        m_folderScrollArea = new QScrollArea(m_librarySection);
+        m_folderScrollArea->setWidget(m_folderListContainer);
+        m_folderScrollArea->setWidgetResizable(false);
+        m_folderScrollArea->setFrameShape(QFrame::NoFrame);
+        m_folderScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_folderScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        m_folderScrollArea->setStyleSheet(QStringLiteral(
+            "QScrollArea { background: transparent; border: none; }") +
+            ThemeManager::instance()->scrollbarStyle());
+
+        sectionLayout->addWidget(m_folderScrollArea, 1);
+
+        // Restore collapsed state
+        m_foldersCollapsed = Settings::instance()->value(
+            QStringLiteral("ui/folderSectionCollapsed"), false).toBool();
+        m_folderScrollArea->setVisible(!m_foldersCollapsed);
+        m_folderArrow->setText(m_foldersCollapsed
+            ? QStringLiteral("\u25B6") : QStringLiteral("\u25BC"));
 
         rebuildFolderButtons();
 
-        m_mainLayout->addWidget(m_librarySection);
+        m_mainLayout->addWidget(m_librarySection, 0);
     }
+
+    // Spacer pushes Settings to bottom
+    m_mainLayout->addStretch(1);
 
     // ── 5. Settings Button (bottom) ─────────────────────────────────
     {
@@ -590,18 +643,23 @@ void AppSidebar::updateNavStyles()
 // ═════════════════════════════════════════════════════════════════════
 void AppSidebar::rebuildFolderButtons()
 {
-    // Remove existing folder buttons
+    // Remove existing folder buttons and spacers
     for (auto* btn : m_folderButtons) {
         m_libLayout->removeWidget(btn);
         btn->deleteLater();
     }
     m_folderButtons.clear();
+    // Remove any leftover stretch/spacer items
+    while (m_libLayout->count()) {
+        auto* item = m_libLayout->takeAt(0);
+        delete item;
+    }
 
     QStringList folders = Settings::instance()->libraryFolders();
 
     if (folders.isEmpty()) {
         // Show a placeholder message
-        auto* placeholder = new QPushButton(m_librarySection);
+        auto* placeholder = new QPushButton(m_folderListContainer);
         placeholder->setText(QStringLiteral("No folders added"));
         placeholder->setEnabled(false);
         placeholder->setFlat(true);
@@ -619,13 +677,14 @@ void AppSidebar::rebuildFolderButtons()
         ).arg(ThemeManager::instance()->colors().foregroundMuted));
         m_libLayout->addWidget(placeholder);
         m_folderButtons.append(placeholder);
+        m_folderListContainer->adjustSize();
         return;
     }
 
     auto* tm = ThemeManager::instance();
     auto c = tm->colors();
     for (const QString& folder : folders) {
-        auto* folderBtn = new QPushButton(m_librarySection);
+        auto* folderBtn = new QPushButton(m_folderListContainer);
         // Show just the folder name, not the full path
         QFileInfo fi(folder);
         folderBtn->setText(fi.fileName().isEmpty() ? folder : fi.fileName());
@@ -658,6 +717,8 @@ void AppSidebar::rebuildFolderButtons()
         m_libLayout->addWidget(folderBtn);
         m_folderButtons.append(folderBtn);
     }
+
+    m_folderListContainer->adjustSize();
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -670,6 +731,16 @@ bool AppSidebar::eventFilter(QObject* obj, QEvent* event)
         if (widget && widget->property("logoClick").toBool()) {
             setActiveIndex(0);
             emit navigationChanged(0);
+            return true;
+        }
+        // Folder section header click → toggle collapse
+        if (widget && widget->objectName() == QStringLiteral("folderHeader")) {
+            m_foldersCollapsed = !m_foldersCollapsed;
+            m_folderScrollArea->setVisible(!m_foldersCollapsed);
+            m_folderArrow->setText(m_foldersCollapsed
+                ? QStringLiteral("\u25B6") : QStringLiteral("\u25BC"));
+            Settings::instance()->setValue(
+                QStringLiteral("ui/folderSectionCollapsed"), m_foldersCollapsed);
             return true;
         }
     }
@@ -736,15 +807,27 @@ void AppSidebar::refreshTheme()
         collapseBtn->setVisible(!m_collapsed);
     }
 
-    // Scrollbar
-    m_navScroll->setStyleSheet(QStringLiteral(
+    // Scrollbars
+    QString scrollStyle = QStringLiteral(
         "QScrollArea { background: transparent; border: none; }") +
-        tm->scrollbarStyle());
+        tm->scrollbarStyle();
+    m_navScroll->setStyleSheet(scrollStyle);
+    if (m_folderScrollArea)
+        m_folderScrollArea->setStyleSheet(scrollStyle);
 
-    // Library section label
+    // Library section label + arrow
     auto* sectionLabel = m_librarySection->findChild<QLabel*>(QStringLiteral("librarySectionLabel"));
     if (sectionLabel) {
-        sectionLabel->setStyleSheet(QStringLiteral("color: %1; padding-bottom: 4px;").arg(c.foregroundMuted));
+        sectionLabel->setStyleSheet(QStringLiteral("color: %1;").arg(c.foregroundMuted));
+    }
+    if (m_folderArrow) {
+        m_folderArrow->setStyleSheet(QStringLiteral("color: %1;").arg(c.foregroundMuted));
+    }
+    // Folder header hover
+    auto* folderHeader = m_librarySection->findChild<QWidget*>(QStringLiteral("folderHeader"));
+    if (folderHeader) {
+        folderHeader->setStyleSheet(QStringLiteral(
+            "#folderHeader:hover { background: %1; border-radius: 4px; }").arg(c.hover));
     }
 
     // Rebuild folder buttons (picks up any new folders and applies theme)

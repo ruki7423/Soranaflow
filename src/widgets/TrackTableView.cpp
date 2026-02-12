@@ -909,7 +909,7 @@ void TrackTableView::contextMenuEvent(QContextMenuEvent* event)
 
 void TrackTableView::saveColumnWidths()
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     settings.setValue(
         QStringLiteral("trackTable/%1/headerState").arg(m_config.settingsKey),
         horizontalHeader()->saveState());
@@ -917,7 +917,7 @@ void TrackTableView::saveColumnWidths()
 
 void TrackTableView::restoreColumnWidths()
 {
-    QSettings settings;
+    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
     const QByteArray state = settings.value(
         QStringLiteral("trackTable/%1/headerState").arg(m_config.settingsKey))
         .toByteArray();
