@@ -185,10 +185,11 @@ private:
     void loadFromDatabase();
 
     mutable QReadWriteLock m_lock;
-    QVector<Track>    m_tracks;
-    QVector<Album>    m_albums;
-    QVector<Artist>   m_artists;
-    QVector<Playlist> m_playlists;
+    QVector<Track>      m_tracks;
+    QVector<TrackIndex> m_trackIndexes;
+    QVector<Album>      m_albums;
+    QVector<Artist>     m_artists;
+    QVector<Playlist>   m_playlists;
 
     bool m_useMockData = true;
     bool m_firstLoadDone = false;

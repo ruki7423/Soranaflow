@@ -173,14 +173,7 @@ MusicDataProvider::MusicDataProvider(QObject* parent)
 
 QVector<Track> MusicDataProvider::allTracks() const {
     QReadLocker l(&m_lock);
-    if (m_tracks.isEmpty() && !m_useMockData) {
-        // Lazy-load from DB on demand (not kept in memory after post-scan reload)
-        l.unlock();
-        auto* db = LibraryDatabase::instance();
-        if (db) return db->allTracks();
-        return {};
-    }
-    return m_tracks;
+    return m_tracks;  // always return cache — populated by sync first-load or async reload
 }
 QVector<Album>    MusicDataProvider::allAlbums()    const { QReadLocker l(&m_lock); return m_albums; }
 QVector<Artist>   MusicDataProvider::allArtists()   const { QReadLocker l(&m_lock); return m_artists; }
@@ -188,9 +181,8 @@ QVector<Playlist> MusicDataProvider::allPlaylists() const { QReadLocker l(&m_loc
 
 QVector<TrackIndex> MusicDataProvider::allTrackIndexes() const
 {
-    auto* db = LibraryDatabase::instance();
-    if (!db) return {};
-    return db->allTrackIndexes();
+    QReadLocker l(&m_lock);
+    return m_trackIndexes;  // cached — populated by sync first-load or async reload
 }
 
 Album MusicDataProvider::albumById(const QString& id) const
@@ -264,8 +256,6 @@ void MusicDataProvider::reloadFromDatabase()
     }
 
     // Subsequent loads run DB queries off main thread
-    // Skip allTracks() — LibraryView uses allTrackIndexes() directly.
-    // allTracks() is lazy-loaded from DB on demand when needed.
     QtConcurrent::run([this]() {
         QElapsedTimer mdpTimer; mdpTimer.start();
         qDebug() << "[TIMING] MDP reloadFromDatabase (async) START";
@@ -277,11 +267,17 @@ void MusicDataProvider::reloadFromDatabase()
 
         int trackCount = db->trackCount();
 
-        // Always query albums/artists — keep cached data if DB returns 0
-        // (during scan the tables may be temporarily empty after DELETE)
-        QVector<Album>    dbAlbums    = db->allAlbums();
-        QVector<Artist>   dbArtists   = db->allArtists();
-        QVector<Playlist> dbPlaylists = db->allPlaylists();
+        // Fetch everything on worker thread — swap into cache on main thread
+        QVector<Track>      dbTracks;
+        QVector<TrackIndex> dbTrackIndexes;
+        QVector<Album>      dbAlbums    = db->allAlbums();
+        QVector<Artist>     dbArtists   = db->allArtists();
+        QVector<Playlist>   dbPlaylists = db->allPlaylists();
+
+        if (trackCount > 0) {
+            dbTracks      = db->allTracks();
+            dbTrackIndexes = db->allTrackIndexes();
+        }
         qDebug() << "[TIMING] MDP async DB queries:" << mdpTimer.elapsed() << "ms";
 
         qDebug() << "MusicDataProvider::reloadFromDatabase (async) — tracks:" << trackCount
@@ -310,15 +306,19 @@ void MusicDataProvider::reloadFromDatabase()
             }
         }
 
-        // Move results to main thread for swap + signal
+        // Swap-on-complete: move all results to main thread atomically
+        // Stale cache remains visible to UI until swap completes (no empty gap)
         QMetaObject::invokeMethod(this, [this,
+                tracks  = std::move(dbTracks),
+                indexes = std::move(dbTrackIndexes),
                 albums  = std::move(dbAlbums),
                 artists = std::move(dbArtists),
                 playlists = std::move(dbPlaylists)]() mutable {
             {
                 QWriteLocker l(&m_lock);
                 m_useMockData = false;
-                m_tracks.clear();  // Clear cached tracks — lazy-loaded on demand
+                m_tracks = std::move(tracks);
+                m_trackIndexes = std::move(indexes);
                 // Keep cached albums/artists if DB returned 0 (scan in progress)
                 if (!albums.isEmpty()) {
                     m_albums = std::move(albums);
@@ -335,6 +335,7 @@ void MusicDataProvider::reloadFromDatabase()
                 }
             }
             qDebug() << "MusicDataProvider: Reloaded"
+                     << m_tracks.size() << "tracks,"
                      << m_albums.size() << "albums," << m_artists.size() << "artists";
             m_reloading.store(false);
             qDebug() << "[TIMING] MDP reloadFromDatabase DONE — emitting libraryUpdated";
@@ -389,21 +390,22 @@ void MusicDataProvider::loadFromDatabase()
         }
     }
 
+    // Also load track indexes (cached — no more sync DB calls from allTrackIndexes())
+    QVector<TrackIndex> dbTrackIndexes = db->allTrackIndexes();
+
     // Swap under write lock — blocks readers briefly
     {
         QWriteLocker l(&m_lock);
         m_useMockData = false;
-        m_tracks    = std::move(dbTracks);
-        m_albums    = std::move(dbAlbums);
-        m_artists   = std::move(dbArtists);
-        m_playlists = std::move(dbPlaylists);
+        m_tracks       = std::move(dbTracks);
+        m_trackIndexes = std::move(dbTrackIndexes);
+        m_albums       = std::move(dbAlbums);
+        m_artists      = std::move(dbArtists);
+        m_playlists    = std::move(dbPlaylists);
     }
 
     qDebug() << "MusicDataProvider: Loaded" << m_tracks.size() << "tracks,"
              << m_albums.size() << "albums," << m_artists.size() << "artists";
-
-    // Pre-warm lightweight track index (activates string pooling + mmap cache)
-    db->allTrackIndexes();
     qDebug() << "[TIMING] MDP loadFromDatabase (sync) TOTAL:" << t.elapsed() << "ms";
 }
 
