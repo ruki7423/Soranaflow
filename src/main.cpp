@@ -196,7 +196,9 @@ int main(int argc, char* argv[]) {
         QStringList keySearchPaths = {
             QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/AuthKey_4GW6686CH4.p8"),
             QCoreApplication::applicationDirPath() + QStringLiteral("/AuthKey_4GW6686CH4.p8"),
+#ifdef QT_DEBUG
             QStringLiteral("/Users/haruki/Documents/Sorana flow/qt-output/AuthKey_4GW6686CH4.p8"),
+#endif
         };
         for (const QString& path : keySearchPaths) {
             if (QFile::exists(path)) {

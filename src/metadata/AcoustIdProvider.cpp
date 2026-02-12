@@ -1,5 +1,6 @@
 #include "AcoustIdProvider.h"
 #include "RateLimiter.h"
+#include "ApiKeys.h"
 #include <QCoreApplication>
 
 #include <QNetworkReply>
@@ -22,7 +23,7 @@ AcoustIdProvider::AcoustIdProvider(QObject* parent)
     : QObject(parent)
     , m_nam(new QNetworkAccessManager(this))
     , m_rateLimiter(new RateLimiter(3, this))   // AcoustID allows ~3 req/s
-    , m_apiKey(QStringLiteral("z0F579krDa"))
+    , m_apiKey(QStringLiteral(ACOUSTID_API_KEY))
 {
     qDebug() << "[AcoustIdProvider] Initialized";
 }

@@ -1,4 +1,5 @@
 #include "ArtistDetailView.h"
+#include "ApiKeys.h"
 #include <QCoreApplication>
 #include <QMouseEvent>
 #include <QResizeEvent>
@@ -909,15 +910,13 @@ void ArtistDetailView::applyAlbumArtFallback()
 
 // ── Last.fm biography fallback ──────────────────────────────────────
 
-static const QString LASTFM_API_KEY = QStringLiteral("7ab675085fa7b32a894631f2643b6a6f");
-
 void ArtistDetailView::fetchLastFmBio(const QString& artistName)
 {
     QUrl url(QStringLiteral("https://ws.audioscrobbler.com/2.0/"));
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("method"), QStringLiteral("artist.getinfo"));
     q.addQueryItem(QStringLiteral("artist"), artistName);
-    q.addQueryItem(QStringLiteral("api_key"), LASTFM_API_KEY);
+    q.addQueryItem(QStringLiteral("api_key"), QStringLiteral(LASTFM_API_KEY));
     q.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
     q.addQueryItem(QStringLiteral("autocorrect"), QStringLiteral("1"));
     url.setQuery(q);

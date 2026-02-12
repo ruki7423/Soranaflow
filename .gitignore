@@ -6,6 +6,10 @@ build/
 
 # Secrets
 *.p8
+.env
+
+# Generated API keys header (contains secrets at build time)
+build/generated/ApiKeys.h
 
 # IDE
 .vscode/

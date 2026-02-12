@@ -1,5 +1,6 @@
 #include "LastFmProvider.h"
 #include "RateLimiter.h"
+#include "ApiKeys.h"
 
 #include <QNetworkReply>
 #include <QJsonDocument>
@@ -8,7 +9,7 @@
 #include <QUrlQuery>
 #include <QDebug>
 
-const QString LastFmProvider::API_KEY = QStringLiteral("7ab675085fa7b32a894631f2643b6a6f");
+const QString LastFmProvider::API_KEY = QStringLiteral(LASTFM_API_KEY);
 const QString LastFmProvider::BASE_URL = QStringLiteral("https://ws.audioscrobbler.com/2.0/");
 
 // ── Singleton ───────────────────────────────────────────────────────

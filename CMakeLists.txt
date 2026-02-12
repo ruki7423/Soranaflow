@@ -413,6 +413,22 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     $<$<NOT:$<CONFIG:Debug>>:RELEASE=1>
 )
 
+# --- API Keys (injected from environment, never stored in source) ---
+# Usage: export LASTFM_API_KEY="your_key" before running cmake
+set(LASTFM_API_KEY "$ENV{LASTFM_API_KEY}" CACHE STRING "Last.fm API key")
+set(LASTFM_API_SECRET "$ENV{LASTFM_API_SECRET}" CACHE STRING "Last.fm API secret")
+set(FANART_API_KEY "$ENV{FANART_API_KEY}" CACHE STRING "Fanart.tv API key")
+set(TIDAL_CLIENT_ID "$ENV{TIDAL_CLIENT_ID}" CACHE STRING "Tidal client ID")
+set(TIDAL_CLIENT_SECRET "$ENV{TIDAL_CLIENT_SECRET}" CACHE STRING "Tidal client secret")
+set(ACOUSTID_API_KEY "$ENV{ACOUSTID_API_KEY}" CACHE STRING "AcoustID API key")
+
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/config/ApiKeys.h.in
+    ${CMAKE_BINARY_DIR}/generated/ApiKeys.h
+    @ONLY
+)
+include_directories(${CMAKE_BINARY_DIR}/generated)
+
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src

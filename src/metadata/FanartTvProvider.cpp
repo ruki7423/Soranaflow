@@ -1,4 +1,5 @@
 #include "FanartTvProvider.h"
+#include "ApiKeys.h"
 #include <QCoreApplication>
 
 #include <QNetworkReply>
@@ -14,7 +15,7 @@
 const QString FanartTvProvider::API_BASE =
     QStringLiteral("https://webservice.fanart.tv/v3/music");
 const QString FanartTvProvider::API_KEY =
-    QStringLiteral("767749d7fe98dbe444a96930c486f5e0");
+    QStringLiteral(FANART_API_KEY);
 
 FanartTvProvider* FanartTvProvider::instance()
 {

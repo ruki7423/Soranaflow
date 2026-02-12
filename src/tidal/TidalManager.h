@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ApiKeys.h"
 #include <QObject>
 #include <QString>
 #include <QJsonObject>
@@ -113,9 +114,9 @@ private:
     QString m_countryCode = QStringLiteral("US");
     bool m_userLoggedIn = false;
 
-    // API credentials
-    static constexpr const char* CLIENT_ID = "5w6Lrp0d9NS4MWgo";
-    static constexpr const char* CLIENT_SECRET = "vede5Lg2g0d1FogHBlEoHpOC1pLfHUAhMAxb0M4dGmw=";
+    // API credentials (injected by CMake from environment)
+    static constexpr const char* CLIENT_ID = TIDAL_CLIENT_ID;
+    static constexpr const char* CLIENT_SECRET = TIDAL_CLIENT_SECRET;
 
     // API health status
     bool m_apiAvailable = false;
