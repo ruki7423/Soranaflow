@@ -158,7 +158,7 @@ void LibraryView::setupUI()
 
     m_navBackBtn = new QPushButton(this);
     m_navBackBtn->setObjectName(QStringLiteral("hdrNavBack"));
-    m_navBackBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+    m_navBackBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
     m_navBackBtn->setIconSize(headerIconSize);
     m_navBackBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
     m_navBackBtn->setCursor(Qt::PointingHandCursor);
@@ -168,7 +168,7 @@ void LibraryView::setupUI()
 
     m_navForwardBtn = new QPushButton(this);
     m_navForwardBtn->setObjectName(QStringLiteral("hdrNavForward"));
-    m_navForwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+    m_navForwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
     m_navForwardBtn->setIconSize(headerIconSize);
     m_navForwardBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
     m_navForwardBtn->setCursor(Qt::PointingHandCursor);
@@ -212,7 +212,7 @@ void LibraryView::setupUI()
     // Play All button
     m_playAllBtn = new QPushButton(QStringLiteral("Play All"), this);
     m_playAllBtn->setObjectName(QStringLiteral("hdrPlayAll"));
-    m_playAllBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/play.svg")));
+    m_playAllBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/play.svg")));
     m_playAllBtn->setIconSize(headerIconSize);
     m_playAllBtn->setFixedHeight(BTN_H);
     m_playAllBtn->setCursor(Qt::PointingHandCursor);
@@ -226,7 +226,7 @@ void LibraryView::setupUI()
     // Scan / Rescan button
     m_scanBtn = new QPushButton(QStringLiteral("Rescan"), this);
     m_scanBtn->setObjectName(QStringLiteral("hdrRescan"));
-    m_scanBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/refresh-cw.svg"));
+    m_scanBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/refresh-cw.svg"));
     m_scanBtn->setIconSize(headerIconSize);
     m_scanBtn->setFixedHeight(BTN_H);
     m_scanBtn->setToolTip(QStringLiteral("Rescan Library"));
@@ -241,7 +241,7 @@ void LibraryView::setupUI()
     // Fetch Metadata button (download icon)
     m_fetchMetadataBtn = new QPushButton(QStringLiteral("Metadata"), this);
     m_fetchMetadataBtn->setObjectName(QStringLiteral("hdrMetadata"));
-    m_fetchMetadataBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/download.svg"));
+    m_fetchMetadataBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/download.svg"));
     m_fetchMetadataBtn->setIconSize(headerIconSize);
     m_fetchMetadataBtn->setFixedHeight(BTN_H);
     m_fetchMetadataBtn->setToolTip(QStringLiteral("Fetch Missing Metadata"));
@@ -256,7 +256,7 @@ void LibraryView::setupUI()
     // Identify by Audio button (fingerprint / music icon)
     m_identifyAudioBtn = new QPushButton(QStringLiteral("Identify"), this);
     m_identifyAudioBtn->setObjectName(QStringLiteral("hdrIdentify"));
-    m_identifyAudioBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/music.svg"));
+    m_identifyAudioBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/music.svg"));
     m_identifyAudioBtn->setIconSize(headerIconSize);
     m_identifyAudioBtn->setFixedHeight(BTN_H);
     m_identifyAudioBtn->setToolTip(QStringLiteral("Identify by Audio (Fingerprint)\nFor files with missing/wrong tags"));
@@ -642,11 +642,11 @@ void LibraryView::refreshTheme()
             .arg(c.foregroundMuted));
 
     // Icons — re-tint for current theme
-    m_navBackBtn->setIcon(tm->themedIcon(":/icons/chevron-left.svg"));
-    m_navForwardBtn->setIcon(tm->themedIcon(":/icons/chevron-right.svg"));
-    m_scanBtn->setIcon(tm->themedIcon(":/icons/refresh-cw.svg"));
-    m_fetchMetadataBtn->setIcon(tm->themedIcon(":/icons/download.svg"));
-    m_identifyAudioBtn->setIcon(tm->themedIcon(":/icons/music.svg"));
+    m_navBackBtn->setIcon(tm->cachedIcon(":/icons/chevron-left.svg"));
+    m_navForwardBtn->setIcon(tm->cachedIcon(":/icons/chevron-right.svg"));
+    m_scanBtn->setIcon(tm->cachedIcon(":/icons/refresh-cw.svg"));
+    m_fetchMetadataBtn->setIcon(tm->cachedIcon(":/icons/download.svg"));
+    m_identifyAudioBtn->setIcon(tm->cachedIcon(":/icons/music.svg"));
 
     // Header button styles — uniform box model for pixel-perfect height.
     // ALL buttons use border: 1px solid (transparent or visible) so that

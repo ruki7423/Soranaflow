@@ -164,14 +164,14 @@ void PlaybackBar::setupUI()
 
     m_shuffleBtn = new StyledButton("", "ghost");
     m_shuffleBtn->setObjectName(QStringLiteral("ShuffleButton"));
-    m_shuffleBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/shuffle.svg"));
+    m_shuffleBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/shuffle.svg"));
     m_shuffleBtn->setIconSize(QSize(ctrlIconSize, ctrlIconSize));
     m_shuffleBtn->setFixedSize(ctrlBtnSize, ctrlBtnSize);
     m_shuffleBtn->setStyleSheet(initTransportStyle);
 
     m_prevBtn = new StyledButton("", "ghost");
     m_prevBtn->setObjectName(QStringLiteral("PrevButton"));
-    m_prevBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/skip-back.svg"));
+    m_prevBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/skip-back.svg"));
     m_prevBtn->setIconSize(QSize(ctrlIconSize, ctrlIconSize));
     m_prevBtn->setFixedSize(ctrlBtnSize, ctrlBtnSize);
     m_prevBtn->setStyleSheet(initTransportStyle);
@@ -208,14 +208,14 @@ void PlaybackBar::setupUI()
 
     m_nextBtn = new StyledButton("", "ghost");
     m_nextBtn->setObjectName(QStringLiteral("NextButton"));
-    m_nextBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/skip-forward.svg"));
+    m_nextBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/skip-forward.svg"));
     m_nextBtn->setIconSize(QSize(ctrlIconSize, ctrlIconSize));
     m_nextBtn->setFixedSize(ctrlBtnSize, ctrlBtnSize);
     m_nextBtn->setStyleSheet(initTransportStyle);
 
     m_repeatBtn = new StyledButton("", "ghost");
     m_repeatBtn->setObjectName(QStringLiteral("RepeatButton"));
-    m_repeatBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/repeat.svg"));
+    m_repeatBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/repeat.svg"));
     m_repeatBtn->setIconSize(QSize(ctrlIconSize, ctrlIconSize));
     m_repeatBtn->setFixedSize(ctrlBtnSize, ctrlBtnSize);
     m_repeatBtn->setStyleSheet(initTransportStyle);
@@ -312,7 +312,7 @@ void PlaybackBar::setupUI()
 
     m_muteBtn = new StyledButton("", "ghost");
     m_muteBtn->setObjectName(QStringLiteral("MuteButton"));
-    m_muteBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/volume-2.svg"));
+    m_muteBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/volume-2.svg"));
     m_muteBtn->setIconSize(QSize(rightIconSize, rightIconSize));
     m_muteBtn->setFixedSize(rightBtnSize, rightBtnSize);
     m_muteBtn->setStyleSheet(initRightStyle);
@@ -325,7 +325,7 @@ void PlaybackBar::setupUI()
 
     m_deviceBtn = new StyledButton("", "ghost");
     m_deviceBtn->setObjectName(QStringLiteral("DeviceButton"));
-    m_deviceBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/audio-output.svg"));
+    m_deviceBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/audio-output.svg"));
     m_deviceBtn->setIconSize(QSize(rightIconSize, rightIconSize));
     m_deviceBtn->setFixedSize(rightBtnSize, rightBtnSize);
     m_deviceBtn->setToolTip(QStringLiteral("Output Device"));
@@ -333,7 +333,7 @@ void PlaybackBar::setupUI()
 
     m_queueBtn = new StyledButton("", "ghost");
     m_queueBtn->setObjectName(QStringLiteral("QueueButton"));
-    m_queueBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/list-music.svg"));
+    m_queueBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/list-music.svg"));
     m_queueBtn->setIconSize(QSize(rightIconSize, rightIconSize));
     m_queueBtn->setFixedSize(rightBtnSize, rightBtnSize);
     m_queueBtn->setToolTip(QStringLiteral("Queue"));
@@ -642,7 +642,7 @@ void PlaybackBar::updateShuffleButton()
     if (active) {
         m_shuffleBtn->setIcon(tintedSvgIcon(":/icons/shuffle.svg", QColor(ThemeManager::instance()->colors().accent)));
     } else {
-        m_shuffleBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/shuffle.svg"));
+        m_shuffleBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/shuffle.svg"));
     }
 }
 
@@ -655,7 +655,7 @@ void PlaybackBar::updateRepeatButton()
 
     switch (mode) {
     case PlaybackState::Off:
-        m_repeatBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/repeat.svg"));
+        m_repeatBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/repeat.svg"));
         break;
     case PlaybackState::All:
         m_repeatBtn->setIcon(tintedSvgIcon(":/icons/repeat.svg", green));
@@ -684,9 +684,9 @@ void PlaybackBar::updateVolumeIcon()
 
     auto* tm = ThemeManager::instance();
     switch (tier) {
-    case 0:  m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-x.svg")); break;
-    case 1:  m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-1.svg")); break;
-    default: m_muteBtn->setIcon(tm->themedIcon(":/icons/volume-2.svg")); break;
+    case 0:  m_muteBtn->setIcon(tm->cachedIcon(":/icons/volume-x.svg")); break;
+    case 1:  m_muteBtn->setIcon(tm->cachedIcon(":/icons/volume-1.svg")); break;
+    default: m_muteBtn->setIcon(tm->cachedIcon(":/icons/volume-2.svg")); break;
     }
 }
 
@@ -932,10 +932,10 @@ void PlaybackBar::refreshTheme()
                        "QLabel:hover { color: %2; }")
             .arg(c.foregroundMuted, c.foreground));
 
-    m_prevBtn->setIcon(tm->themedIcon(":/icons/skip-back.svg"));
-    m_nextBtn->setIcon(tm->themedIcon(":/icons/skip-forward.svg"));
-    m_queueBtn->setIcon(tm->themedIcon(":/icons/list-music.svg"));
-    m_deviceBtn->setIcon(tm->themedIcon(":/icons/audio-output.svg"));
+    m_prevBtn->setIcon(tm->cachedIcon(":/icons/skip-back.svg"));
+    m_nextBtn->setIcon(tm->cachedIcon(":/icons/skip-forward.svg"));
+    m_queueBtn->setIcon(tm->cachedIcon(":/icons/list-music.svg"));
+    m_deviceBtn->setIcon(tm->cachedIcon(":/icons/audio-output.svg"));
 
     updatePlayButton();
     updateShuffleButton();

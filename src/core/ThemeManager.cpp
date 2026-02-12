@@ -55,6 +55,7 @@ void ThemeManager::setTheme(Theme theme)
 
     qApp->setStyleSheet(stylesheet);
 
+    m_iconCache.clear();  // invalidate cached icons — colors changed
     emit themeChanged(m_theme);
 }
 
@@ -552,6 +553,18 @@ QString ThemeManager::formatBadgeStyle(const QString& format) const
         .arg(UISizes::badgePaddingV)
         .arg(UISizes::badgePaddingH)
         .arg(UISizes::badgeFontSize);
+}
+
+// ── cachedIcon ─────────────────────────────────────────────────────
+QIcon ThemeManager::cachedIcon(const QString& resourcePath)
+{
+    auto it = m_iconCache.find(resourcePath);
+    if (it != m_iconCache.end())
+        return it.value();
+
+    QIcon icon = themedIcon(resourcePath);
+    m_iconCache.insert(resourcePath, icon);
+    return icon;
 }
 
 // ── themedIcon ──────────────────────────────────────────────────────

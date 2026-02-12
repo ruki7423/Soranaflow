@@ -51,7 +51,7 @@ void PlaylistDetailView::setupUI()
     // ────────────────────────────────────────────────────────────────
     //  Back Button
     // ────────────────────────────────────────────────────────────────
-    m_backBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")),
+    m_backBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")),
                                   QString(), QStringLiteral("ghost"),
                                   scrollContent);
     m_backBtn->setFixedSize(32, 32);

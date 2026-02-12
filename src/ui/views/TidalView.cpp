@@ -255,7 +255,7 @@ void TidalView::setupUI()
 
         // Navigation ← →
         m_backBtn = new QPushButton(this);
-        m_backBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+        m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
         m_backBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         m_backBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
         m_backBtn->setCursor(Qt::PointingHandCursor);
@@ -264,7 +264,7 @@ void TidalView::setupUI()
         headerRow->addWidget(m_backBtn);
 
         m_forwardBtn = new QPushButton(this);
-        m_forwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+        m_forwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
         m_forwardBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         m_forwardBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
         m_forwardBtn->setCursor(Qt::PointingHandCursor);
@@ -746,7 +746,7 @@ QWidget* TidalView::createTrackRow(const QJsonObject& track)
 
     // Play button
     auto* playBtn = new QPushButton(row);
-    playBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/play.svg")));
+    playBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/play.svg")));
     playBtn->setIconSize(QSize(16, 16));
     playBtn->setFixedSize(32, 32);
     playBtn->setCursor(Qt::PointingHandCursor);
@@ -1207,8 +1207,8 @@ void TidalView::refreshTheme()
     m_backBtn->setStyleSheet(navBtnStyle);
     m_forwardBtn->setStyleSheet(navBtnStyle);
 
-    m_backBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
-    m_forwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+    m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+    m_forwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
 
     updateAuthStatus();
 }

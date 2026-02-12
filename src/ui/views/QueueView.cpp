@@ -95,14 +95,14 @@ void QueueView::setupUI()
     m_shuffleBtn = new StyledButton(QStringLiteral("Shuffle"),
                                      QStringLiteral("ghost"),
                                      headerWidget);
-    m_shuffleBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/shuffle.svg")));
+    m_shuffleBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/shuffle.svg")));
     m_shuffleBtn->setIconSize(QSize(16, 16));
     headerLayout->addWidget(m_shuffleBtn);
 
     m_clearBtn = new StyledButton(QStringLiteral("Clear"),
                                    QStringLiteral("ghost"),
                                    headerWidget);
-    m_clearBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/trash-2.svg")));
+    m_clearBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/trash-2.svg")));
     m_clearBtn->setIconSize(QSize(16, 16));
     headerLayout->addWidget(m_clearBtn);
 
@@ -718,8 +718,8 @@ void QueueView::refreshTheme()
                        "  padding: 0px;"
                        "}"));
 
-    m_shuffleBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/shuffle.svg")));
-    m_clearBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/trash-2.svg")));
+    m_shuffleBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/shuffle.svg")));
+    m_clearBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/trash-2.svg")));
 
     m_currentCover->setStyleSheet(
         QStringLiteral("QLabel {"

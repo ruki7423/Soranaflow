@@ -166,7 +166,7 @@ void FolderBrowserView::buildTree()
         auto* rootItem = new QTreeWidgetItem(m_folderTree);
         rootItem->setText(0, QStringLiteral("%1 (%2)").arg(rootName).arg(rootCount));
         rootItem->setData(0, Qt::UserRole, rootPath);
-        rootItem->setIcon(0, ThemeManager::instance()->themedIcon(":/icons/folder.svg"));
+        rootItem->setIcon(0, ThemeManager::instance()->cachedIcon(":/icons/folder.svg"));
 
         // Collect all subdirectories that belong to this root
         QStringList dirs;
@@ -227,7 +227,7 @@ QTreeWidgetItem* FolderBrowserView::findOrCreatePath(const QString& rootPath,
                 : part;
             item->setText(0, label);
             item->setData(0, Qt::UserRole, currentPath);
-            item->setIcon(0, ThemeManager::instance()->themedIcon(":/icons/folder.svg"));
+            item->setIcon(0, ThemeManager::instance()->cachedIcon(":/icons/folder.svg"));
             parent = item;
         }
     }
@@ -297,8 +297,8 @@ void FolderBrowserView::applyTheme()
     auto c = tm->colors();
 
     // Generate themed branch indicator pixmaps (tinted for current theme)
-    QPixmap closedPix = tm->themedIcon(":/icons/chevron-right.svg").pixmap(12, 12);
-    QPixmap openPix   = tm->themedIcon(":/icons/chevron-down.svg").pixmap(12, 12);
+    QPixmap closedPix = tm->cachedIcon(":/icons/chevron-right.svg").pixmap(12, 12);
+    QPixmap openPix   = tm->cachedIcon(":/icons/chevron-down.svg").pixmap(12, 12);
 
     static const QString closedPath = QDir::tempPath() + QStringLiteral("/sorana_branch_closed.png");
     static const QString openPath   = QDir::tempPath() + QStringLiteral("/sorana_branch_open.png");
@@ -351,7 +351,7 @@ void FolderBrowserView::applyTheme()
     // Re-theme tree icons
     QTreeWidgetItemIterator it(m_folderTree);
     while (*it) {
-        (*it)->setIcon(0, tm->themedIcon(":/icons/folder.svg"));
+        (*it)->setIcon(0, tm->cachedIcon(":/icons/folder.svg"));
         ++it;
     }
 }

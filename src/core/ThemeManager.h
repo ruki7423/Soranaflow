@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <QIcon>
+#include <QHash>
 
 // ── Centralized color system ────────────────────────────────────────
 struct ThemeColors {
@@ -218,6 +219,7 @@ public:
 
     // ── Icon helper ─────────────────────────────────────────────────
     QIcon themedIcon(const QString& resourcePath) const;
+    QIcon cachedIcon(const QString& resourcePath);
 
 signals:
     void themeChanged(Theme theme);
@@ -228,4 +230,6 @@ private:
     QString loadStyleSheet(const QString& path);
     ThemeColors darkColors() const;
     ThemeColors lightColors() const;
+
+    QHash<QString, QIcon> m_iconCache;
 };

@@ -1237,7 +1237,7 @@ QWidget* SettingsView::createLibraryTab()
     // Add Folder button
     auto* addFolderBtn = new StyledButton(QStringLiteral("Add Folder"),
                                            QStringLiteral("outline"));
-    addFolderBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/folder.svg")));
+    addFolderBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/folder.svg")));
     connect(addFolderBtn, &QPushButton::clicked, this, &SettingsView::onAddFolderClicked);
     layout->addWidget(addFolderBtn);
 
@@ -1547,7 +1547,7 @@ void SettingsView::rebuildFolderList()
         auto* removeBtn = new StyledButton(QStringLiteral(""),
                                             QStringLiteral("ghost"),
                                             folderWidget);
-        removeBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/trash-2.svg")));
+        removeBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/trash-2.svg")));
         removeBtn->setFixedSize(UISizes::smallButtonSize, UISizes::smallButtonSize);
         removeBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
 
@@ -3321,7 +3321,7 @@ QWidget* SettingsView::createAppearanceTab()
         cardLayout->setSpacing(8);
 
         auto* iconLabel = new QLabel(card);
-        iconLabel->setPixmap(ThemeManager::instance()->themedIcon(opt.iconPath).pixmap(32, 32));
+        iconLabel->setPixmap(ThemeManager::instance()->cachedIcon(opt.iconPath).pixmap(32, 32));
         iconLabel->setAlignment(Qt::AlignCenter);
         iconLabel->setStyleSheet(QStringLiteral("border: none;"));
         cardLayout->addWidget(iconLabel);

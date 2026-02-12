@@ -128,7 +128,7 @@ void ArtistDetailView::setupUI()
     innerLayout->setContentsMargins(24, 0, 24, 0);
     innerLayout->setSpacing(24);
 
-    m_backBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")),
+    m_backBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")),
                                  QString(), QStringLiteral("ghost"), innerContent);
     m_backBtn->setFixedSize(32, 32);
     m_backBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));

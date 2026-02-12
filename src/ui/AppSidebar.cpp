@@ -73,7 +73,7 @@ void AppSidebar::setupUI()
 
         auto* collapseBtn = new QPushButton(m_logoBar);
         collapseBtn->setObjectName("collapseButton");
-        collapseBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/chevron-left.svg"));
+        collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/chevron-left.svg"));
         collapseBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         collapseBtn->setFixedSize(UISizes::smallButtonSize, UISizes::smallButtonSize);
         collapseBtn->setFlat(true);
@@ -118,7 +118,7 @@ void AppSidebar::setupUI()
     {
         m_collapsedSearchBtn = new QPushButton(this);
         m_collapsedSearchBtn->setObjectName("collapsedSearchBtn");
-        m_collapsedSearchBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/search.svg"));
+        m_collapsedSearchBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/search.svg"));
         m_collapsedSearchBtn->setIconSize(QSize(22, 22));
         m_collapsedSearchBtn->setFixedSize(44, 44);
         m_collapsedSearchBtn->setFlat(true);
@@ -294,7 +294,7 @@ void AppSidebar::setupUI()
 
         m_settingsButton = new QPushButton(settingsContainer);
         m_settingsButton->setText(tr("Settings"));
-        m_settingsButton->setIcon(ThemeManager::instance()->themedIcon(":/icons/settings.svg"));
+        m_settingsButton->setIcon(ThemeManager::instance()->cachedIcon(":/icons/settings.svg"));
         m_settingsButton->setIconSize(QSize(20, 20));
         m_settingsButton->setFixedHeight(UISizes::thumbnailSize);
         m_settingsButton->setFlat(true);
@@ -355,7 +355,7 @@ QPushButton* AppSidebar::createNavButton(const QString& text, const QString& ico
         btn->setIcon(QIcon(tidalIcon));
     */
     } else {
-        btn->setIcon(tm->themedIcon(iconPath));
+        btn->setIcon(tm->cachedIcon(iconPath));
     }
     btn->setIconSize(QSize(20, 20));
     btn->setFixedHeight(UISizes::thumbnailSize);
@@ -452,7 +452,7 @@ void AppSidebar::toggleCollapse()
         // Show the collapse arrow button
         if (collapseBtn) {
             collapseBtn->show();
-            collapseBtn->setIcon(ThemeManager::instance()->themedIcon(":/icons/chevron-left.svg"));
+            collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/chevron-left.svg"));
         }
 
         // Show elements
@@ -689,7 +689,7 @@ void AppSidebar::rebuildFolderButtons()
         QFileInfo fi(folder);
         folderBtn->setText(fi.fileName().isEmpty() ? folder : fi.fileName());
         folderBtn->setToolTip(folder);
-        folderBtn->setIcon(tm->themedIcon(":/icons/folder.svg"));
+        folderBtn->setIcon(tm->cachedIcon(":/icons/folder.svg"));
         folderBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         folderBtn->setFixedHeight(UISizes::buttonHeight);
         folderBtn->setFlat(true);
@@ -799,7 +799,7 @@ void AppSidebar::refreshTheme()
     // Collapse button — hidden when collapsed, shown when expanded
     auto* collapseBtn = m_logoBar->findChild<QPushButton*>("collapseButton");
     if (collapseBtn) {
-        collapseBtn->setIcon(tm->themedIcon(":/icons/chevron-left.svg"));
+        collapseBtn->setIcon(tm->cachedIcon(":/icons/chevron-left.svg"));
         collapseBtn->setStyleSheet(QStringLiteral(
             "QPushButton { background: transparent; border: none; }"
             "QPushButton:hover { background: %1; border-radius: 4px; }"
@@ -843,11 +843,11 @@ void AppSidebar::refreshTheme()
     }
 
     // Settings button icon
-    m_settingsButton->setIcon(tm->themedIcon(":/icons/settings.svg"));
+    m_settingsButton->setIcon(tm->cachedIcon(":/icons/settings.svg"));
 
     // Collapsed search button
     if (m_collapsedSearchBtn) {
-        m_collapsedSearchBtn->setIcon(tm->themedIcon(":/icons/search.svg"));
+        m_collapsedSearchBtn->setIcon(tm->cachedIcon(":/icons/search.svg"));
         m_collapsedSearchBtn->setStyleSheet(QStringLiteral(
             "QPushButton {"
             "  background: transparent;"
@@ -866,12 +866,12 @@ void AppSidebar::refreshTheme()
         ":/icons/users.svg", ":/icons/list-music.svg"
     };
     for (int i = 0; i < m_navButtons.size() && i < 5; ++i) {
-        m_navButtons[i]->setIcon(tm->themedIcon(iconPaths[i]));
+        m_navButtons[i]->setIcon(tm->cachedIcon(iconPaths[i]));
     }
     // Apple Music (index 5) - gradient icon, no theme change needed
     // Folders (index 6) - themed icon
     if (m_navButtons.size() > 6) {
-        m_navButtons[6]->setIcon(tm->themedIcon(":/icons/folder.svg"));
+        m_navButtons[6]->setIcon(tm->cachedIcon(":/icons/folder.svg"));
     }
     /* TODO: restore when Tidal API available
     // Tidal (index 7) - monochrome, needs theme-specific variant

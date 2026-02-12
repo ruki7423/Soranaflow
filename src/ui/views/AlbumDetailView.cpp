@@ -81,7 +81,7 @@ void AlbumDetailView::setupUI()
     backRowLayout->setContentsMargins(24, 16, 0, 0);
     backRowLayout->setAlignment(Qt::AlignLeft);
 
-    m_backBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")),
+    m_backBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")),
                                  QString(), QStringLiteral("ghost"), backRow);
     m_backBtn->setFixedSize(32, 32);
     m_backBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
@@ -180,21 +180,21 @@ void AlbumDetailView::setupUI()
     const int DETAIL_BTN_H = 36;
     const QSize DETAIL_ICON(16, 16);
 
-    m_playAllBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/play.svg")),
+    m_playAllBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/play.svg")),
                                     QStringLiteral("Play All"),
                                     QStringLiteral("default"), infoColumn);
     m_playAllBtn->setIconSize(DETAIL_ICON);
     m_playAllBtn->setFixedHeight(DETAIL_BTN_H);
     actionsRow->addWidget(m_playAllBtn);
 
-    m_shuffleBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/shuffle.svg")),
+    m_shuffleBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/shuffle.svg")),
                                     QStringLiteral("Shuffle"),
                                     QStringLiteral("outline"), infoColumn);
     m_shuffleBtn->setIconSize(DETAIL_ICON);
     m_shuffleBtn->setFixedHeight(DETAIL_BTN_H);
     actionsRow->addWidget(m_shuffleBtn);
 
-    m_addQueueBtn = new StyledButton(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/plus.svg")),
+    m_addQueueBtn = new StyledButton(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/plus.svg")),
                                      QStringLiteral("Add to Queue"),
                                      QStringLiteral("ghost"), infoColumn);
     m_addQueueBtn->setIconSize(DETAIL_ICON);
@@ -583,10 +583,10 @@ void AlbumDetailView::refreshTheme()
         QStringLiteral("font-size: 13px; color: %1;")
             .arg(c.foregroundMuted));
 
-    m_backBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
-    m_playAllBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/play.svg")));
-    m_shuffleBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/shuffle.svg")));
-    m_addQueueBtn->setIcon(tm->themedIcon(QStringLiteral(":/icons/plus.svg")));
+    m_backBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+    m_playAllBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/play.svg")));
+    m_shuffleBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/shuffle.svg")));
+    m_addQueueBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/plus.svg")));
 
     // Re-apply hero background and cover art if album is loaded
     if (!m_album.id.isEmpty())

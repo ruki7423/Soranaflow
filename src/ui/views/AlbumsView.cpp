@@ -77,7 +77,7 @@ void AlbumsView::setupUI()
     headerRow->addSpacing(4);
 
     m_navBackBtn = new QPushButton(this);
-    m_navBackBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+    m_navBackBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
     m_navBackBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
     m_navBackBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
     m_navBackBtn->setCursor(Qt::PointingHandCursor);
@@ -86,7 +86,7 @@ void AlbumsView::setupUI()
     headerRow->addWidget(m_navBackBtn);
 
     m_navForwardBtn = new QPushButton(this);
-    m_navForwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+    m_navForwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
     m_navForwardBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
     m_navForwardBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
     m_navForwardBtn->setCursor(Qt::PointingHandCursor);
@@ -110,7 +110,7 @@ void AlbumsView::setupUI()
     };
 
     m_largeIconBtn = new StyledButton(QStringLiteral(""), QStringLiteral("ghost"), this);
-    m_largeIconBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/grid-2x2.svg")));
+    m_largeIconBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/grid-2x2.svg")));
     m_largeIconBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
     m_largeIconBtn->setFixedSize(UISizes::toggleButtonSize, UISizes::toggleButtonSize);
     m_largeIconBtn->setToolTip(QStringLiteral("Large Icons"));
@@ -118,7 +118,7 @@ void AlbumsView::setupUI()
     headerRow->addWidget(m_largeIconBtn);
 
     m_smallIconBtn = new StyledButton(QStringLiteral(""), QStringLiteral("ghost"), this);
-    m_smallIconBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/grid-3x3.svg")));
+    m_smallIconBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/grid-3x3.svg")));
     m_smallIconBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
     m_smallIconBtn->setFixedSize(UISizes::toggleButtonSize, UISizes::toggleButtonSize);
     m_smallIconBtn->setToolTip(QStringLiteral("Small Icons"));
@@ -126,7 +126,7 @@ void AlbumsView::setupUI()
     headerRow->addWidget(m_smallIconBtn);
 
     m_listBtn = new StyledButton(QStringLiteral(""), QStringLiteral("ghost"), this);
-    m_listBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/list.svg")));
+    m_listBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/list.svg")));
     m_listBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
     m_listBtn->setFixedSize(UISizes::toggleButtonSize, UISizes::toggleButtonSize);
     m_listBtn->setToolTip(QStringLiteral("List"));
@@ -230,11 +230,11 @@ void AlbumsView::reloadAlbums()
     // Refresh view toggle icons for current theme
     {
         auto* tmIcons = ThemeManager::instance();
-        m_largeIconBtn->setIcon(tmIcons->themedIcon(QStringLiteral(":/icons/grid-2x2.svg")));
-        m_smallIconBtn->setIcon(tmIcons->themedIcon(QStringLiteral(":/icons/grid-3x3.svg")));
-        m_listBtn->setIcon(tmIcons->themedIcon(QStringLiteral(":/icons/list.svg")));
-        m_navBackBtn->setIcon(tmIcons->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
-        m_navForwardBtn->setIcon(tmIcons->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+        m_largeIconBtn->setIcon(tmIcons->cachedIcon(QStringLiteral(":/icons/grid-2x2.svg")));
+        m_smallIconBtn->setIcon(tmIcons->cachedIcon(QStringLiteral(":/icons/grid-3x3.svg")));
+        m_listBtn->setIcon(tmIcons->cachedIcon(QStringLiteral(":/icons/list.svg")));
+        m_navBackBtn->setIcon(tmIcons->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+        m_navForwardBtn->setIcon(tmIcons->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
         setViewMode(m_viewMode);
     }
 

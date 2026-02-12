@@ -143,7 +143,7 @@ void AppleMusicView::setupUI()
 
         // ── Navigation ← → (left side) ──────────────────────────────
         m_backBtn = new QPushButton(this);
-        m_backBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+        m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
         m_backBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         m_backBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
         m_backBtn->setCursor(Qt::PointingHandCursor);
@@ -152,7 +152,7 @@ void AppleMusicView::setupUI()
         headerRow->addWidget(m_backBtn);
 
         m_forwardBtn = new QPushButton(this);
-        m_forwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+        m_forwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
         m_forwardBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         m_forwardBtn->setFixedSize(NAV_SIZE, NAV_SIZE);
         m_forwardBtn->setCursor(Qt::PointingHandCursor);
@@ -416,8 +416,8 @@ void AppleMusicView::updateNavBar()
 
     m_backBtn->setEnabled(canBack);
     m_forwardBtn->setEnabled(canFwd);
-    m_backBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-left.svg")));
-    m_forwardBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/chevron-right.svg")));
+    m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
+    m_forwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
 
     auto navStyle = [&c](bool enabled) {
         Q_UNUSED(enabled)
@@ -653,7 +653,7 @@ QWidget* AppleMusicView::createSongRow(const QJsonObject& song)
 
     // Play button — fixed width
     auto* playBtn = new QPushButton(row);
-    playBtn->setIcon(ThemeManager::instance()->themedIcon(QStringLiteral(":/icons/play.svg")));
+    playBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/play.svg")));
     playBtn->setIconSize(QSize(16, 16));
     playBtn->setFixedSize(COL_PLAY_WIDTH, COL_PLAY_WIDTH);
     playBtn->setFlat(true);
