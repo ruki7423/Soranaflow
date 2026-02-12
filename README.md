@@ -102,13 +102,20 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 13 (v1.0.0 → v1.4.5) |
+| GitHub Releases | 14 (v1.0.0 → v1.4.6) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.4.6 — Freeze Hotfix
+
+- Library reload: debounced view cascade (max once per 2s during scan)
+- Album/Artist views: single allTracks() copy per reload (was 2+ full copies)
+- Autoplay: O(1) hash lookup replaces O(n×m) nested loop
+- Single-instance guard prevents dual-launch SQLite contention
 
 ### v1.4.5 — Performance & Reliability
 
