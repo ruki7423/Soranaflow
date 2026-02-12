@@ -1207,8 +1207,11 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             }
         }
 
+        // DoP passthrough — DSD data must be bit-perfect, skip ALL DSP
+        const bool dopPassthrough = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+
         // Apply headroom (before DSP)
-        if (framesRead > 0) {
+        if (framesRead > 0 && !dopPassthrough) {
             float hr = m_headroomGain.load(std::memory_order_relaxed);
             if (hr != 1.0f) {
                 int n = framesRead * channels;
@@ -1218,23 +1221,23 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 
         // Apply crossfeed (stereo only, after headroom)
         //   Mutually exclusive with HRTF — if both enabled, skip crossfeed (HRTF wins)
-        if (framesRead > 0 && channels == 2
+        if (framesRead > 0 && !dopPassthrough && channels == 2
             && !(m_hrtf.isEnabled() && m_crossfeed.isEnabled())) {
             m_crossfeed.process(buf, framesRead);
         }
 
         // Apply convolution (room correction / IR)
-        if (framesRead > 0) {
+        if (framesRead > 0 && !dopPassthrough) {
             m_convolution.process(buf, framesRead, channels);
         }
 
         // Apply HRTF (binaural spatial audio)
-        if (framesRead > 0 && channels == 2) {
+        if (framesRead > 0 && !dopPassthrough && channels == 2) {
             m_hrtf.process(buf, framesRead);
         }
 
-        // Apply DSP pipeline (gain, EQ, plugins) — skip in bit-perfect mode
-        if (framesRead > 0 && !m_bitPerfect.load(std::memory_order_relaxed)) {
+        // Apply DSP pipeline (gain, EQ, plugins) — skip in bit-perfect mode or DoP
+        if (framesRead > 0 && !dopPassthrough && !m_bitPerfect.load(std::memory_order_relaxed)) {
             if (!m_renderDiagOnce.exchange(true, std::memory_order_relaxed)) {
                 qDebug() << "[AudioEngine::renderAudio] DSP pipeline call —"
                          << "bitPerfect:" << m_bitPerfect.load()
@@ -1246,7 +1249,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
         }
 
         // Apply volume leveling gain
-        if (framesRead > 0) {
+        if (framesRead > 0 && !dopPassthrough) {
             float lg = m_levelingGain.load(std::memory_order_relaxed);
             if (lg != 1.0f) {
                 int n = framesRead * channels;
@@ -1255,7 +1258,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
         }
 
         // Peak limiter (safety net after all DSP)
-        if (framesRead > 0) {
+        if (framesRead > 0 && !dopPassthrough) {
             int n = framesRead * channels;
             for (int i = 0; i < n; ++i) {
                 float s = buf[i];

@@ -12,6 +12,7 @@
 #include <QButtonGroup>
 #include <QHash>
 #include <QPointer>
+#include <QTimer>
 
 #include "../../core/MusicData.h"
 #include "../../widgets/StyledButton.h"
@@ -33,6 +34,7 @@ public slots:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     void setupUI();
@@ -67,4 +69,7 @@ private:
     QHash<QString, QPointer<QLabel>> m_coverLabels;
     QHash<QString, QString> m_albumTrackPaths;  // albumId → first track file path
     int m_coverLoadIndex = 0;
+    QTimer* m_resizeDebounceTimer = nullptr;
+    QTimer* m_filterDebounceTimer = nullptr;
+    bool m_libraryDirty = false;
 };

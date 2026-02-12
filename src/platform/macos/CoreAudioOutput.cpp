@@ -387,6 +387,31 @@ bool CoreAudioOutput::setBufferSize(uint32_t frames)
             kAudioObjectPropertyScopeGlobal,
             kAudioObjectPropertyElementMain
         };
+
+        // Query supported range and clamp
+        AudioObjectPropertyAddress rangeProp = {
+            kAudioDevicePropertyBufferFrameSizeRange,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        AudioValueRange range = {0, 0};
+        UInt32 rangeSize = sizeof(range);
+        OSStatus rangeErr = AudioObjectGetPropertyData(currentDevice, &rangeProp,
+                                                        0, nullptr, &rangeSize, &range);
+        if (rangeErr == noErr && range.mMinimum > 0 && range.mMaximum > 0) {
+            UInt32 clamped = frames;
+            if (clamped < static_cast<UInt32>(range.mMinimum))
+                clamped = static_cast<UInt32>(range.mMinimum);
+            if (clamped > static_cast<UInt32>(range.mMaximum))
+                clamped = static_cast<UInt32>(range.mMaximum);
+            if (clamped != frames) {
+                fprintf(stderr, "CoreAudioOutput: clamped buffer size %u -> %u (range %u–%u)\n",
+                        frames, clamped,
+                        (unsigned)range.mMinimum, (unsigned)range.mMaximum);
+                frames = clamped;
+            }
+        }
+
         UInt32 bufSize = static_cast<UInt32>(frames);
         err = AudioObjectSetPropertyData(currentDevice, &prop,
                                           0, nullptr, sizeof(UInt32), &bufSize);

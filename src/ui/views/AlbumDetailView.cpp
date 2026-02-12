@@ -232,7 +232,7 @@ void AlbumDetailView::setupUI()
 // ── setAlbum ───────────────────────────────────────────────────────
 void AlbumDetailView::setAlbum(const QString& albumId)
 {
-    m_album = MusicDataProvider::instance()->albumById(albumId);
+    m_album = LibraryDatabase::instance()->albumById(albumId);  // needs tracks
     updateDisplay();
 }
 

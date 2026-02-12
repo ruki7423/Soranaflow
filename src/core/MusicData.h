@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QObject>
 #include <QReadWriteLock>
+#include <QHash>
 #include <atomic>
 
 // ── Audio Format Enum ───────────────────────────────────────────────
@@ -169,6 +170,7 @@ public:
 
     Album    albumById(const QString& id)    const;
     Artist   artistById(const QString& id)   const;
+    QString  artistFirstTrackPath(const QString& artistId) const;
     Playlist playlistById(const QString& id) const;
 
     bool hasDatabaseTracks() const;
@@ -195,6 +197,11 @@ private:
     bool m_firstLoadDone = false;
     std::atomic<bool> m_reloading{false};
     std::atomic<bool> m_pendingReload{false};
+
+    // Index maps for O(1) lookup (built during reload)
+    QHash<QString, int> m_albumIndex;    // albumId → index in m_albums
+    QHash<QString, int> m_artistIndex;   // artistId → index in m_artists
+    QHash<QString, QString> m_artistFirstTrackPath;  // artistId → first track filePath
 };
 
 // ── Utility Functions ───────────────────────────────────────────────

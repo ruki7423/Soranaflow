@@ -15,6 +15,7 @@
 #include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
 #include "../../metadata/FanartTvProvider.h"
+#include <QtConcurrent>
 
 ArtistsView::ArtistsView(QWidget* parent)
     : QWidget(parent)
@@ -27,10 +28,17 @@ ArtistsView::ArtistsView(QWidget* parent)
 {
     setupUI();
     refreshTheme();
+
+    m_resizeDebounceTimer = new QTimer(this);
+    m_resizeDebounceTimer->setSingleShot(true);
+    m_resizeDebounceTimer->setInterval(150);
+    connect(m_resizeDebounceTimer, &QTimer::timeout, this, &ArtistsView::relayoutGrid);
+
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &ArtistsView::refreshTheme);
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
             this, [this]() {
+                if (!isVisible()) { m_libraryDirty = true; return; }
                 m_coverCache.clear();
                 onLibraryUpdated();
             });
@@ -49,6 +57,10 @@ void ArtistsView::showEvent(QShowEvent* event)
     QWidget::showEvent(event);
     if (m_firstShow) {
         m_firstShow = false;
+        onLibraryUpdated();
+    } else if (m_libraryDirty) {
+        m_libraryDirty = false;
+        m_coverCache.clear();
         onLibraryUpdated();
     }
 }
@@ -178,8 +190,14 @@ void ArtistsView::setupUI()
 
     // ── Search input ──────────────────────────────────────────────────
     m_searchInput = new StyledInput(QStringLiteral("Search artists..."), QString(), this);
+    m_searchDebounceTimer = new QTimer(this);
+    m_searchDebounceTimer->setSingleShot(true);
+    m_searchDebounceTimer->setInterval(200);
+    connect(m_searchDebounceTimer, &QTimer::timeout, this, [this]() {
+        onSearchChanged(m_searchInput->lineEdit()->text());
+    });
     connect(m_searchInput->lineEdit(), &QLineEdit::textChanged,
-            this, &ArtistsView::onSearchChanged);
+            this, [this]() { m_searchDebounceTimer->start(); });
     m_searchInput->lineEdit()->installEventFilter(this);
     mainLayout->addWidget(m_searchInput);
 
@@ -227,31 +245,25 @@ QPixmap ArtistsView::findArtistCoverArt(const Artist& artist)
         }
     }
 
-    // Get folder path from the artist's tracks (albums don't carry tracks in cache)
+    // Get folder path from pre-computed map (O(1) instead of O(n) allTracks copy)
     QString folderPath;
-    QString firstTrackPath;
-    {
+    QString firstTrackPath = MusicDataProvider::instance()->artistFirstTrackPath(artist.id);
+
+    // Fallback: before rebuildAlbumsAndArtists, track.artistId may be empty.
+    // Match by artist name instead (rare — only during initial scan).
+    if (firstTrackPath.isEmpty()) {
         const auto tracks = MusicDataProvider::instance()->allTracks();
+        QString artistLower = artist.name.toLower().trimmed();
         for (const auto& track : tracks) {
-            if (track.artistId == artist.id && !track.filePath.isEmpty()) {
-                folderPath = QFileInfo(track.filePath).absolutePath();
+            if (track.artist.toLower().trimmed() == artistLower && !track.filePath.isEmpty()) {
                 firstTrackPath = track.filePath;
                 break;
             }
         }
-        // Fallback: before rebuildAlbumsAndArtists, track.artistId is empty.
-        // Match by artist name instead.
-        if (firstTrackPath.isEmpty()) {
-            QString artistLower = artist.name.toLower().trimmed();
-            for (const auto& track : tracks) {
-                if (track.artist.toLower().trimmed() == artistLower && !track.filePath.isEmpty()) {
-                    folderPath = QFileInfo(track.filePath).absolutePath();
-                    firstTrackPath = track.filePath;
-                    break;
-                }
-            }
-        }
     }
+
+    if (!firstTrackPath.isEmpty())
+        folderPath = QFileInfo(firstTrackPath).absolutePath();
 
     // Look for cover images in folder
     if (!folderPath.isEmpty()) {
@@ -574,7 +586,7 @@ void ArtistsView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     if (!m_artists.isEmpty()) {
-        relayoutGrid();
+        m_resizeDebounceTimer->start();  // restarts 150ms countdown
     }
 }
 
@@ -677,32 +689,48 @@ QPixmap ArtistsView::renderCircularCover(const QPixmap& src, int size)
     return circular;
 }
 
-// ── loadNextCoverBatch — async cover loading, 5 per event-loop tick ─
+// ── loadNextCoverBatch — async cover loading on worker thread ────────
 void ArtistsView::loadNextCoverBatch()
 {
-    int processed = 0;
-    while (m_coverLoadIndex < m_artists.size() && processed < 5) {
+    // Collect batch of artists needing covers
+    QVector<QPair<QString, Artist>> batch;
+    while (m_coverLoadIndex < m_artists.size() && batch.size() < 5) {
         const auto& artist = m_artists[m_coverLoadIndex];
         m_coverLoadIndex++;
-
         if (m_coverCache.contains(artist.id)) continue;
+        batch.append({artist.id, artist});
+    }
 
-        QPixmap pix = findArtistCoverArt(artist);
-        m_coverCache[artist.id] = pix;  // cache even null
-        processed++;
-
-        // Update the label if it still exists
-        QLabel* label = m_coverLabels.value(artist.id);
-        if (label && !pix.isNull()) {
-            int size = label->width();
-            label->setPixmap(renderCircularCover(pix, size));
-            label->setStyleSheet(QString());
+    if (batch.isEmpty()) {
+        if (m_coverLoadIndex < m_artists.size()) {
+            QTimer::singleShot(0, this, &ArtistsView::loadNextCoverBatch);
+        } else {
+            m_coverLabels.clear();
         }
+        return;
     }
 
-    if (m_coverLoadIndex < m_artists.size()) {
-        QTimer::singleShot(0, this, &ArtistsView::loadNextCoverBatch);
-    } else {
-        m_coverLabels.clear();
-    }
+    // Process cover art extraction on worker thread (MetadataReader I/O off main thread)
+    QtConcurrent::run([this, batch]() {
+        QVector<QPair<QString, QPixmap>> results;
+        for (const auto& job : batch)
+            results.append({job.first, findArtistCoverArt(job.second)});
+
+        QMetaObject::invokeMethod(this, [this, results]() {
+            for (const auto& r : results) {
+                m_coverCache[r.first] = r.second;
+                QLabel* label = m_coverLabels.value(r.first);
+                if (label && !r.second.isNull()) {
+                    int size = label->width();
+                    label->setPixmap(renderCircularCover(r.second, size));
+                    label->setStyleSheet(QString());
+                }
+            }
+            if (m_coverLoadIndex < m_artists.size()) {
+                loadNextCoverBatch();
+            } else {
+                m_coverLabels.clear();
+            }
+        }, Qt::QueuedConnection);
+    });
 }

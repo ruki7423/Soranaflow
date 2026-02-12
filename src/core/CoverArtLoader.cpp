@@ -5,6 +5,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QDebug>
+#include <QtConcurrent>
 
 // ── Singleton ───────────────────────────────────────────────────────
 CoverArtLoader* CoverArtLoader::instance()
@@ -31,8 +32,8 @@ void CoverArtLoader::requestCoverArt(const QString& trackPath, const QString& co
         return;
     }
 
-    // Run disk I/O on a worker thread
-    QThread* worker = QThread::create([this, trackPath, coverUrl, size, cacheKey]() {
+    // Run disk I/O on QThreadPool (bounded concurrency)
+    QtConcurrent::run([this, trackPath, coverUrl, size, cacheKey]() {
         QPixmap pix;
 
         // 1. Try coverUrl
@@ -105,7 +106,4 @@ void CoverArtLoader::requestCoverArt(const QString& trackPath, const QString& co
             emit coverArtReady(trackPath, pix);
         }, Qt::QueuedConnection);
     });
-
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
 }

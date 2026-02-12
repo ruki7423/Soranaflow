@@ -41,4 +41,8 @@ private:
     QHash<QString, QVector<Track>> m_folderTracks;  // dir path -> tracks
     QString m_currentFolder;
     QVector<Track> m_currentTracks;  // tracks shown in table (for queue)
+    bool m_libraryDirty = false;
+
+protected:
+    void showEvent(QShowEvent* event) override;
 };

@@ -21,6 +21,7 @@ signals:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private slots:
     void onCreatePlaylistClicked();
@@ -54,4 +55,5 @@ private:
 
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
+    bool m_libraryDirty = false;
 };

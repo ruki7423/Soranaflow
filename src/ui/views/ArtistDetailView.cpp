@@ -282,6 +282,7 @@ void ArtistDetailView::updateDisplay()
     // ── Reset hero + bio ────────────────────────────────────────────────
     m_heroBackground->setVisible(false);
     m_heroBackground->clear();
+    m_cachedHeroOriginal = QPixmap();  // clear cached hero
     m_heroFromFanart = false;
     m_bioHeader->setVisible(false);
     m_bioLabel->setVisible(false);
@@ -829,6 +830,8 @@ void ArtistDetailView::applyCircularPixmap(const QPixmap& pix)
 
 void ArtistDetailView::applyHeroPixmap(const QPixmap& pix)
 {
+    m_cachedHeroOriginal = pix;  // cache original for resize re-use
+
     int heroW = m_heroBackground->width();
     if (heroW <= 0) heroW = width();
     if (heroW <= 0) heroW = 800; // fallback
@@ -978,18 +981,9 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
 void ArtistDetailView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    // Re-apply hero background if visible
-    if (m_heroBackground->isVisible() && !m_heroBackground->pixmap().isNull()) {
-        if (m_heroFromFanart) {
-            QString cachedBg = FanartTvProvider::instance()->getCachedArtistBackground(m_artistMbid);
-            if (!cachedBg.isEmpty()) {
-                QPixmap pix(cachedBg);
-                if (!pix.isNull()) applyHeroPixmap(pix);
-            }
-        } else {
-            // Re-apply album art fallback at new width
-            applyAlbumArtFallback();
-        }
+    // Re-apply hero from cached original (avoids re-loading from disk/network)
+    if (m_heroBackground->isVisible() && !m_cachedHeroOriginal.isNull()) {
+        applyHeroPixmap(m_cachedHeroOriginal);
     }
 }
 

@@ -123,6 +123,9 @@ private:
     QTimer* m_scanHideTimer = nullptr;
     QElapsedTimer m_batchThrottle;
     QTimer* m_libraryReloadTimer = nullptr;
+    QTimer* m_searchDebounceTimer = nullptr;
+    QString m_pendingSearchQuery;
+    int m_searchGeneration = 0;
     void doLibraryReload();
     void showScanBar(int current, int total);
     void showScanComplete(int totalTracks);

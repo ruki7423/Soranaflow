@@ -11,6 +11,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QTimer>
 
 #include "../../core/ThemeManager.h"
@@ -18,6 +19,7 @@
 #include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
 #include "../../metadata/CoverArtProvider.h"
+#include <QtConcurrent>
 
 // ═══════════════════════════════════════════════════════════════════
 //  Constructor
@@ -27,9 +29,15 @@ AlbumsView::AlbumsView(QWidget* parent)
 {
     setupUI();
 
-    // Library change: clear cover cache and reload
+    m_resizeDebounceTimer = new QTimer(this);
+    m_resizeDebounceTimer->setSingleShot(true);
+    m_resizeDebounceTimer->setInterval(150);
+    connect(m_resizeDebounceTimer, &QTimer::timeout, this, &AlbumsView::relayoutGrid);
+
+    // Library change: defer if invisible
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
             this, [this]() {
+                if (!isVisible()) { m_libraryDirty = true; return; }
                 m_coverCache.clear();
                 reloadAlbums();
             });
@@ -170,8 +178,14 @@ void AlbumsView::setupUI()
     // ── Inline filter ───────────────────────────────────────────────
     m_filterInput = new StyledInput(QStringLiteral("Filter albums..."), QString(), this);
     m_filterInput->setFixedHeight(32);
+    m_filterDebounceTimer = new QTimer(this);
+    m_filterDebounceTimer->setSingleShot(true);
+    m_filterDebounceTimer->setInterval(200);
+    connect(m_filterDebounceTimer, &QTimer::timeout, this, [this]() {
+        onFilterChanged(m_filterInput->lineEdit()->text());
+    });
     connect(m_filterInput->lineEdit(), &QLineEdit::textChanged,
-            this, &AlbumsView::onFilterChanged);
+            this, [this]() { m_filterDebounceTimer->start(); });
     m_filterInput->lineEdit()->installEventFilter(this);
     mainLayout->addWidget(m_filterInput);
 
@@ -503,11 +517,21 @@ void AlbumsView::relayoutGrid()
 // ═══════════════════════════════════════════════════════════════════
 //  resizeEvent — re-layout grid on window resize
 // ═══════════════════════════════════════════════════════════════════
+void AlbumsView::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (m_libraryDirty) {
+        m_libraryDirty = false;
+        m_coverCache.clear();
+        reloadAlbums();
+    }
+}
+
 void AlbumsView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     if (!m_albums.isEmpty()) {
-        relayoutGrid();
+        m_resizeDebounceTimer->start();  // restarts 150ms countdown
     }
 }
 
@@ -731,30 +755,46 @@ QPixmap AlbumsView::renderRoundedCover(const QPixmap& src, int size, int radius)
 // ═══════════════════════════════════════════════════════════════════
 void AlbumsView::loadNextCoverBatch()
 {
-    int processed = 0;
-    while (m_coverLoadIndex < m_albums.size() && processed < 5) {
+    // Collect batch of albums needing covers
+    QVector<QPair<QString, Album>> batch;
+    while (m_coverLoadIndex < m_albums.size() && batch.size() < 5) {
         const auto& album = m_albums[m_coverLoadIndex];
         m_coverLoadIndex++;
+        if (m_coverCache.contains(album.id)) continue;
+        batch.append({album.id, album});
+    }
 
-        if (m_coverCache.contains(album.id)) continue;  // already cached
-
-        QPixmap pix = findCoverArt(album);
-        m_coverCache[album.id] = pix;  // cache even null (means "no cover")
-        processed++;
-
-        // Update the label if it still exists
-        QLabel* label = m_coverLabels.value(album.id);
-        if (label && !pix.isNull()) {
-            int size = label->width();
-            int radius = label->property("coverRadius").toInt();
-            label->setPixmap(renderRoundedCover(pix, size, radius));
-            label->setStyleSheet(QString());  // clear placeholder style
+    if (batch.isEmpty()) {
+        if (m_coverLoadIndex < m_albums.size()) {
+            QTimer::singleShot(0, this, &AlbumsView::loadNextCoverBatch);
+        } else {
+            m_coverLabels.clear();
         }
+        return;
     }
 
-    if (m_coverLoadIndex < m_albums.size()) {
-        QTimer::singleShot(0, this, &AlbumsView::loadNextCoverBatch);
-    } else {
-        m_coverLabels.clear();
-    }
+    // Process cover art extraction on worker thread (MetadataReader I/O off main thread)
+    QtConcurrent::run([this, batch]() {
+        QVector<QPair<QString, QPixmap>> results;
+        for (const auto& job : batch)
+            results.append({job.first, findCoverArt(job.second)});
+
+        QMetaObject::invokeMethod(this, [this, results]() {
+            for (const auto& r : results) {
+                m_coverCache[r.first] = r.second;
+                QLabel* label = m_coverLabels.value(r.first);
+                if (label && !r.second.isNull()) {
+                    int size = label->width();
+                    int radius = label->property("coverRadius").toInt();
+                    label->setPixmap(renderRoundedCover(r.second, size, radius));
+                    label->setStyleSheet(QString());
+                }
+            }
+            if (m_coverLoadIndex < m_albums.size()) {
+                loadNextCoverBatch();
+            } else {
+                m_coverLabels.clear();
+            }
+        }, Qt::QueuedConnection);
+    });
 }

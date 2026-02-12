@@ -1,5 +1,6 @@
 #include "PlaylistsView.h"
 #include <QMouseEvent>
+#include <QShowEvent>
 #include "../dialogs/StyledMessageBox.h"
 #include "../dialogs/NewPlaylistDialog.h"
 #include "../../core/ThemeManager.h"
@@ -229,7 +230,10 @@ void PlaylistsView::setupUI()
     connect(PlaylistManager::instance(), &PlaylistManager::playlistsChanged,
             this, &PlaylistsView::onPlaylistsChanged);
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
-            this, &PlaylistsView::onPlaylistsChanged);
+            this, [this]() {
+                if (!isVisible()) { m_libraryDirty = true; return; }
+                onPlaylistsChanged();
+            });
     connect(m_largeIconBtn, &QPushButton::clicked, this, [this]() { setViewMode(LargeIcons); });
     connect(m_smallIconBtn, &QPushButton::clicked, this, [this]() { setViewMode(SmallIcons); });
     connect(m_listBtn, &QPushButton::clicked, this, [this]() { setViewMode(ListView); });
@@ -606,6 +610,15 @@ void PlaylistsView::onCreatePlaylistClicked()
 // ═════════════════════════════════════════════════════════════════════
 //  onPlaylistsChanged
 // ═════════════════════════════════════════════════════════════════════
+
+void PlaylistsView::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (m_libraryDirty) {
+        m_libraryDirty = false;
+        onPlaylistsChanged();
+    }
+}
 
 void PlaylistsView::onPlaylistsChanged()
 {

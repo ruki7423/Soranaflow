@@ -11,6 +11,7 @@
 #include "../../core/library/LibraryDatabase.h"
 
 #include <QKeyEvent>
+#include <QShowEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include "../dialogs/StyledMessageBox.h"
@@ -19,6 +20,7 @@
 #include <QTimer>
 #include <algorithm>
 #include <QRandomGenerator>
+#include <QtConcurrent>
 
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
@@ -36,15 +38,24 @@ LibraryView::LibraryView(QWidget* parent)
     populateTracks();
 
     // ── Connect signals ────────────────────────────────────────────
+    m_searchDebounceTimer = new QTimer(this);
+    m_searchDebounceTimer->setSingleShot(true);
+    m_searchDebounceTimer->setInterval(200);
+    connect(m_searchDebounceTimer, &QTimer::timeout, this, [this]() {
+        onSearchChanged(m_searchInput->lineEdit()->text());
+    });
     connect(m_searchInput->lineEdit(), &QLineEdit::textChanged,
-            this, &LibraryView::onSearchChanged);
+            this, [this]() { m_searchDebounceTimer->start(); });
     m_searchInput->lineEdit()->installEventFilter(this);
     connect(PlaybackState::instance(), &PlaybackState::trackChanged,
             this, &LibraryView::onTrackChanged);
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &LibraryView::refreshTheme);
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
-            this, &LibraryView::onLibraryUpdated);
+            this, [this]() {
+                if (!isVisible()) { m_libraryDirty = true; return; }
+                onLibraryUpdated();
+            });
 
     // ── Scanner progress feedback ──────────────────────────────────
     auto* scanner = LibraryScanner::instance();
@@ -597,14 +608,19 @@ void LibraryView::onIdentifyAudioClicked()
 
 void LibraryView::addTracksFromFiles(const QStringList& files)
 {
-    auto* db = LibraryDatabase::instance();
-    for (const QString& filePath : files) {
-        auto trackOpt = MetadataReader::readTrack(filePath);
-        if (!trackOpt.has_value()) continue;
-        db->insertTrack(trackOpt.value());
-    }
-    // insertTrack now handles album/artist creation incrementally
-    MusicDataProvider::instance()->reloadFromDatabase();
+    // Run MetadataReader I/O off main thread
+    QtConcurrent::run([files]() {
+        auto* db = LibraryDatabase::instance();
+        for (const QString& filePath : files) {
+            auto trackOpt = MetadataReader::readTrack(filePath);
+            if (!trackOpt.has_value()) continue;
+            db->insertTrack(trackOpt.value());
+        }
+        // Reload on main thread after all inserts complete
+        QMetaObject::invokeMethod(MusicDataProvider::instance(), [&]() {
+            MusicDataProvider::instance()->reloadFromDatabase();
+        }, Qt::QueuedConnection);
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -678,6 +694,15 @@ void LibraryView::refreshTheme()
 // ═════════════════════════════════════════════════════════════════════
 //  onLibraryUpdated
 // ═════════════════════════════════════════════════════════════════════
+
+void LibraryView::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (m_libraryDirty) {
+        m_libraryDirty = false;
+        onLibraryUpdated();
+    }
+}
 
 void LibraryView::onLibraryUpdated()
 {

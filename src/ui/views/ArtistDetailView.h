@@ -44,6 +44,7 @@ private:
     Artist m_artist;
     QString m_artistMbid;
     bool m_heroFromFanart = false;   // true = fanart.tv bg, false = album art fallback
+    QPixmap m_cachedHeroOriginal;    // unscaled hero pixmap for resize re-use
 
     QNetworkAccessManager* m_network;
     QNetworkReply* m_pendingLastFmReply = nullptr;

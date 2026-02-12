@@ -5,11 +5,6 @@
 #include "../../core/ThemeManager.h"
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledButton.h"
-#ifdef Q_OS_MACOS
-#include "../../platform/macos/AudioProcessTap.h"
-#include "../../core/audio/AudioEngine.h"
-#endif
-
 #include <QLineEdit>
 #include <QPushButton>
 #include <QJsonObject>
@@ -87,14 +82,12 @@ AppleMusicView::AppleMusicView(QWidget* parent)
             } else {
                 qDebug() << "[AppleMusicView] No cached token yet, will inject when available";
             }
-#ifdef Q_OS_MACOS
-            // Pre-create ProcessTap for faster start when user plays
-            auto* tap = AudioProcessTap::instance();
-            if (tap->isSupported() && !tap->isPrepared() && !tap->isActive()) {
-                tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
-                tap->prepareForPlayback();
-            }
-#endif
+            // NOTE: Do NOT pre-create ProcessTap here.
+            // CATapMuted intercepts ALL app audio (including local playback).
+            // Pre-creating on musicKitReady causes local audio to go silent
+            // after Apple Music disconnect/reconnect cycles.
+            // ProcessTap is created on-demand when Apple Music actually plays
+            // (PlaybackState::playTrack → activate → start).
         });
 
     // Full playback confirmed — also refresh auth status label

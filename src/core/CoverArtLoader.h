@@ -3,7 +3,6 @@
 #include <QObject>
 #include <QPixmap>
 #include <QCache>
-#include <QThread>
 #include <QString>
 
 class CoverArtLoader : public QObject {

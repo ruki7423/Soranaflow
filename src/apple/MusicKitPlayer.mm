@@ -645,6 +645,20 @@ void MusicKitPlayer::clearMusicUserToken()
     m_pendingUserToken.clear();
     m_pendingSongId.clear();
 
+    // Tear down ProcessTap BEFORE destroying WebView.
+    // WebView destruction kills WebKit child processes, which invalidates
+    // the aggregate device created by ProcessTap (CATapMuted still intercepts
+    // self audio but the IOProc passthrough stops → local playback goes silent).
+#ifdef Q_OS_MACOS
+    {
+        auto* tap = AudioProcessTap::instance();
+        if (tap->isPrepared() || tap->isActive()) {
+            qDebug() << "[MusicKitPlayer] Stopping ProcessTap before WebView teardown";
+            tap->stop();
+        }
+    }
+#endif
+
     if (m_wk && m_wk->webView) {
         if (m_ready)
             runJS(QStringLiteral("if(music) music.stop()"));

@@ -13,6 +13,7 @@
 #include <QPixmap>
 #include <QTimer>
 #include <QDebug>
+#include <QShowEvent>
 #include <algorithm>
 
 // ═════════════════════════════════════════════════════════════════════
@@ -71,7 +72,10 @@ FolderBrowserView::FolderBrowserView(QWidget* parent)
 
     // ── Connections ─────────────────────────────────────────────────
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
-            this, &FolderBrowserView::reloadFolders);
+            this, [this]() {
+                if (!isVisible()) { m_libraryDirty = true; return; }
+                reloadFolders();
+            });
 
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &FolderBrowserView::applyTheme);
@@ -103,6 +107,15 @@ FolderBrowserView::FolderBrowserView(QWidget* parent)
 // ═════════════════════════════════════════════════════════════════════
 //  reloadFolders — rebuild folder map + tree from track data
 // ═════════════════════════════════════════════════════════════════════
+
+void FolderBrowserView::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (m_libraryDirty) {
+        m_libraryDirty = false;
+        reloadFolders();
+    }
+}
 
 void FolderBrowserView::reloadFolders()
 {

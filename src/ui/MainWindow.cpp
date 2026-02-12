@@ -24,6 +24,7 @@
 #include "../core/library/LibraryDatabase.h"
 #include "../core/MusicData.h"
 #include "../core/CoverArtLoader.h"
+#include <QtConcurrent>
 #include "../core/ThemeManager.h"
 #ifdef Q_OS_MAC
 #include "../platform/macos/MacMediaIntegration.h"
@@ -290,13 +291,22 @@ void MainWindow::connectSignals()
     connect(m_sidebar, &AppSidebar::folderSelected,
             this, &MainWindow::onFolderSelected);
 
-    // Sidebar search -> global search results view
+    // Sidebar search -> global search results view (debounced 200ms)
+    m_searchDebounceTimer = new QTimer(this);
+    m_searchDebounceTimer->setSingleShot(true);
+    m_searchDebounceTimer->setInterval(200);
+    connect(m_searchDebounceTimer, &QTimer::timeout, this, [this]() {
+        onSearch(m_pendingSearchQuery);
+    });
     connect(m_sidebar, &AppSidebar::searchRequested,
             this, [this](const QString& query) {
         if (query.trimmed().isEmpty()) {
+            m_searchDebounceTimer->stop();
+            m_pendingSearchQuery.clear();
             onSearchCleared();
         } else {
-            onSearch(query.trimmed());
+            m_pendingSearchQuery = query.trimmed();
+            m_searchDebounceTimer->start();  // restarts 200ms countdown
         }
     });
 
@@ -660,16 +670,28 @@ SearchResultsView* MainWindow::ensureSearchResultsView()
 
 void MainWindow::onSearch(const QString& query)
 {
-    auto tracks  = LibraryDatabase::instance()->searchTracks(query);
-    auto albums  = LibraryDatabase::instance()->searchAlbums(query);
-    auto artists = LibraryDatabase::instance()->searchArtists(query);
+    int gen = ++m_searchGeneration;
 
     // Only save previous view when first entering search (not on each keystroke)
     if (m_viewStack->currentWidget() != ensureSearchResultsView()) {
         m_previousView = m_viewStack->currentWidget();
     }
-    m_searchResultsView->setResults(query, artists, albums, tracks);
     m_viewStack->setCurrentWidget(m_searchResultsView);
+
+    // Run DB queries off main thread
+    QtConcurrent::run([this, query, gen]() {
+        auto tracks  = LibraryDatabase::instance()->searchTracks(query);
+        auto albums  = LibraryDatabase::instance()->searchAlbums(query);
+        auto artists = LibraryDatabase::instance()->searchArtists(query);
+
+        QMetaObject::invokeMethod(this, [this, gen, query,
+                tracks  = std::move(tracks),
+                albums  = std::move(albums),
+                artists = std::move(artists)]() {
+            if (gen != m_searchGeneration) return;  // stale result
+            m_searchResultsView->setResults(query, artists, albums, tracks);
+        }, Qt::QueuedConnection);
+    });
 }
 
 void MainWindow::onSearchCleared()

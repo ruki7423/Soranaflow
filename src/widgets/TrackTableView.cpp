@@ -545,9 +545,9 @@ void TrackTableView::setupHeader()
         }
     }
 
-    // Title column stretches
+    // Title column — Interactive so users can resize it
     if (titleCol >= 0) {
-        hdr->setSectionResizeMode(titleCol, QHeaderView::Stretch);
+        hdr->setSectionResizeMode(titleCol, QHeaderView::Interactive);
     }
 
     // Restore saved widths
@@ -924,10 +924,10 @@ void TrackTableView::restoreColumnWidths()
     if (!state.isEmpty()) {
         horizontalHeader()->restoreState(state);
 
-        // Re-apply stretch on title column since restoreState overrides it
+        // Re-apply Interactive on title column since restoreState overrides it
         int titleCol = columnForTrackColumn(TrackColumn::Title);
         if (titleCol >= 0) {
-            horizontalHeader()->setSectionResizeMode(titleCol, QHeaderView::Stretch);
+            horizontalHeader()->setSectionResizeMode(titleCol, QHeaderView::Interactive);
         }
 
         // Ensure duration column didn't shrink below readable width

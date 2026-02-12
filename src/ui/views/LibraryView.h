@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QPropertyAnimation>
 #include <QPushButton>
+#include <QTimer>
 #include "../../widgets/StyledButton.h"
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledScrollArea.h"
@@ -63,4 +64,9 @@ private:
     QPropertyAnimation* m_scanSpinAnim = nullptr;
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
+    QTimer* m_searchDebounceTimer = nullptr;
+    bool m_libraryDirty = false;
+
+protected:
+    void showEvent(QShowEvent* event) override;
 };

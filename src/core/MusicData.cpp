@@ -187,34 +187,42 @@ QVector<TrackIndex> MusicDataProvider::allTrackIndexes() const
 
 Album MusicDataProvider::albumById(const QString& id) const
 {
-    // Always load from DB — it populates tracks on demand without duplication
-    if (!m_useMockData) {
-        return LibraryDatabase::instance()->albumById(id);
-    }
-
-    // Mock data path
+    // O(1) cache lookup — albums without tracks (metadata only)
     {
         QReadLocker l(&m_lock);
-        for (const auto& a : m_albums)
-            if (a.id == id) return a;
+        auto it = m_albumIndex.constFind(id);
+        if (it != m_albumIndex.constEnd() && *it < m_albums.size())
+            return m_albums[*it];
+        // Mock data path — linear scan
+        if (m_useMockData) {
+            for (const auto& a : m_albums)
+                if (a.id == id) return a;
+        }
     }
     return Album{};
 }
 
 Artist MusicDataProvider::artistById(const QString& id) const
 {
-    // Always load from DB — it populates albums on demand without duplication
-    if (!m_useMockData) {
-        return LibraryDatabase::instance()->artistById(id);
-    }
-
-    // Mock data path
+    // O(1) cache lookup — artists with album metadata (no track vectors)
     {
         QReadLocker l(&m_lock);
-        for (const auto& a : m_artists)
-            if (a.id == id) return a;
+        auto it = m_artistIndex.constFind(id);
+        if (it != m_artistIndex.constEnd() && *it < m_artists.size())
+            return m_artists[*it];
+        // Mock data path — linear scan
+        if (m_useMockData) {
+            for (const auto& a : m_artists)
+                if (a.id == id) return a;
+        }
     }
     return Artist{};
+}
+
+QString MusicDataProvider::artistFirstTrackPath(const QString& artistId) const
+{
+    QReadLocker l(&m_lock);
+    return m_artistFirstTrackPath.value(artistId);
 }
 
 Playlist MusicDataProvider::playlistById(const QString& id) const
@@ -306,6 +314,25 @@ void MusicDataProvider::reloadFromDatabase()
             }
         }
 
+        // Build index maps for O(1) lookup
+        QHash<QString, int> albumIdx;
+        albumIdx.reserve(dbAlbums.size());
+        for (int i = 0; i < dbAlbums.size(); ++i)
+            albumIdx[dbAlbums[i].id] = i;
+
+        QHash<QString, int> artistIdx;
+        artistIdx.reserve(dbArtists.size());
+        for (int i = 0; i < dbArtists.size(); ++i)
+            artistIdx[dbArtists[i].id] = i;
+
+        // Build artist → first track file path map
+        QHash<QString, QString> artistPaths;
+        for (const auto& track : dbTracks) {
+            if (!track.artistId.isEmpty() && !track.filePath.isEmpty()
+                && !artistPaths.contains(track.artistId))
+                artistPaths[track.artistId] = track.filePath;
+        }
+
         // Swap-on-complete: move all results to main thread atomically
         // Stale cache remains visible to UI until swap completes (no empty gap)
         QMetaObject::invokeMethod(this, [this,
@@ -313,7 +340,10 @@ void MusicDataProvider::reloadFromDatabase()
                 indexes = std::move(dbTrackIndexes),
                 albums  = std::move(dbAlbums),
                 artists = std::move(dbArtists),
-                playlists = std::move(dbPlaylists)]() mutable {
+                playlists = std::move(dbPlaylists),
+                aIdx    = std::move(albumIdx),
+                rIdx    = std::move(artistIdx),
+                aPaths  = std::move(artistPaths)]() mutable {
             {
                 QWriteLocker l(&m_lock);
                 m_useMockData = false;
@@ -322,16 +352,21 @@ void MusicDataProvider::reloadFromDatabase()
                 // Keep cached albums/artists if DB returned 0 (scan in progress)
                 if (!albums.isEmpty()) {
                     m_albums = std::move(albums);
+                    m_albumIndex = std::move(aIdx);
                 } else if (!m_albums.isEmpty()) {
                     qDebug() << "[MDP] Keeping cached" << m_albums.size() << "albums (DB returned 0)";
                 }
                 if (!artists.isEmpty()) {
                     m_artists = std::move(artists);
+                    m_artistIndex = std::move(rIdx);
                 } else if (!m_artists.isEmpty()) {
                     qDebug() << "[MDP] Keeping cached" << m_artists.size() << "artists (DB returned 0)";
                 }
                 if (!playlists.isEmpty()) {
                     m_playlists = std::move(playlists);
+                }
+                if (!aPaths.isEmpty()) {
+                    m_artistFirstTrackPath = std::move(aPaths);
                 }
             }
             qDebug() << "MusicDataProvider: Reloaded"
@@ -393,6 +428,25 @@ void MusicDataProvider::loadFromDatabase()
     // Also load track indexes (cached — no more sync DB calls from allTrackIndexes())
     QVector<TrackIndex> dbTrackIndexes = db->allTrackIndexes();
 
+    // Build index maps for O(1) lookup
+    QHash<QString, int> albumIdx;
+    albumIdx.reserve(dbAlbums.size());
+    for (int i = 0; i < dbAlbums.size(); ++i)
+        albumIdx[dbAlbums[i].id] = i;
+
+    QHash<QString, int> artistIdx;
+    artistIdx.reserve(dbArtists.size());
+    for (int i = 0; i < dbArtists.size(); ++i)
+        artistIdx[dbArtists[i].id] = i;
+
+    // Build artist → first track file path map
+    QHash<QString, QString> artistPaths;
+    for (const auto& track : dbTracks) {
+        if (!track.artistId.isEmpty() && !track.filePath.isEmpty()
+            && !artistPaths.contains(track.artistId))
+            artistPaths[track.artistId] = track.filePath;
+    }
+
     // Swap under write lock — blocks readers briefly
     {
         QWriteLocker l(&m_lock);
@@ -402,6 +456,9 @@ void MusicDataProvider::loadFromDatabase()
         m_albums       = std::move(dbAlbums);
         m_artists      = std::move(dbArtists);
         m_playlists    = std::move(dbPlaylists);
+        m_albumIndex   = std::move(albumIdx);
+        m_artistIndex  = std::move(artistIdx);
+        m_artistFirstTrackPath = std::move(artistPaths);
     }
 
     qDebug() << "MusicDataProvider: Loaded" << m_tracks.size() << "tracks,"

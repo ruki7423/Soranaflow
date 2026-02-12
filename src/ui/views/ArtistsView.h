@@ -8,6 +8,7 @@
 #include <QShowEvent>
 #include <QHash>
 #include <QPointer>
+#include <QTimer>
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledScrollArea.h"
 #include "../../widgets/StyledButton.h"
@@ -64,4 +65,7 @@ private:
     QHash<QString, QPixmap> m_coverCache;
     QHash<QString, QPointer<QLabel>> m_coverLabels;
     int m_coverLoadIndex = 0;
+    QTimer* m_resizeDebounceTimer = nullptr;
+    QTimer* m_searchDebounceTimer = nullptr;
+    bool m_libraryDirty = false;
 };

@@ -428,7 +428,8 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
     for (const QString& ext : Settings::instance()->ignoreExtensions())
         ignoreExts.insert(ext.toLower());
 
-    // Check for new files
+    // Collect new files (pre-register in m_knownFiles to prevent re-dispatch)
+    QStringList newFiles;
     QDirIterator it(path, QDir::Files);
     while (it.hasNext()) {
         it.next();
@@ -441,13 +442,35 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
         QString filePath = fi.absoluteFilePath();
         if (!m_knownFiles.contains(filePath)) {
             qDebug() << "LibraryScanner: New file detected:" << filePath;
-            processFile(filePath);
-            emit fileAdded(filePath);
+            m_knownFiles.insert(filePath);
+            newFiles.append(filePath);
         }
     }
 
-    // Check for removed files — only check files directly in this directory,
-    // NOT in subdirectories (subdirectories get their own change notifications)
+    // Process new files on worker thread (MetadataReader I/O off main thread)
+    if (!newFiles.isEmpty()) {
+        QtConcurrent::run([this, newFiles]() {
+            for (const QString& filePath : newFiles) {
+                if (LibraryDatabase::instance()->trackExists(filePath))
+                    continue;
+                auto trackOpt = MetadataReader::readTrack(filePath);
+                if (!trackOpt.has_value()) continue;
+                Track track = trackOpt.value();
+                QFileInfo fi(filePath);
+                track.fileSize = fi.size();
+                track.fileMtime = fi.lastModified().toSecsSinceEpoch();
+                LibraryDatabase::instance()->insertTrack(track);
+            }
+            QMetaObject::invokeMethod(this, [this, newFiles]() {
+                for (const QString& fp : newFiles)
+                    emit fileAdded(fp);
+                LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
+                emit LibraryDatabase::instance()->databaseChanged();
+            }, Qt::QueuedConnection);
+        });
+    }
+
+    // Check for removed files — only check files directly in this directory
     QSet<QString> currentFiles;
     QDirIterator it2(path, QDir::Files);
     while (it2.hasNext()) {
@@ -457,25 +480,23 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
 
     QStringList toRemove;
     for (const QString& known : m_knownFiles) {
-        // Only check files that are directly in this directory, not subdirectories
         QFileInfo fi(known);
         if (fi.absolutePath() == path && !currentFiles.contains(known)) {
             toRemove.append(known);
         }
     }
-    for (const QString& removed : toRemove) {
-        qDebug() << "LibraryScanner: File removed:" << removed;
-        LibraryDatabase::instance()->removeTrackByPath(removed);
-        m_knownFiles.remove(removed);
-        emit fileRemoved(removed);
+    if (!toRemove.isEmpty()) {
+        for (const QString& removed : toRemove) {
+            qDebug() << "LibraryScanner: File removed:" << removed;
+            LibraryDatabase::instance()->removeTrackByPath(removed);
+            m_knownFiles.remove(removed);
+            emit fileRemoved(removed);
+        }
+        QTimer::singleShot(500, this, []() {
+            LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
+            emit LibraryDatabase::instance()->databaseChanged();
+        });
     }
-
-    // Incremental: insertTrack/removeTrackByPath already handle album/artist updates.
-    // Just emit databaseChanged after a short debounce.
-    QTimer::singleShot(500, this, []() {
-        LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
-        emit LibraryDatabase::instance()->databaseChanged();
-    });
 }
 
 void LibraryScanner::onFileChanged(const QString& path)
@@ -484,12 +505,23 @@ void LibraryScanner::onFileChanged(const QString& path)
 
     QFileInfo fi(path);
     if (fi.exists()) {
-        // File was modified — remove old entry and re-read metadata
-        // removeTrackByPath now handles album stats + orphan cleanup incrementally
+        // File was modified — remove old entry and re-read metadata on worker thread
         LibraryDatabase::instance()->removeTrackByPath(path);
         m_knownFiles.remove(path);
-        // processFile → insertTrack now handles findOrCreate + stats incrementally
-        processFile(path);
+        m_knownFiles.insert(path);  // pre-register
+        QtConcurrent::run([this, path]() {
+            auto trackOpt = MetadataReader::readTrack(path);
+            if (!trackOpt.has_value()) return;
+            Track track = trackOpt.value();
+            QFileInfo tfi(path);
+            track.fileSize = tfi.size();
+            track.fileMtime = tfi.lastModified().toSecsSinceEpoch();
+            LibraryDatabase::instance()->insertTrack(track);
+            QMetaObject::invokeMethod(this, [this, path]() {
+                emit fileAdded(path);
+                emit LibraryDatabase::instance()->databaseChanged();
+            }, Qt::QueuedConnection);
+        });
     } else {
         // File was deleted — removeTrackByPath handles cleanup incrementally
         LibraryDatabase::instance()->removeTrackByPath(path);
