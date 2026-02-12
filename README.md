@@ -102,13 +102,23 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 11 (v1.0.0 → v1.4.3) |
+| GitHub Releases | 12 (v1.0.0 → v1.4.4) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.4.4 — Apple Music & Stability
+
+- Apple Music: eliminated auth popup, fixed first-play stall, ProcessTap audio capture
+- Clean shutdown in ~1s — proper WKWebView, DB, scanner teardown
+- Sidebar: Library Folders collapsible with scroll support
+- Improved uninstaller with admin privileges and Apple Music data cleanup
+- Database: fixed connection warnings on quit
+- Volume slider: eliminated visual lag during drag
+- Language dialog: fixed text truncation
 
 ### v1.4.3 — Auto-Scan on Folder Add
 
