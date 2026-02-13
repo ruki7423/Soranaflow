@@ -241,7 +241,9 @@ void ArtistDetailView::setupUI()
         QStringLiteral("color: %1; font-size: 13px; line-height: 1.6;")
             .arg(ThemeManager::instance()->colors().foregroundMuted));
     m_bioLabel->setVisible(false);
-    m_bioLabel->setTextFormat(Qt::PlainText);
+    m_bioLabel->setTextFormat(Qt::RichText);
+    m_bioLabel->setOpenExternalLinks(true);
+    m_bioLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
     innerLayout->addWidget(m_bioLabel);
 
     // ── Albums section ────────────────────────────────────────────────
@@ -757,35 +759,65 @@ void ArtistDetailView::fetchFanartImages()
     FanartTvProvider::instance()->fetchArtistImages(m_artistMbid);
 }
 
-// ── Sanitise MusicBrainz annotation text ────────────────────────────
+// ── Sanitise MusicBrainz annotation text (returns HTML) ─────────────
 static QString sanitizeAnnotation(const QString& raw)
 {
     QString t = raw;
+    const QString linkColor = ThemeManager::instance()->colors().accent;
 
-    // 1. [url|display text] → keep "display text"
-    t.replace(QRegularExpression(QStringLiteral("\\[https?://[^|\\]]+\\|([^\\]]+)\\]")),
+    // 1. Replace [url|display text] with unique placeholders
+    struct Link { QString url; QString text; };
+    QVector<Link> namedLinks;
+    {
+        QRegularExpression rx(QStringLiteral("\\[(https?://[^|\\]]+)\\|([^\\]]+)\\]"));
+        int idx = 0;
+        QRegularExpressionMatch m = rx.match(t);
+        while (m.hasMatch()) {
+            namedLinks.append({m.captured(1), m.captured(2)});
+            QString placeholder = QStringLiteral("\x01LINK%1\x01").arg(idx++);
+            t.replace(m.capturedStart(), m.capturedLength(), placeholder);
+            m = rx.match(t, m.capturedStart() + placeholder.length());
+        }
+    }
+
+    // 2. [bare url] → unwrap brackets (bare URL preserved for step 7)
+    t.replace(QRegularExpression(QStringLiteral("\\[(https?://[^\\]]+)\\]")),
               QStringLiteral("\\1"));
 
-    // 2. [bare url] → remove entirely
-    t.remove(QRegularExpression(QStringLiteral("\\[https?://[^\\]]+\\]")));
-
-    // 3. Bare URLs not in brackets
-    t.remove(QRegularExpression(QStringLiteral("https?://\\S+")));
-
-    // 4. MusicBrainz wiki bold/italic markers
+    // 3. MusicBrainz wiki bold/italic markers
     t.remove(QStringLiteral("'''"));
     t.remove(QStringLiteral("''"));
 
-    // 5. Standalone UUIDs (MBIDs)
+    // 4. Standalone UUIDs (MBIDs)
     t.remove(QRegularExpression(
         QStringLiteral("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")));
 
-    // 6. Collapse whitespace left by removals
+    // 5. Collapse whitespace left by removals
     t.replace(QRegularExpression(QStringLiteral("[ \\t]{2,}")), QStringLiteral(" "));
     t.replace(QRegularExpression(QStringLiteral("\\n{3,}")), QStringLiteral("\n\n"));
     t = t.trimmed();
 
-    return t.length() >= 10 ? t : QString();
+    if (t.length() < 10) return QString();
+
+    // 6. HTML-escape text content
+    t = t.toHtmlEscaped();
+
+    // 7. Convert bare URLs to clickable <a> tags
+    t.replace(QRegularExpression(QStringLiteral("https?://[^\\s&lt;]+")),
+              QStringLiteral("<a href=\"\\0\" style=\"color:%1;\">\\0</a>").arg(linkColor));
+
+    // 8. Restore named [url|text] links as clickable <a> tags
+    for (int i = 0; i < namedLinks.size(); ++i) {
+        const auto& lnk = namedLinks[i];
+        t.replace(QStringLiteral("\x01LINK%1\x01").arg(i),
+                  QStringLiteral("<a href=\"%1\" style=\"color:%2;\">%3</a>")
+                      .arg(lnk.url.toHtmlEscaped(), linkColor, lnk.text.toHtmlEscaped()));
+    }
+
+    // 9. Newlines → <br> for RichText
+    t.replace(QStringLiteral("\n"), QStringLiteral("<br>"));
+
+    return t;
 }
 
 void ArtistDetailView::fetchBiography()
@@ -997,6 +1029,12 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
             bio = bio.trimmed();
 
         if (!bio.isEmpty()) {
+            // HTML-escape + convert bare URLs to clickable links
+            bio = bio.toHtmlEscaped();
+            const QString linkColor = ThemeManager::instance()->colors().accent;
+            bio.replace(QRegularExpression(QStringLiteral("https?://[^\\s&lt;]+")),
+                        QStringLiteral("<a href=\"\\0\" style=\"color:%1;\">\\0</a>").arg(linkColor));
+            bio.replace(QStringLiteral("\n"), QStringLiteral("<br>"));
             m_bioHeader->setVisible(true);
             m_bioLabel->setVisible(true);
             m_bioLabel->setText(bio);
