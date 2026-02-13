@@ -389,7 +389,7 @@ void MusicKitPlayer::play(const QString& songId)
         m_pendingSongId = songId;
         if (m_pendingUserToken.isEmpty()) {
             qDebug() << "[MusicKitPlayer] No token yet — queuing song, waiting for token";
-            emit playbackStateChanged(false); // signal UI: not playing yet
+            emit playbackStateChanged(false);
             return;
         }
         qDebug() << "[MusicKitPlayer] Token available, creating WebView for queued song";

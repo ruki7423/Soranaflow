@@ -29,6 +29,7 @@ AppleMusicView::AppleMusicView(QWidget* parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
     setObjectName(QStringLiteral("AppleMusicView"));
+    m_playDebounce.start();
     setupUI();
 
     auto* am = AppleMusicManager::instance();
@@ -561,6 +562,12 @@ static const int COL_DUR_WIDTH    = 50;
 
 void AppleMusicView::playSong(const QJsonObject& song)
 {
+    if (m_playDebounce.elapsed() < 500) {
+        qDebug() << "[AppleMusic] playSong debounced, ignoring duplicate";
+        return;
+    }
+    m_playDebounce.restart();
+
     // Build a queue from all currently displayed songs so next/prev works
     QJsonArray songsArray = m_lastSongs;
     QVector<Track> queue;
