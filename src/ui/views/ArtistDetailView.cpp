@@ -757,6 +757,37 @@ void ArtistDetailView::fetchFanartImages()
     FanartTvProvider::instance()->fetchArtistImages(m_artistMbid);
 }
 
+// ── Sanitise MusicBrainz annotation text ────────────────────────────
+static QString sanitizeAnnotation(const QString& raw)
+{
+    QString t = raw;
+
+    // 1. [url|display text] → keep "display text"
+    t.replace(QRegularExpression(QStringLiteral("\\[https?://[^|\\]]+\\|([^\\]]+)\\]")),
+              QStringLiteral("\\1"));
+
+    // 2. [bare url] → remove entirely
+    t.remove(QRegularExpression(QStringLiteral("\\[https?://[^\\]]+\\]")));
+
+    // 3. Bare URLs not in brackets
+    t.remove(QRegularExpression(QStringLiteral("https?://\\S+")));
+
+    // 4. MusicBrainz wiki bold/italic markers
+    t.remove(QStringLiteral("'''"));
+    t.remove(QStringLiteral("''"));
+
+    // 5. Standalone UUIDs (MBIDs)
+    t.remove(QRegularExpression(
+        QStringLiteral("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")));
+
+    // 6. Collapse whitespace left by removals
+    t.replace(QRegularExpression(QStringLiteral("[ \\t]{2,}")), QStringLiteral(" "));
+    t.replace(QRegularExpression(QStringLiteral("\\n{3,}")), QStringLiteral("\n\n"));
+    t = t.trimmed();
+
+    return t.length() >= 10 ? t : QString();
+}
+
 void ArtistDetailView::fetchBiography()
 {
     if (m_artistMbid.isEmpty()) {
@@ -768,11 +799,9 @@ void ArtistDetailView::fetchBiography()
     connect(MusicBrainzProvider::instance(), &MusicBrainzProvider::artistFound,
             this, [this](const QString& mbid, const QJsonObject& data) {
         if (mbid != m_artistMbid) return;
-        QString annotation = data[QStringLiteral("annotation")].toString().trimmed();
+        QString annotation = sanitizeAnnotation(
+            data[QStringLiteral("annotation")].toString());
         if (!annotation.isEmpty()) {
-            // Strip basic wiki markup if present
-            annotation.remove(QRegularExpression(QStringLiteral("\\[\\[([^|\\]]*\\|)?([^\\]]*)\\]\\]"),
-                                                  QRegularExpression::NoPatternOption));
             m_bioHeader->setVisible(true);
             m_bioLabel->setVisible(true);
             m_bioLabel->setText(annotation);
