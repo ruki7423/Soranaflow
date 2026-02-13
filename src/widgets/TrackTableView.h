@@ -6,6 +6,7 @@
 #include <QHeaderView>
 #include <QPainter>
 #include <QMouseEvent>
+#include <QTimer>
 #include "../core/MusicData.h"
 
 // ── Column configuration ────────────────────────────────────────────
@@ -200,4 +201,5 @@ private:
     TrackColumn m_sortColumn = TrackColumn::Number;
     Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
     bool m_sorted = false;
+    QTimer* m_columnSaveTimer = nullptr;
 };

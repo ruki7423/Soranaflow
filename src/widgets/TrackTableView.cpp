@@ -553,9 +553,14 @@ void TrackTableView::setupHeader()
     // Restore saved widths
     restoreColumnWidths();
 
-    // Save on resize
+    // Debounced save on resize — avoid disk I/O on every pixel of drag
+    m_columnSaveTimer = new QTimer(this);
+    m_columnSaveTimer->setSingleShot(true);
+    m_columnSaveTimer->setInterval(300);
+    connect(m_columnSaveTimer, &QTimer::timeout, this, &TrackTableView::saveColumnWidths);
+
     connect(hdr, &QHeaderView::sectionResized, this, [this]() {
-        saveColumnWidths();
+        m_columnSaveTimer->start();  // restarts 300ms countdown
     });
 
     // Enable clickable headers for sorting
