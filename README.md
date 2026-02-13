@@ -102,13 +102,18 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 17 (v1.0.0 → v1.5.2) |
+| GitHub Releases | 18 (v1.0.0 → v1.5.3) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.5.3 — Header State Migration
+
+- Fixed library columns not visible after updating from older versions
+- One-time migration resets stale column widths to defaults
 
 ### v1.5.2 — Startup Performance Fix
 
