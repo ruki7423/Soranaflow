@@ -2,6 +2,9 @@
 #include "../../core/Settings.h"
 #include <QSettings>
 #include <QDebug>
+#include <QFileInfo>
+#include <QDir>
+#include <QElapsedTimer>
 
 #import <Foundation/Foundation.h>
 
@@ -55,14 +58,35 @@ bool BookmarkManager::saveBookmark(const QString& folderPath)
 void BookmarkManager::restoreAllBookmarks()
 {
     @autoreleasepool {
+        QElapsedTimer timer;
+        timer.start();
+
         QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
         settings.beginGroup(QStringLiteral("SecurityBookmarks"));
         const QStringList keys = settings.childKeys();
         settings.endGroup();
 
         int restored = 0;
+        int skipped = 0;
 
         for (const QString& key : keys) {
+            // Decode the base64 key back to the original path
+            QString originalPath = QString::fromUtf8(QByteArray::fromBase64(key.toUtf8()));
+
+            // Pre-filter: skip bookmarks for unmounted /Volumes/ paths
+            if (originalPath.startsWith(QStringLiteral("/Volumes/"))) {
+                // Extract volume name: /Volumes/<name>/...
+                int thirdSlash = originalPath.indexOf('/', 9); // 9 = length of "/Volumes/"
+                QString volumeRoot = (thirdSlash > 0) ? originalPath.left(thirdSlash)
+                                                      : originalPath;
+                if (!QFileInfo::exists(volumeRoot)) {
+                    skipped++;
+                    qDebug() << "BookmarkManager: Skipping unmounted volume:" << volumeRoot
+                             << "for" << originalPath;
+                    continue;
+                }
+            }
+
             QByteArray data = settings.value(QStringLiteral("SecurityBookmarks/") + key).toByteArray();
             if (data.isEmpty()) continue;
 
@@ -95,7 +119,8 @@ void BookmarkManager::restoreAllBookmarks()
             }
         }
 
-        qDebug() << "BookmarkManager: Restored" << restored << "of" << keys.size() << "bookmarks";
+        qDebug() << "BookmarkManager: Restored" << restored << "of" << keys.size()
+                 << "bookmarks (skipped" << skipped << "unmounted) in" << timer.elapsed() << "ms";
     }
 }
 
