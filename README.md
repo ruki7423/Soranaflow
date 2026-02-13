@@ -102,13 +102,21 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 15 (v1.0.0 → v1.5.0) |
+| GitHub Releases | 16 (v1.0.0 → v1.5.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.5.1 — Performance & DSD Fix
+
+- Search: 200ms debounce + async DB queries, O(1) album/artist cache
+- Cover art: async extraction, bounded QThreadPool, pre-computed artist cover map
+- Views: resize/filter debounce, skip rebuild when hidden, cached hero pixmap
+- DSD: DoP passthrough bypasses all DSP stages, buffer size range validation
+- Bug fix: silent playback after Apple Music disconnect, title column resizable
 
 ### v1.5.0 — Architecture Refactoring
 
