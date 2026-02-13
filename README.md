@@ -102,13 +102,19 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 16 (v1.0.0 → v1.5.1) |
+| GitHub Releases | 17 (v1.0.0 → v1.5.2) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.5.2 — Startup Performance Fix
+
+- Fix ~100s startup delay when external volume bookmarks are disconnected
+- Pre-filter security-scoped bookmarks: skip unmounted `/Volumes/` paths before XPC resolution
+- Bookmark restoration: ~3ms (was ~100s with stale volume bookmarks)
 
 ### v1.5.1 — Performance & DSD Fix
 
