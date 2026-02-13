@@ -1048,12 +1048,6 @@ async function playSong(songId) {
             return;
         }
 
-        // Silence original MusicKit output — ProcessTap (CATapUnmuted) captures
-        // audio from the WebKit process's audio graph before the volume stage,
-        // so the tap still gets full audio even at volume 0.
-        music.volume = 0;
-        log('[MusicKit] Volume set to 0 (tap captures pre-volume audio)');
-
         log('[MusicKit] Setting queue...');
         await music.setQueue({ song: songId });
         log('[MusicKit] Calling music.play()...');
@@ -1125,7 +1119,6 @@ async function togglePlayback() {
 async function stopPlayback() {
     try {
         if (music) {
-            music.volume = 1; // Restore volume before stopping
             await music.stop();
         }
     } catch (err) {

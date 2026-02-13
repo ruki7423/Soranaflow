@@ -3,9 +3,6 @@
 #include "../../apple/MusicKitPlayer.h"
 #include "../../core/PlaybackState.h"
 #include "../../core/ThemeManager.h"
-#ifdef Q_OS_MACOS
-#include "../../platform/macos/AudioProcessTap.h"
-#endif
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledButton.h"
 #include <QLineEdit>
@@ -283,26 +280,6 @@ void AppleMusicView::setupUI()
     m_scrollArea->setWidget(m_resultsContainer);
     mainLayout->addWidget(m_scrollArea, 1);
 
-    // ── Audio echo warning (shown during AM playback) ───────────────
-    m_echoWarning = new QLabel(
-        QStringLiteral("Note: Other app sounds may echo slightly during "
-                       "Apple Music playback due to a macOS audio limitation."),
-        this);
-    m_echoWarning->setWordWrap(true);
-    m_echoWarning->setStyleSheet(
-        QStringLiteral("color: #888; font-size: 11px; padding: 6px 0;"));
-    m_echoWarning->hide();
-    mainLayout->addWidget(m_echoWarning);
-
-#ifdef Q_OS_MACOS
-    auto* tap = AudioProcessTap::instance();
-    connect(tap, &AudioProcessTap::tapStarted, this, [this]() {
-        m_echoWarning->show();
-    });
-    connect(tap, &AudioProcessTap::tapStopped, this, [this]() {
-        m_echoWarning->hide();
-    });
-#endif
 }
 
 // ═════════════════════════════════════════════════════════════════════

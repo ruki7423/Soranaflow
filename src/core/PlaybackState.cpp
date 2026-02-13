@@ -3,9 +3,8 @@
 #include "Settings.h"
 #include "../apple/MusicKitPlayer.h"
 #include "../radio/AutoplayManager.h"
-#ifdef Q_OS_MACOS
-#include "../platform/macos/AudioProcessTap.h"
-#endif
+// AudioProcessTap.h — not included; ProcessTap disabled for AM playback
+// (macOS 26.2 global tap causes echo/silence). Re-enable when fixed.
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -134,17 +133,9 @@ void PlaybackState::connectToMusicKitPlayer()
         if (playing != m_playing) {
             m_playing = playing;
             emit playStateChanged(m_playing);
-#ifdef Q_OS_MACOS
-            // Start process tap when Apple Music starts playing
-            // NOTE: Don't stop tap on temporary pauses/stalls — only explicit stop
-            // This avoids the stall-restart infinite loop
-            auto* tap = AudioProcessTap::instance();
-            if (playing && tap->isSupported() && !tap->isActive()) {
-                tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
-                qDebug() << "[Playback] Apple Music: Activating ProcessTap";
-                tap->activate();
-            }
-#endif
+            // ProcessTap disabled for AM playback (macOS 26.2 global tap causes
+            // echo/mute issues). AM plays directly through system audio.
+            // DSP not applied to AM. Re-enable when per-process tap is restored.
         }
     });
 
@@ -374,18 +365,9 @@ void PlaybackState::playTrack(const Track& track)
         }
         m_currentSource = AppleMusic;
 
-        // Start process tap so DSP applies to Apple Music audio
-        // NOTE: Delay start so WebView child process exists first
-#ifdef Q_OS_MACOS
-        {
-            auto* tap = AudioProcessTap::instance();
-            if (tap->isSupported() && !tap->isActive()) {
-                tap->setDSPPipeline(AudioEngine::instance()->dspPipeline());
-                qDebug() << "[Playback] Apple Music: Activating ProcessTap (play)";
-                tap->activate();
-            }
-        }
-#endif
+        // ProcessTap disabled for AM playback — macOS 26.2 global tap causes
+        // echo (CATapUnmuted) or silence (CATapMuted). AM plays directly through
+        // system audio without DSP. Re-enable when per-process tap is restored.
 
         QString songId = track.id;
         QTimer::singleShot(0, this, [songId]() {
@@ -397,10 +379,6 @@ void PlaybackState::playTrack(const Track& track)
     // Local playback
     if (m_currentSource == AppleMusic) {
         MusicKitPlayer::instance()->stop();
-#ifdef Q_OS_MACOS
-        AudioProcessTap::instance()->deactivate();
-        qDebug() << "[Playback] Apple Music: ProcessTap deactivated (stays warm)";
-#endif
     }
     m_currentSource = Local;
 

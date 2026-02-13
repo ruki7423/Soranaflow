@@ -600,8 +600,8 @@ void AudioProcessTap::prepareForPlayback()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        tapDesc.muteBehavior = CATapUnmuted;
-        qDebug() << "[ProcessTap] Tap mode: CATapUnmuted (original plays, tap captures copy)";
+        tapDesc.muteBehavior = CATapMuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapMuted (original muted, IOProc replaces)";
 
         NSUUID* uuid = [NSUUID UUID];
         tapDesc.UUID = uuid;
@@ -856,10 +856,8 @@ bool AudioProcessTap::start()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        // CATapUnmuted: original audio plays, tap captures a copy for DSP processing.
-        // MusicKit volume is set to 0 to silence original AM output.
-        tapDesc.muteBehavior = CATapUnmuted;
-        qDebug() << "[ProcessTap] Tap mode: CATapUnmuted (original plays, tap captures copy)";
+        tapDesc.muteBehavior = CATapMuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapMuted (original muted, IOProc replaces)";
 
         // Generate a stable UUID for the tap
         NSUUID* uuid = [NSUUID UUID];
