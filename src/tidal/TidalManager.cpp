@@ -33,6 +33,7 @@ TidalManager::TidalManager(QObject* parent)
     : QObject(parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
+    m_networkManager->setTransferTimeout(15000);  // 15s timeout for all requests
     qDebug() << "[TidalManager] Initialized";
     loadTokens();
 }
@@ -535,7 +536,8 @@ QJsonObject TidalManager::parseTrackFromJsonApi(const QJsonObject& data, const Q
     }
 
     // Cover art
-    QJsonObject imageLinks = attrs[QStringLiteral("imageLinks")].toArray().first().toObject();
+    QJsonArray imageLinksArr = attrs[QStringLiteral("imageLinks")].toArray();
+    QJsonObject imageLinks = imageLinksArr.isEmpty() ? QJsonObject{} : imageLinksArr.first().toObject();
     QString imageHref = imageLinks[QStringLiteral("href")].toString();
     if (!imageHref.isEmpty()) {
         track[QStringLiteral("artworkUrl")] = imageHref;
@@ -587,7 +589,8 @@ QJsonObject TidalManager::parseAlbumFromJsonApi(const QJsonObject& data, const Q
     album[QStringLiteral("releaseDate")] = attrs[QStringLiteral("releaseDate")].toString();
 
     // Cover art
-    QJsonObject imageLinks = attrs[QStringLiteral("imageLinks")].toArray().first().toObject();
+    QJsonArray imageLinksArr = attrs[QStringLiteral("imageLinks")].toArray();
+    QJsonObject imageLinks = imageLinksArr.isEmpty() ? QJsonObject{} : imageLinksArr.first().toObject();
     QString imageHref = imageLinks[QStringLiteral("href")].toString();
     if (!imageHref.isEmpty()) {
         album[QStringLiteral("artworkUrl")] = imageHref;
@@ -615,7 +618,8 @@ QJsonObject TidalManager::parseArtistFromJsonApi(const QJsonObject& data)
     artist[QStringLiteral("name")] = attrs[QStringLiteral("name")].toString();
 
     // Artist image
-    QJsonObject imageLinks = attrs[QStringLiteral("imageLinks")].toArray().first().toObject();
+    QJsonArray imageLinksArr = attrs[QStringLiteral("imageLinks")].toArray();
+    QJsonObject imageLinks = imageLinksArr.isEmpty() ? QJsonObject{} : imageLinksArr.first().toObject();
     QString imageHref = imageLinks[QStringLiteral("href")].toString();
     if (!imageHref.isEmpty()) {
         artist[QStringLiteral("artworkUrl")] = imageHref;

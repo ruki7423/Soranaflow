@@ -164,10 +164,10 @@ void PlaylistsView::setupUI()
     };
     updateNavBtnStyle();
 
-    connect(m_navBackBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navBackBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateBack();
     });
-    connect(m_navForwardBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navForwardBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateForward();
     });
     connect(MainWindow::instance(), &MainWindow::globalNavChanged,

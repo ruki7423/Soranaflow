@@ -775,7 +775,9 @@ void PlaybackBar::updateSignalPath()
     m_formatLabel->setVisible(true);
 }
 
-// ── Helper: find cover art for a track ─────────────────────────────
+// ── Helper: find cover art for a track (currently unused) ──────────
+// Kept for potential future use; commented out to silence -Wunused-function.
+#if 0
 static QPixmap findPlaybackCoverArt(const Track& track, int size)
 {
     QPixmap pix;
@@ -831,6 +833,7 @@ static QPixmap findPlaybackCoverArt(const Track& track, int size)
 
     return pix;
 }
+#endif
 
 // ── Helper: Update Track Info ──────────────────────────────────────
 void PlaybackBar::updateTrackInfo()

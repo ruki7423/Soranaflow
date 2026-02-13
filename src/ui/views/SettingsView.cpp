@@ -1443,7 +1443,7 @@ QWidget* SettingsView::createLibraryTab()
                                          QStringLiteral("default"));
     cleanupBtn->setFixedHeight(UISizes::buttonHeight);
     cleanupBtn->setStyleSheet(ThemeManager::instance()->buttonStyle(ButtonVariant::Destructive));
-    connect(cleanupBtn, &QPushButton::clicked, this, [this]() {
+    connect(cleanupBtn, &QPushButton::clicked, this, []() {
         LibraryDatabase::instance()->removeDuplicates();
         MusicDataProvider::instance()->reloadFromDatabase();
     });

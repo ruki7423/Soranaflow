@@ -264,7 +264,7 @@ void MusicDataProvider::reloadFromDatabase()
     }
 
     // Subsequent loads run DB queries off main thread
-    QtConcurrent::run([this]() {
+    (void)QtConcurrent::run([this]() {
         QElapsedTimer mdpTimer; mdpTimer.start();
         qDebug() << "[TIMING] MDP reloadFromDatabase (async) START";
         auto* db = LibraryDatabase::instance();
@@ -488,9 +488,22 @@ void MusicDataProvider::buildMockData()
                         int trackNumber,
                         int discNumber) -> Track
     {
-        return Track{id, title, artist, album, albumId, artistId,
-                     duration, format, sampleRate, bitDepth, bitrate,
-                     coverUrl, trackNumber, discNumber};
+        Track t;
+        t.id          = id;
+        t.title       = title;
+        t.artist      = artist;
+        t.album       = album;
+        t.albumId     = albumId;
+        t.artistId    = artistId;
+        t.duration    = duration;
+        t.format      = format;
+        t.sampleRate  = sampleRate;
+        t.bitDepth    = bitDepth;
+        t.bitrate     = bitrate;
+        t.coverUrl    = coverUrl;
+        t.trackNumber = trackNumber;
+        t.discNumber  = discNumber;
+        return t;
     };
 
     // ────────────────────────────────────────────────────────────────

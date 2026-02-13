@@ -4,6 +4,7 @@
 #include <QStringList>
 #include <QFileSystemWatcher>
 #include <QSet>
+#include <QMutex>
 #include <QThread>
 #include <QElapsedTimer>
 #include <QtConcurrent>
@@ -14,6 +15,7 @@ class LibraryScanner : public QObject {
 
 public:
     static LibraryScanner* instance();
+    ~LibraryScanner();
 
     bool isScanning() const { return m_scanning; }
 
@@ -47,6 +49,7 @@ private:
 
     QFileSystemWatcher* m_watcher = nullptr;
     QSet<QString> m_knownFiles;
+    QMutex m_knownFilesMutex;
     QStringList m_watchedFolders;
 
     QThread* m_workerThread = nullptr;

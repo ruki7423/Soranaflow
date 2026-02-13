@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QPixmap>
+#include <QMutex>
 #include <QCache>
 #include <QString>
 
@@ -20,4 +21,5 @@ private:
     explicit CoverArtLoader(QObject* parent = nullptr);
 
     QCache<QString, QPixmap> m_cache;
+    mutable QMutex m_cacheMutex;
 };

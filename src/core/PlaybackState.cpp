@@ -596,7 +596,7 @@ void PlaybackState::doSave()
     bool shuffle = m_shuffle;
     int repeat = static_cast<int>(m_repeat);
 
-    QtConcurrent::run([snapshot, idx, shuffle, repeat]() {
+    (void)QtConcurrent::run([snapshot, idx, shuffle, repeat]() {
         static QMutex mutex;
         QMutexLocker lock(&mutex);
 
@@ -828,7 +828,9 @@ Track PlaybackState::peekNextTrack() const
 // ── scheduleGaplessPrepare ──────────────────────────────────────────
 void PlaybackState::scheduleGaplessPrepare()
 {
-    if (!Settings::instance()->gaplessPlayback()) return;
+    bool gapless = Settings::instance()->gaplessPlayback();
+    bool crossfade = AudioEngine::instance()->crossfadeDurationMs() > 0;
+    if (!gapless && !crossfade) return;
     if (m_currentSource != Local) return;
 
     Track next = peekNextTrack();

@@ -68,6 +68,7 @@ public:
     void cancelNextTrack();
     bool isNextTrackReady() const { return m_nextTrackReady.load(std::memory_order_relaxed); }
     void setCrossfadeDuration(int ms);
+    int crossfadeDurationMs() const { return m_crossfadeDurationMs.load(std::memory_order_relaxed); }
 
     // Volume leveling
     void setCurrentTrack(const Track& track);
@@ -104,7 +105,7 @@ private:
     void onPositionTimer();
 
     State m_state = Stopped;
-    double m_duration = 0.0;
+    std::atomic<double> m_duration{0.0};
 
     std::unique_ptr<AudioDecoder>    m_decoder;
     std::unique_ptr<DSDDecoder>      m_dsdDecoder;
@@ -115,7 +116,7 @@ private:
     std::atomic<int64_t>             m_framesRendered{0};
     std::atomic<double>              m_sampleRate{44100.0};
     std::atomic<int>                 m_channels{2};
-    bool                             m_usingDSDDecoder = false;
+    std::atomic<bool>                m_usingDSDDecoder{false};
 
     // Gapless playback: pre-decoded next track
     std::unique_ptr<AudioDecoder>    m_nextDecoder;
@@ -134,6 +135,7 @@ private:
     std::atomic<bool> m_destroyed{false};
     std::atomic<bool> m_renderingInProgress{false};
     QString m_currentFilePath;
+    mutable std::mutex m_filePathMutex;
     std::vector<float> m_decodeBuf;  // Pre-allocated buffer for decoded source frames
 
     // Volume leveling
@@ -161,6 +163,10 @@ private:
 
     // Render diagnostics
     std::atomic<bool> m_renderDiagOnce{false};
+
+    // RT-safe signaling flags (set on audio thread, polled on main thread)
+    std::atomic<bool> m_rtGaplessFlag{false};
+    std::atomic<bool> m_rtPlaybackEndFlag{false};
 
 public:
     DSPPipeline* dspPipeline() { return m_dspPipeline.get(); }

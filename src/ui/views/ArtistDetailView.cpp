@@ -367,7 +367,7 @@ void ArtistDetailView::updateDisplay()
 
     // Connect double-click
     disconnect(m_popularTracksTable, &TrackTableView::trackDoubleClicked, nullptr, nullptr);
-    connect(m_popularTracksTable, &TrackTableView::trackDoubleClicked, this, [this, allTracks](const Track& track) {
+    connect(m_popularTracksTable, &TrackTableView::trackDoubleClicked, this, [allTracks](const Track& track) {
         PlaybackState::instance()->setQueue(allTracks);
         PlaybackState::instance()->playTrack(track);
     });
@@ -375,7 +375,7 @@ void ArtistDetailView::updateDisplay()
     disconnect(m_popularTracksTable, &TrackTableView::fixMetadataRequested, nullptr, nullptr);
     connect(m_popularTracksTable, &TrackTableView::fixMetadataRequested, this, [this](const Track& t) {
         auto* dlg = new MetadataSearchDialog(t, this);
-        connect(dlg, &QDialog::accepted, this, [this, dlg, t]() {
+        connect(dlg, &QDialog::accepted, this, [dlg, t]() {
             MusicBrainzResult result = dlg->selectedResult();
             Track updated = t;
             if (!result.title.isEmpty())  updated.title  = result.title;
@@ -416,7 +416,7 @@ void ArtistDetailView::updateDisplay()
     });
 
     disconnect(m_popularTracksTable, &TrackTableView::identifyByAudioRequested, nullptr, nullptr);
-    connect(m_popularTracksTable, &TrackTableView::identifyByAudioRequested, this, [this](const Track& t) {
+    connect(m_popularTracksTable, &TrackTableView::identifyByAudioRequested, this, [](const Track& t) {
         MetadataService::instance()->identifyByFingerprint(t);
     });
 
@@ -513,7 +513,7 @@ void ArtistDetailView::updateDisplay()
 
     // ── Play All button connection ────────────────────────────────────
     disconnect(m_playAllBtn, nullptr, nullptr, nullptr);
-    connect(m_playAllBtn, &QPushButton::clicked, this, [this, allTracks]() {
+    connect(m_playAllBtn, &QPushButton::clicked, this, [allTracks]() {
         if (!allTracks.isEmpty()) {
             PlaybackState::instance()->setQueue(allTracks);
             PlaybackState::instance()->playTrack(allTracks.first());
@@ -522,7 +522,7 @@ void ArtistDetailView::updateDisplay()
 
     // ── Shuffle button connection ─────────────────────────────────────
     disconnect(m_shuffleBtn, nullptr, nullptr, nullptr);
-    connect(m_shuffleBtn, &QPushButton::clicked, this, [this, allTracks]() {
+    connect(m_shuffleBtn, &QPushButton::clicked, this, [allTracks]() {
         if (!allTracks.isEmpty()) {
             PlaybackState::instance()->setQueue(allTracks);
             if (!PlaybackState::instance()->shuffleEnabled())

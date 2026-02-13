@@ -185,7 +185,7 @@ AudioEngine::AudioEngine(QObject* parent)
         m_convolution.setEnabled(s->convolutionEnabled());
         QString irPath = s->convolutionIRPath();
         if (!irPath.isEmpty()) {
-            QtConcurrent::run([this, irPath]() {
+            (void)QtConcurrent::run([this, irPath]() {
                 bool ok = m_convolution.loadIR(irPath.toStdString());
                 qDebug() << "[Convolution] IR load:" << irPath << (ok ? "OK" : "FAILED");
                 if (ok) {
@@ -204,7 +204,7 @@ AudioEngine::AudioEngine(QObject* parent)
         m_convolution.setEnabled(s->convolutionEnabled());
         QString irPath = s->convolutionIRPath();
         if (!irPath.isEmpty() && irPath.toStdString() != m_convolution.irFilePath()) {
-            QtConcurrent::run([this, irPath]() {
+            (void)QtConcurrent::run([this, irPath]() {
                 bool ok = m_convolution.loadIR(irPath.toStdString());
                 qDebug() << "[Convolution] IR reload:" << irPath << (ok ? "OK" : "FAILED");
                 if (ok) {
@@ -228,7 +228,7 @@ AudioEngine::AudioEngine(QObject* parent)
         m_hrtf.setSpeakerAngle(s->hrtfSpeakerAngle());
         QString sofaPath = s->hrtfSofaPath();
         if (!sofaPath.isEmpty()) {
-            QtConcurrent::run([this, sofaPath]() {
+            (void)QtConcurrent::run([this, sofaPath]() {
                 bool ok = m_hrtf.loadSOFA(sofaPath);
                 qDebug() << "[HRTF] SOFA load:" << sofaPath << (ok ? "OK" : "FAILED");
                 if (ok) {
@@ -248,7 +248,7 @@ AudioEngine::AudioEngine(QObject* parent)
         m_hrtf.setSpeakerAngle(s->hrtfSpeakerAngle());
         QString sofaPath = s->hrtfSofaPath();
         if (!sofaPath.isEmpty() && sofaPath != m_hrtf.sofaPath()) {
-            QtConcurrent::run([this, sofaPath]() {
+            (void)QtConcurrent::run([this, sofaPath]() {
                 bool ok = m_hrtf.loadSOFA(sofaPath);
                 qDebug() << "[HRTF] SOFA reload:" << sofaPath << (ok ? "OK" : "FAILED");
                 if (ok) {
@@ -437,8 +437,8 @@ bool AudioEngine::load(const QString& filePath)
         m_decodeBuf.resize(maxSourceFrames * fmt.channels);
     }
 
-    // Pre-allocate crossfade buffer (same size as output, stereo)
-    m_crossfadeBuf.resize(4096 * fmt.channels);
+    // Pre-allocate crossfade buffer (generous — covers any CoreAudio buffer size)
+    m_crossfadeBuf.resize(16384 * fmt.channels);
     m_crossfading = false;
     m_crossfadeProgress = 0;
 
@@ -475,7 +475,7 @@ bool AudioEngine::load(const QString& filePath)
         }
     }
 
-    m_currentFilePath = filePath;
+    { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = filePath; }
 
     updateHeadroomGain();
 
@@ -552,7 +552,7 @@ void AudioEngine::stop()
     m_usingDSDDecoder = false;
     m_framesRendered.store(0, std::memory_order_relaxed);
     m_dspPipeline->reset();
-    m_currentFilePath.clear();
+    { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath.clear(); }
     m_state = Stopped;
 
     m_shuttingDown.store(false, std::memory_order_release);
@@ -757,16 +757,20 @@ UpsamplerProcessor* AudioEngine::upsampler() const
 void AudioEngine::applyUpsamplingChange()
 {
     // Only meaningful if we have an active source
-    if (m_state == Stopped || m_currentFilePath.isEmpty()) {
-        emit signalPathChanged();
-        return;
+    QString path;
+    {
+        std::lock_guard<std::mutex> lock(m_filePathMutex);
+        if (m_state == Stopped || m_currentFilePath.isEmpty()) {
+            emit signalPathChanged();
+            return;
+        }
+        path = m_currentFilePath;
     }
 
     // Re-load the current track to apply the new upsampling config
     // Save current position and state, then reload and seek back
     double pos = position();
     bool wasPlaying = (m_state == Playing);
-    QString path = m_currentFilePath;
 
     qDebug() << "[AudioEngine] applyUpsamplingChange: reloading at position" << pos;
 
@@ -792,7 +796,7 @@ void AudioEngine::setCurrentTrack(const Track& track)
 
         QString path = m_currentTrack.filePath;
         QString title = m_currentTrack.title;
-        QtConcurrent::run([this, path, title]() {
+        (void)QtConcurrent::run([this, path, title]() {
             LoudnessResult r = LoudnessAnalyzer::analyze(path);
             if (r.valid) {
                 QMetaObject::invokeMethod(this, [this, r, path]() {
@@ -908,8 +912,9 @@ void AudioEngine::prepareNextTrack(const QString& filePath)
 {
     if (filePath.isEmpty()) return;
 
-    // Don't prepare if gapless is disabled
-    if (!Settings::instance()->gaplessPlayback()) return;
+    // Don't prepare if both gapless and crossfade are disabled
+    if (!Settings::instance()->gaplessPlayback()
+        && m_crossfadeDurationMs.load(std::memory_order_relaxed) <= 0) return;
 
     qDebug() << "[Gapless] Preparing next track:" << filePath;
 
@@ -1015,7 +1020,15 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
     }
 
     m_renderingInProgress.store(true, std::memory_order_release);
-    std::lock_guard<std::mutex> lock(m_decoderMutex);
+
+    // try_lock — never block the realtime audio thread
+    std::unique_lock<std::mutex> lock(m_decoderMutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        // Main thread holds mutex (load/seek/stop) — output silence this cycle
+        std::memset(buf, 0, maxFrames * channels * sizeof(float));
+        m_renderingInProgress.store(false, std::memory_order_release);
+        return 0;
+    }
 
     bool upsamplerActive = m_upsampler && m_upsampler->isActive()
                            && !m_bitPerfect.load(std::memory_order_relaxed)
@@ -1033,8 +1046,14 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
         // Use pre-allocated decode buffer (sized in load(), no allocation here)
         int bufSamples = sourceFrames * channels;
         if ((int)m_decodeBuf.size() < bufSamples) {
-            // Safety fallback — should not happen if load() sized correctly
-            m_decodeBuf.resize(bufSamples);
+            // Buffer too small — cap frames to avoid RT allocation
+            sourceFrames = (int)m_decodeBuf.size() / channels;
+            bufSamples = sourceFrames * channels;
+            if (sourceFrames <= 0) {
+                std::memset(buf, 0, maxFrames * channels * sizeof(float));
+                m_renderingInProgress.store(false, std::memory_order_release);
+                return 0;
+            }
         }
 
         // 1. Decode source frames into separate buffer
@@ -1137,10 +1156,6 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     m_crossfading = true;
                     m_crossfadeProgress = (int)(pos - (totalFrames - cfFrames));
                     m_crossfadeTotalFrames = (int)cfFrames;
-                    if ((int)m_crossfadeBuf.size() < maxFrames * channels)
-                        m_crossfadeBuf.resize(maxFrames * channels);
-                    qDebug() << "[Crossfade] Started, duration:" << cfMs << "ms,"
-                             << m_crossfadeTotalFrames << "frames";
                 }
             }
 
@@ -1161,8 +1176,11 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     }
                 } else {
                     // Both tracks active — read incoming and mix
-                    int nextRead = m_nextDecoder->isOpen()
-                        ? m_nextDecoder->read(m_crossfadeBuf.data(), framesRead) : 0;
+                    // Cap to available buffer capacity (avoid RT allocation)
+                    int maxNextFrames = std::min(framesRead,
+                        (int)m_crossfadeBuf.size() / std::max(channels, 1));
+                    int nextRead = (m_nextDecoder->isOpen() && maxNextFrames > 0)
+                        ? m_nextDecoder->read(m_crossfadeBuf.data(), maxNextFrames) : 0;
                     for (int f = 0; f < framesRead; f++) {
                         float t = (float)(m_crossfadeProgress + f) / (float)m_crossfadeTotalFrames;
                         t = std::min(t, 1.0f);
@@ -1184,7 +1202,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     m_decoder.swap(m_nextDecoder);
                     m_dsdDecoder.swap(m_nextDsdDecoder);
                     m_usingDSDDecoder = m_nextUsingDSD;
-                    m_currentFilePath = m_nextFilePath;
+                    { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
                     m_duration = m_nextFormat.durationSecs;
                     m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
                     m_channels.store(m_nextFormat.channels, std::memory_order_relaxed);
@@ -1198,11 +1216,8 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     m_crossfading = false;
                     m_crossfadeProgress = 0;
 
-                    qDebug() << "[Crossfade] Complete — swapped to next track";
-                    QMetaObject::invokeMethod(this, [this]() {
-                        emit durationChanged(m_duration);
-                        emit gaplessTransitionOccurred();
-                    }, Qt::QueuedConnection);
+                    // Signal main thread via atomic flag (RT-safe)
+                    m_rtGaplessFlag.store(true, std::memory_order_release);
                 }
             }
         }
@@ -1238,13 +1253,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 
         // Apply DSP pipeline (gain, EQ, plugins) — skip in bit-perfect mode or DoP
         if (framesRead > 0 && !dopPassthrough && !m_bitPerfect.load(std::memory_order_relaxed)) {
-            if (!m_renderDiagOnce.exchange(true, std::memory_order_relaxed)) {
-                qDebug() << "[AudioEngine::renderAudio] DSP pipeline call —"
-                         << "bitPerfect:" << m_bitPerfect.load()
-                         << "pipelineEnabled:" << m_dspPipeline->isEnabled()
-                         << "plugins:" << m_dspPipeline->processorCount()
-                         << "frames:" << framesRead << "ch:" << channels;
-            }
+            (void)m_renderDiagOnce.exchange(true, std::memory_order_relaxed);
             m_dspPipeline->process(buf, framesRead, channels);
         }
 
@@ -1278,7 +1287,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             m_decoder.swap(m_nextDecoder);
             m_dsdDecoder.swap(m_nextDsdDecoder);
             m_usingDSDDecoder = m_nextUsingDSD;
-            m_currentFilePath = m_nextFilePath;
+            { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
             m_duration = m_nextFormat.durationSecs;
             m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
             m_channels.store(m_nextFormat.channels, std::memory_order_relaxed);
@@ -1299,9 +1308,12 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                 int sourceFrames = (int)std::ceil((double)maxFrames / ratio);
                 int bufSamples = sourceFrames * channels;
                 if ((int)m_decodeBuf.size() < bufSamples) {
-                    m_decodeBuf.resize(bufSamples);
+                    // Cap frames to available buffer — avoid RT allocation
+                    sourceFrames = (int)m_decodeBuf.size() / channels;
+                    bufSamples = sourceFrames * channels;
                 }
-                int srcRead = m_decoder->read(m_decodeBuf.data(), sourceFrames);
+                int srcRead = (sourceFrames > 0)
+                    ? m_decoder->read(m_decodeBuf.data(), sourceFrames) : 0;
                 if (srcRead > 0) {
                     size_t generated = m_upsampler->processUpsampling(
                         m_decodeBuf.data(), srcRead, channels, buf, maxFrames);
@@ -1322,23 +1334,15 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                 m_framesRendered.fetch_add(newFrames, std::memory_order_relaxed);
             }
 
-            // Signal main thread about the gapless transition
-            QMetaObject::invokeMethod(this, [this]() {
-                emit durationChanged(m_duration);
-                emit gaplessTransitionOccurred();
-            }, Qt::QueuedConnection);
+            // Signal main thread via atomic flag (RT-safe)
+            m_rtGaplessFlag.store(true, std::memory_order_release);
 
             m_renderingInProgress.store(false, std::memory_order_release);
             return newFrames;
         }
 
-        // No next track ready — normal end of playback
-        QMetaObject::invokeMethod(this, [this]() {
-            m_output->stop();
-            m_positionTimer->stop();
-            m_state = Stopped;
-            emit playbackFinished();
-        }, Qt::QueuedConnection);
+        // Signal main thread via atomic flag (RT-safe)
+        m_rtPlaybackEndFlag.store(true, std::memory_order_release);
     }
 
     m_renderingInProgress.store(false, std::memory_order_release);
@@ -1348,6 +1352,19 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 // ── onPositionTimer (called on main thread every 50ms) ─────────────
 void AudioEngine::onPositionTimer()
 {
+    // Poll RT-safe flags set by the audio thread
+    if (m_rtGaplessFlag.exchange(false, std::memory_order_acquire)) {
+        emit durationChanged(m_duration);
+        emit gaplessTransitionOccurred();
+    }
+    if (m_rtPlaybackEndFlag.exchange(false, std::memory_order_acquire)) {
+        m_output->stop();
+        m_positionTimer->stop();
+        m_state = Stopped;
+        emit playbackFinished();
+        return;  // timer is stopped, no need to emit position
+    }
+
     double pos = position();
     emit positionChanged(pos);
 }
@@ -1370,8 +1387,11 @@ SignalPathInfo AudioEngine::getSignalPath() const
 {
     SignalPathInfo info;
 
-    if (m_state == Stopped && m_currentFilePath.isEmpty()) {
-        return info;
+    {
+        std::lock_guard<std::mutex> lock(m_filePathMutex);
+        if (m_state == Stopped && m_currentFilePath.isEmpty()) {
+            return info;
+        }
     }
 
     double sr = m_sampleRate.load(std::memory_order_relaxed);

@@ -8,17 +8,27 @@
 
 #import <Foundation/Foundation.h>
 
-static BookmarkManager* s_instance = nullptr;
-
 BookmarkManager* BookmarkManager::instance()
 {
-    if (!s_instance)
-        s_instance = new BookmarkManager();
-    return s_instance;
+    static BookmarkManager s_instance;
+    return &s_instance;
 }
 
-BookmarkManager::BookmarkManager() {}
-BookmarkManager::~BookmarkManager() {}
+BookmarkManager::BookmarkManager()
+{
+    m_restoredURLs = (__bridge_retained void*)[[NSMutableArray alloc] init];
+}
+
+BookmarkManager::~BookmarkManager()
+{
+    @autoreleasepool {
+        NSMutableArray* urls = (__bridge_transfer NSMutableArray*)m_restoredURLs;
+        for (NSURL* url in urls) {
+            [url stopAccessingSecurityScopedResource];
+        }
+        qDebug() << "BookmarkManager: Released" << (int)urls.count << "security-scoped resources";
+    }
+}
 
 QString BookmarkManager::bookmarkKey(const QString& path) const
 {
@@ -106,6 +116,7 @@ void BookmarkManager::restoreAllBookmarks()
             }
 
             if ([url startAccessingSecurityScopedResource]) {
+                [(__bridge NSMutableArray*)m_restoredURLs addObject:url];
                 restored++;
                 qDebug() << "BookmarkManager: Restored access to" << QString::fromNSString(url.path);
 

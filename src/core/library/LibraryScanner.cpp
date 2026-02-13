@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QMutexLocker>
 #include <QTimer>
 #include <QThread>
 
@@ -167,7 +168,7 @@ void LibraryScanner::scanFolders(const QStringList& folders)
                     && it.value().second == currentMtime
                     && it.value().first > 0) {
                     // Unchanged — skip
-                    m_knownFiles.insert(filePath);
+                    { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.insert(filePath); }
                     skippedCount++;
                 } else {
                     // Changed — remove old entry, queue for re-parse
@@ -250,7 +251,7 @@ void LibraryScanner::scanFolders(const QStringList& folders)
                         const Track& track = batchTracks[j];
                         if (!track.filePath.isEmpty()) {
                             db->insertTrack(track);
-                            m_knownFiles.insert(track.filePath);
+                            { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.insert(track.filePath); }
                         }
                     }
                     db->commitTransaction();
@@ -330,7 +331,7 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 
             // Set up file watching AFTER scanFinished (async, non-blocking)
             if (m_watchEnabled) {
-                QtConcurrent::run([this, folders]() {
+                (void)QtConcurrent::run([this, folders]() {
                     QStringList dirs;
                     for (const QString& folder : folders) {
                         dirs << folder;
@@ -358,6 +359,14 @@ void LibraryScanner::scanFolders(const QStringList& folders)
 void LibraryScanner::stopScan()
 {
     m_stopRequested = true;
+    if (m_workerThread && m_workerThread->isRunning()) {
+        m_workerThread->wait(5000);
+    }
+}
+
+LibraryScanner::~LibraryScanner()
+{
+    stopScan();
 }
 
 // ── processFile ─────────────────────────────────────────────────────
@@ -365,7 +374,7 @@ void LibraryScanner::processFile(const QString& filePath)
 {
     // Skip if already in database
     if (LibraryDatabase::instance()->trackExists(filePath)) {
-        m_knownFiles.insert(filePath);
+        { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.insert(filePath); }
         return;
     }
 
@@ -383,7 +392,7 @@ void LibraryScanner::processFile(const QString& filePath)
     track.fileMtime = fi.lastModified().toSecsSinceEpoch();
 
     LibraryDatabase::instance()->insertTrack(track);
-    m_knownFiles.insert(filePath);
+    { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.insert(filePath); }
 }
 
 // ── scanFolder (single folder) ──────────────────────────────────────
@@ -440,16 +449,19 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
             continue;
 
         QString filePath = fi.absoluteFilePath();
-        if (!m_knownFiles.contains(filePath)) {
-            qDebug() << "LibraryScanner: New file detected:" << filePath;
-            m_knownFiles.insert(filePath);
-            newFiles.append(filePath);
+        {
+            QMutexLocker lock(&m_knownFilesMutex);
+            if (!m_knownFiles.contains(filePath)) {
+                qDebug() << "LibraryScanner: New file detected:" << filePath;
+                m_knownFiles.insert(filePath);
+                newFiles.append(filePath);
+            }
         }
     }
 
     // Process new files on worker thread (MetadataReader I/O off main thread)
     if (!newFiles.isEmpty()) {
-        QtConcurrent::run([this, newFiles]() {
+        (void)QtConcurrent::run([this, newFiles]() {
             for (const QString& filePath : newFiles) {
                 if (LibraryDatabase::instance()->trackExists(filePath))
                     continue;
@@ -479,19 +491,24 @@ void LibraryScanner::onDirectoryChanged(const QString& path)
     }
 
     QStringList toRemove;
-    for (const QString& known : m_knownFiles) {
-        QFileInfo fi(known);
-        if (fi.absolutePath() == path && !currentFiles.contains(known)) {
-            toRemove.append(known);
+    {
+        QMutexLocker lock(&m_knownFilesMutex);
+        for (const QString& known : m_knownFiles) {
+            QFileInfo fi(known);
+            if (fi.absolutePath() == path && !currentFiles.contains(known)) {
+                toRemove.append(known);
+            }
+        }
+        if (!toRemove.isEmpty()) {
+            for (const QString& removed : toRemove) {
+                qDebug() << "LibraryScanner: File removed:" << removed;
+                LibraryDatabase::instance()->removeTrackByPath(removed);
+                m_knownFiles.remove(removed);
+                emit fileRemoved(removed);
+            }
         }
     }
     if (!toRemove.isEmpty()) {
-        for (const QString& removed : toRemove) {
-            qDebug() << "LibraryScanner: File removed:" << removed;
-            LibraryDatabase::instance()->removeTrackByPath(removed);
-            m_knownFiles.remove(removed);
-            emit fileRemoved(removed);
-        }
         QTimer::singleShot(500, this, []() {
             LibraryDatabase::instance()->cleanOrphanedAlbumsAndArtists();
             emit LibraryDatabase::instance()->databaseChanged();
@@ -507,9 +524,8 @@ void LibraryScanner::onFileChanged(const QString& path)
     if (fi.exists()) {
         // File was modified — remove old entry and re-read metadata on worker thread
         LibraryDatabase::instance()->removeTrackByPath(path);
-        m_knownFiles.remove(path);
-        m_knownFiles.insert(path);  // pre-register
-        QtConcurrent::run([this, path]() {
+        { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.remove(path); m_knownFiles.insert(path); }  // pre-register
+        (void)QtConcurrent::run([this, path]() {
             auto trackOpt = MetadataReader::readTrack(path);
             if (!trackOpt.has_value()) return;
             Track track = trackOpt.value();
@@ -525,7 +541,7 @@ void LibraryScanner::onFileChanged(const QString& path)
     } else {
         // File was deleted — removeTrackByPath handles cleanup incrementally
         LibraryDatabase::instance()->removeTrackByPath(path);
-        m_knownFiles.remove(path);
+        { QMutexLocker lock(&m_knownFilesMutex); m_knownFiles.remove(path); }
         emit fileRemoved(path);
     }
 }

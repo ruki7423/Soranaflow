@@ -57,6 +57,8 @@ AppleMusicManager::AppleMusicManager(QObject* parent)
     , d(new AppleMusicManagerPrivate)
     , m_network(new QNetworkAccessManager(this))
 {
+    m_network->setTransferTimeout(15000);  // 15s timeout for all REST API requests
+
     // Detect storefront from locale (e.g., "us", "jp", "gb")
     QString country = QLocale::system().name().section('_', 1).toLower();
     d->storefront = country.isEmpty() ? QStringLiteral("us") : country;
@@ -535,6 +537,10 @@ void AppleMusicManager::handleRestApiReply(QNetworkReply* reply)
     }
 
     QJsonObject root = doc.object();
+    if (!root.contains(QStringLiteral("results"))) {
+        emit errorOccurred(QStringLiteral("API response missing 'results' key"));
+        return;
+    }
     QJsonObject results = root[QStringLiteral("results")].toObject();
 
     // Parse songs (page 1)
@@ -791,6 +797,7 @@ void AppleMusicManager::fetchArtistAlbums(const QString& artistId)
         return;
     }
 
+    ++m_artistFetchId;
     m_artistAlbums = QJsonArray();
 
     QString path = QStringLiteral("/v1/catalog/%1/artists/%2/albums?limit=100")
@@ -808,10 +815,17 @@ void AppleMusicManager::fetchArtistAlbumsPage(const QString& artistId,
     request.setRawHeader("Authorization",
                          QStringLiteral("Bearer %1").arg(d->developerToken).toUtf8());
 
+    int currentFetchId = m_artistFetchId;
+
     QNetworkReply* reply = m_network->get(request);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, artistId, pageNum]() {
+            [this, reply, artistId, pageNum, currentFetchId]() {
         reply->deleteLater();
+
+        if (currentFetchId != m_artistFetchId) {
+            qDebug() << "AppleMusicManager: Artist albums fetch cancelled (new request started)";
+            return;
+        }
 
         if (reply->error() != QNetworkReply::NoError) {
             qWarning() << "AppleMusicManager: Artist albums page" << pageNum

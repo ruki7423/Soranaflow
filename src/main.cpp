@@ -218,10 +218,13 @@ int main(int argc, char* argv[]) {
         QStringList keySearchPaths = {
             QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/AuthKey_4GW6686CH4.p8"),
             QCoreApplication::applicationDirPath() + QStringLiteral("/AuthKey_4GW6686CH4.p8"),
-#ifdef QT_DEBUG
-            QStringLiteral("/Users/haruki/Documents/Sorana flow/qt-output/AuthKey_4GW6686CH4.p8"),
-#endif
         };
+#ifdef QT_DEBUG
+        // Debug: also search path from SORANA_KEY_DIR env var
+        QByteArray envKeyDir = qgetenv("SORANA_KEY_DIR");
+        if (!envKeyDir.isEmpty())
+            keySearchPaths.append(QString::fromUtf8(envKeyDir) + QStringLiteral("/AuthKey_4GW6686CH4.p8"));
+#endif
         for (const QString& path : keySearchPaths) {
             if (QFile::exists(path)) {
                 keyPath = path;

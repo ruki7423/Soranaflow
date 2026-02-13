@@ -62,7 +62,8 @@ void CrossfeedProcessor::recalculate()
     m_crossfeedGain = rawCrossfeed / (1.0f + rawCrossfeed);
 
     // Low-pass filter coefficient (1-pole): a = exp(-2*pi*fc/fs)
-    float w = 2.0f * static_cast<float>(M_PI) * cutoffHz / static_cast<float>(m_sampleRate);
+    int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+    float w = 2.0f * static_cast<float>(M_PI) * cutoffHz / static_cast<float>(sr);
     m_lpCoeff = std::exp(-w);
 
     // Delay: ~300 microseconds (interaural time difference)

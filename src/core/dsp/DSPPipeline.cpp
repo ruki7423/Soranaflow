@@ -23,25 +23,9 @@ void DSPPipeline::process(float* buf, int frames, int channels)
 {
     if (!m_enabled.load(std::memory_order_acquire)) return;
 
-    // One-time entry diagnostic
-    if (!m_processLogOnce.exchange(true, std::memory_order_relaxed)) {
-        qDebug() << "[DSPPipeline::process] ENTERED — plugins:"
-                 << (int)m_plugins.size() << "enabled:" << m_enabled.load();
-    }
-
-    // Periodic diagnostic (~every 5 seconds at 44.1kHz/512-frame blocks ≈ 430 calls)
-    int callCount = m_processCallCount.fetch_add(1, std::memory_order_relaxed);
-    if (callCount > 0 && (callCount % 430) == 0) {
-        std::unique_lock<std::mutex> diagLock(m_pluginMutex, std::try_to_lock);
-        int pluginCount = diagLock.owns_lock() ? (int)m_plugins.size() : -1;
-        qDebug() << "[DSPPipeline] periodic — call#" << callCount
-                 << "plugins:" << pluginCount
-                 << "enabled:" << m_enabled.load();
-    }
-
     // Signal chain: Gain -> EQ -> Plugins
-    m_gain->process(buf, frames, channels);
-    m_eq->process(buf, frames, channels);
+    if (m_gain) m_gain->process(buf, frames, channels);
+    if (m_eq)   m_eq->process(buf, frames, channels);
 
     // Process plugin chain — use try_lock to avoid priority inversion
     // on the real-time audio thread. If the main thread holds the lock
@@ -49,15 +33,6 @@ void DSPPipeline::process(float* buf, int frames, int channels)
     // this buffer rather than blocking the audio thread.
     std::unique_lock<std::mutex> lock(m_pluginMutex, std::try_to_lock);
     if (lock.owns_lock()) {
-        if (!m_plugins.empty() && !m_pluginLogOnce.exchange(true, std::memory_order_relaxed)) {
-            qDebug() << "[DSPPipeline] Processing" << (int)m_plugins.size()
-                     << "plugin(s) — first audio pass confirmed";
-            for (size_t i = 0; i < m_plugins.size(); ++i) {
-                qDebug() << "  plugin[" << i << "]"
-                         << QString::fromStdString(m_plugins[i]->getName())
-                         << "enabled:" << m_plugins[i]->isEnabled();
-            }
-        }
         for (auto& proc : m_plugins) {
             if (proc && proc->isEnabled()) {
                 proc->process(buf, frames, channels);
@@ -109,10 +84,6 @@ void DSPPipeline::addProcessor(std::shared_ptr<IDSPProcessor> proc)
         m_enabled.store(true, std::memory_order_release);
         qDebug() << "[DSPPipeline] Auto-enabled — processor added while pipeline was disabled";
     }
-
-    // Reset one-time flags so diagnostics fire again during next audio pass
-    m_processLogOnce.store(false, std::memory_order_relaxed);
-    m_pluginLogOnce.store(false, std::memory_order_relaxed);
 
     // Signal OUTSIDE lock scope — slots may call processorCount()/processor()
     emit configurationChanged();

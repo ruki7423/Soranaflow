@@ -475,8 +475,10 @@ void MusicKitPlayer::onMusicKitReady()
         qDebug() << "[MusicKitPlayer] MusicKit ready — checking if token was included in configure";
         NSString* js = @"music ? music.isAuthorized : false";
         [m_wk->webView evaluateJavaScript:js completionHandler:^(id result, NSError* error) {
+            if (m_cleanedUp) return;
             bool isAuth = [result boolValue];
             QMetaObject::invokeMethod(this, [this, isAuth]() {
+                if (m_cleanedUp) return;
                 qDebug() << "[MusicKitPlayer] Post-configure auth check: isAuthorized =" << isAuth;
                 if (isAuth) {
                     qDebug() << "[MusicKitPlayer] Token was in MusicKit.configure() — full playback available";
@@ -592,8 +594,10 @@ void MusicKitPlayer::injectMusicUserToken(const QString& token)
 
     NSString* js = jsQ.toNSString();
     [m_wk->webView evaluateJavaScript:js completionHandler:^(id result, NSError* error) {
+        if (m_cleanedUp) return;
         QString status = QString::fromNSString([result description]);
         QMetaObject::invokeMethod(this, [this, status, token]() {
+            if (m_cleanedUp) return;
             qDebug() << "[MusicKitPlayer] Token injection JS returned:" << status;
 
             if (status == QLatin1String("ok")) {
@@ -1044,6 +1048,12 @@ async function playSong(songId) {
             return;
         }
 
+        // Silence original MusicKit output — ProcessTap (CATapUnmuted) captures
+        // audio from the WebKit process's audio graph before the volume stage,
+        // so the tap still gets full audio even at volume 0.
+        music.volume = 0;
+        log('[MusicKit] Volume set to 0 (tap captures pre-volume audio)');
+
         log('[MusicKit] Setting queue...');
         await music.setQueue({ song: songId });
         log('[MusicKit] Calling music.play()...');
@@ -1114,7 +1124,10 @@ async function togglePlayback() {
 
 async function stopPlayback() {
     try {
-        if (music) await music.stop();
+        if (music) {
+            music.volume = 1; // Restore volume before stopping
+            await music.stop();
+        }
     } catch (err) {
         log('[MusicKit] Stop error: ' + (err.message || String(err)));
         msg('error', 'Stop error: ' + (err.message || String(err)));

@@ -318,10 +318,10 @@ void LibraryView::setupUI()
     };
     updateNavBtnStyle();
 
-    connect(m_navBackBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navBackBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateBack();
     });
-    connect(m_navForwardBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navForwardBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateForward();
     });
 
@@ -374,7 +374,7 @@ void LibraryView::setupUI()
     connect(m_trackTable, &TrackTableView::fixMetadataRequested,
             this, [this](const Track& t) {
         auto* dlg = new MetadataSearchDialog(t, this);
-        connect(dlg, &QDialog::accepted, this, [this, dlg, t]() {
+        connect(dlg, &QDialog::accepted, this, [dlg, t]() {
             MusicBrainzResult result = dlg->selectedResult();
             Track updated = t;
             if (!result.title.isEmpty())  updated.title  = result.title;
@@ -415,7 +415,7 @@ void LibraryView::setupUI()
     });
 
     connect(m_trackTable, &TrackTableView::identifyByAudioRequested,
-            this, [this](const Track& t) {
+            this, [](const Track& t) {
         MetadataService::instance()->identifyByFingerprint(t);
     });
 
@@ -609,7 +609,7 @@ void LibraryView::onIdentifyAudioClicked()
 void LibraryView::addTracksFromFiles(const QStringList& files)
 {
     // Run MetadataReader I/O off main thread
-    QtConcurrent::run([files]() {
+    (void)QtConcurrent::run([files]() {
         auto* db = LibraryDatabase::instance();
         for (const QString& filePath : files) {
             auto trackOpt = MetadataReader::readTrack(filePath);

@@ -5,6 +5,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QDebug>
+#include <QMutexLocker>
 #include <QtConcurrent>
 
 // ── Singleton ───────────────────────────────────────────────────────
@@ -27,13 +28,16 @@ void CoverArtLoader::requestCoverArt(const QString& trackPath, const QString& co
     QString cacheKey = QFileInfo(trackPath).absolutePath() + QString::number(size);
 
     // Check cache first
-    if (QPixmap* cached = m_cache.object(cacheKey)) {
-        emit coverArtReady(trackPath, *cached);
-        return;
+    {
+        QMutexLocker lock(&m_cacheMutex);
+        if (QPixmap* cached = m_cache.object(cacheKey)) {
+            emit coverArtReady(trackPath, *cached);
+            return;
+        }
     }
 
     // Run disk I/O on QThreadPool (bounded concurrency)
-    QtConcurrent::run([this, trackPath, coverUrl, size, cacheKey]() {
+    (void)QtConcurrent::run([this, trackPath, coverUrl, size, cacheKey]() {
         QPixmap pix;
 
         // 1. Try coverUrl
@@ -100,8 +104,11 @@ void CoverArtLoader::requestCoverArt(const QString& trackPath, const QString& co
 
         // Deliver result on the main thread
         QMetaObject::invokeMethod(this, [this, trackPath, pix, cacheKey]() {
-            if (!pix.isNull()) {
-                m_cache.insert(cacheKey, new QPixmap(pix));
+            {
+                QMutexLocker lock(&m_cacheMutex);
+                if (!pix.isNull()) {
+                    m_cache.insert(cacheKey, new QPixmap(pix));
+                }
             }
             emit coverArtReady(trackPath, pix);
         }, Qt::QueuedConnection);

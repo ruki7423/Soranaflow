@@ -235,7 +235,7 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
 
     // ── Standby mode: DSP inactive → passthrough (copy input to output) ──
     if (!io->dspActive.load(std::memory_order_relaxed)) {
-        // CATapMuted: we must write to output or user hears nothing
+        // Write captured audio to output (DSP passthrough in standby)
         if (inInputData && inInputData->mNumberBuffers > 0) {
             UInt32 bufs = std::min(inInputData->mNumberBuffers,
                                    outOutputData->mNumberBuffers);
@@ -339,7 +339,7 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
             }
         }
 
-        // CATapMuted: de-interleave DSP-processed audio back to output buffers
+        // De-interleave DSP-processed audio back to output buffers
         for (UInt32 f = 0; f < framesPerBuf; ++f)
             for (int c = 0; c < ch; ++c)
                 static_cast<float*>(outOutputData->mBuffers[c].mData)[f] =
@@ -405,7 +405,7 @@ static OSStatus tapIOProc(AudioObjectID           /*inDevice*/,
             fprintf(stderr, "[ProcessTap] WARNING: DSP pipeline is null, audio passing through unprocessed\n");
         }
 
-        // CATapMuted: write DSP-processed audio to output
+        // Write DSP-processed audio to output
         if (io->pipeline && io->interleaved.size() >= totalSamples) {
             memcpy(outOutputData->mBuffers[0].mData,
                    io->interleaved.data(),
@@ -578,7 +578,7 @@ void AudioProcessTap::prepareForPlayback()
         }
 
         // Build exclusion list for global tap: exclude self so aggregate
-        // output isn't re-captured (CATapMuted feedback loop).
+        // output isn't double-captured.
         NSArray* selfExclude = (myObj != kAudioObjectUnknown)
             ? @[@(myObj)] : @[];
 
@@ -600,8 +600,8 @@ void AudioProcessTap::prepareForPlayback()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        tapDesc.muteBehavior = CATapMuted;
-        qDebug() << "[ProcessTap] Tap mode: CATapMuted (DSP routes to output)";
+        tapDesc.muteBehavior = CATapUnmuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapUnmuted (original plays, tap captures copy)";
 
         NSUUID* uuid = [NSUUID UUID];
         tapDesc.UUID = uuid;
@@ -831,7 +831,7 @@ bool AudioProcessTap::start()
         }
 
         // Build exclusion list for global tap: exclude self so aggregate
-        // output isn't re-captured (CATapMuted feedback loop).
+        // output isn't double-captured.
         NSArray* selfExclude = (myObj != kAudioObjectUnknown)
             ? @[@(myObj)] : @[];
 
@@ -856,9 +856,10 @@ bool AudioProcessTap::start()
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
-        // CATapMuted: DSP mode — original audio muted, IOProc routes processed audio to output
-        tapDesc.muteBehavior = CATapMuted;
-        qDebug() << "[ProcessTap] Tap mode: CATapMuted (DSP routes to output)";
+        // CATapUnmuted: original audio plays, tap captures a copy for DSP processing.
+        // MusicKit volume is set to 0 to silence original AM output.
+        tapDesc.muteBehavior = CATapUnmuted;
+        qDebug() << "[ProcessTap] Tap mode: CATapUnmuted (original plays, tap captures copy)";
 
         // Generate a stable UUID for the tap
         NSUUID* uuid = [NSUUID UUID];

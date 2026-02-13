@@ -52,12 +52,12 @@ struct CoreAudioOutput::Impl {
 
         int framesRead = 0;
         {
-            // Use blocking lock — swappingCallback flag prevents main thread
-            // from holding the lock for more than a brief swap
-            std::lock_guard<std::mutex> lock(self->cbMutex);
-            if (self->renderCb) {
+            // try_lock — never block the realtime audio thread
+            std::unique_lock<std::mutex> lock(self->cbMutex, std::try_to_lock);
+            if (lock.owns_lock() && self->renderCb) {
                 framesRead = self->renderCb(outBuf, (int)inNumberFrames);
             }
+            // If lock failed, framesRead stays 0 → silence this cycle
         }
 
         // Zero any remaining samples

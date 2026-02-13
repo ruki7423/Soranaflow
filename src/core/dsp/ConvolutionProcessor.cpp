@@ -367,6 +367,8 @@ void ConvolutionProcessor::convolveChannel(
     int fdlIdx, int numPartitions,
     const float* input, float* output, float* overlap)
 {
+    if (!m_fftSetup) return;
+    if (numPartitions <= 0) return;
     if (static_cast<int>(fdl.size()) < numPartitions) return;
 
     // Zero-pad input to FFT_SIZE: [input | zeros]

@@ -69,7 +69,11 @@ bool LibraryDatabase::open()
 
     // Enable WAL mode + performance PRAGMAs
     QSqlQuery pragma(m_db);
-    pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+    if (pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL")) && pragma.next()) {
+        QString mode = pragma.value(0).toString().toLower();
+        if (mode != QStringLiteral("wal"))
+            qWarning() << "[LibraryDB] WAL mode not activated, got:" << mode;
+    }
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     pragma.exec(QStringLiteral("PRAGMA foreign_keys=ON"));
     pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));   // 256MB mmap window
@@ -515,6 +519,7 @@ void LibraryDatabase::clearAllData(bool preservePlaylists)
     qDebug() << "=== LibraryDatabase::clearAllData ===" << "preservePlaylists:" << preservePlaylists;
 
     QSqlQuery q(m_db);
+    m_db.transaction();
     q.exec(QStringLiteral("DELETE FROM play_history"));
     q.exec(QStringLiteral("DELETE FROM metadata_backups"));
     if (!preservePlaylists) {
@@ -524,6 +529,7 @@ void LibraryDatabase::clearAllData(bool preservePlaylists)
     q.exec(QStringLiteral("DELETE FROM tracks"));
     q.exec(QStringLiteral("DELETE FROM albums"));
     q.exec(QStringLiteral("DELETE FROM artists"));
+    m_db.commit();
     q.exec(QStringLiteral("VACUUM"));
 
     clearIncrementalCaches();

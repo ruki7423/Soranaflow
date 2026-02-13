@@ -108,6 +108,9 @@ private:
 
     QNetworkAccessManager* m_networkManager = nullptr;
 
+    // Audio echo warning
+    QLabel* m_echoWarning = nullptr;
+
     // Music User Token
     QString m_musicUserToken;
 };

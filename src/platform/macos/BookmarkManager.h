@@ -28,4 +28,6 @@ private:
     ~BookmarkManager();
 
     QString bookmarkKey(const QString& path) const;
+
+    void* m_restoredURLs = nullptr;  // NSMutableArray<NSURL*>*
 };

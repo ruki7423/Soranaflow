@@ -197,12 +197,15 @@ void EqualizerProcessor::recalcCoeffs(int band)
 // ── calcBiquad — Audio EQ Cookbook (Robert Bristow-Johnson) ─────────
 BiquadCoeffs EqualizerProcessor::calcBiquad(double sampleRate, const EQBand& band)
 {
+    if (sampleRate <= 0.0) sampleRate = 44100.0;
     double q = band.q;
     double freqHz = band.frequency;
+    double gainDb = std::clamp(static_cast<double>(band.gainDb), -30.0, 30.0);
     if (q <= 0.0) q = 0.1;
     if (freqHz <= 0.0) freqHz = 1000.0;
+    if (freqHz > sampleRate * 0.49) freqHz = sampleRate * 0.49;
 
-    double A = std::pow(10.0, band.gainDb / 40.0);
+    double A = std::pow(10.0, gainDb / 40.0);
     double w0 = 2.0 * PI * freqHz / sampleRate;
     double cosw0 = std::cos(w0);
     double sinw0 = std::sin(w0);

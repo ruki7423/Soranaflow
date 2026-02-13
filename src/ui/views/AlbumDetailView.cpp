@@ -293,7 +293,7 @@ void AlbumDetailView::updateDisplay()
     disconnect(m_trackTable, &TrackTableView::fixMetadataRequested, nullptr, nullptr);
     connect(m_trackTable, &TrackTableView::fixMetadataRequested, this, [this](const Track& t) {
         auto* dlg = new MetadataSearchDialog(t, this);
-        connect(dlg, &QDialog::accepted, this, [this, dlg, t]() {
+        connect(dlg, &QDialog::accepted, this, [dlg, t]() {
             MusicBrainzResult result = dlg->selectedResult();
             Track updated = t;
             if (!result.title.isEmpty())  updated.title  = result.title;
@@ -334,7 +334,7 @@ void AlbumDetailView::updateDisplay()
     });
 
     disconnect(m_trackTable, &TrackTableView::identifyByAudioRequested, nullptr, nullptr);
-    connect(m_trackTable, &TrackTableView::identifyByAudioRequested, this, [this](const Track& t) {
+    connect(m_trackTable, &TrackTableView::identifyByAudioRequested, this, [](const Track& t) {
         MetadataService::instance()->identifyByFingerprint(t);
     });
 
@@ -404,7 +404,7 @@ void AlbumDetailView::loadCoverArt()
     int loadId = ++m_coverLoadId;
 
     auto* watcher = new QFutureWatcher<QImage>(this);
-    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, loadId, sz, radius]() {
+    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, loadId]() {
         watcher->deleteLater();
         if (loadId != m_coverLoadId) return; // Album changed — discard
 

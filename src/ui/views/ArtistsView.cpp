@@ -177,10 +177,10 @@ void ArtistsView::setupUI()
     };
     updateNavBtnStyle();
 
-    connect(m_navBackBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navBackBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateBack();
     });
-    connect(m_navForwardBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_navForwardBtn, &QPushButton::clicked, this, []() {
         if (auto* mw = MainWindow::instance()) mw->navigateForward();
     });
     connect(MainWindow::instance(), &MainWindow::globalNavChanged,
@@ -711,7 +711,7 @@ void ArtistsView::loadNextCoverBatch()
     }
 
     // Process cover art extraction on worker thread (MetadataReader I/O off main thread)
-    QtConcurrent::run([this, batch]() {
+    (void)QtConcurrent::run([this, batch]() {
         QVector<QPair<QString, QPixmap>> results;
         for (const auto& job : batch)
             results.append({job.first, findArtistCoverArt(job.second)});

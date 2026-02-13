@@ -101,7 +101,7 @@ MainWindow::MainWindow(QWidget* parent)
     // Global keyboard shortcuts — skip when a text input has focus
     auto* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     spaceShortcut->setContext(Qt::ApplicationShortcut);
-    connect(spaceShortcut, &QShortcut::activated, this, [this]() {
+    connect(spaceShortcut, &QShortcut::activated, this, []() {
         if (isTextInputFocused()) return;
         // Check playback SOURCE (not view) to decide which player to control
         auto* ps = PlaybackState::instance();
@@ -691,7 +691,7 @@ void MainWindow::onSearch(const QString& query)
     m_viewStack->setCurrentWidget(m_searchResultsView);
 
     // Run DB queries off main thread
-    QtConcurrent::run([this, query, gen]() {
+    (void)QtConcurrent::run([this, query, gen]() {
         auto tracks  = LibraryDatabase::instance()->searchTracks(query);
         auto albums  = LibraryDatabase::instance()->searchAlbums(query);
         auto artists = LibraryDatabase::instance()->searchArtists(query);
@@ -701,6 +701,7 @@ void MainWindow::onSearch(const QString& query)
                 albums  = std::move(albums),
                 artists = std::move(artists)]() {
             if (gen != m_searchGeneration) return;  // stale result
+            if (!m_searchResultsView) return;       // view destroyed
             m_searchResultsView->setResults(query, artists, albums, tracks);
         }, Qt::QueuedConnection);
     });
