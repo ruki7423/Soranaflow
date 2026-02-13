@@ -102,13 +102,18 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 18 (v1.0.0 → v1.5.3) |
+| GitHub Releases | 19 (v1.0.0 → v1.5.4) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.5.4 — Column Resize Lag Fix
+
+- Fixed lag when dragging column headers to resize
+- Column width save debounced (300ms) — was triggering disk I/O per pixel
 
 ### v1.5.3 — Header State Migration
 
