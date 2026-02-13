@@ -25,6 +25,23 @@
 
 ---
 
+## What's New (v1.5.4)
+
+### Performance
+- Fixed ~2 minute startup delay when external drives were disconnected
+- Eliminated lag when resizing column headers
+- Faster search, album browsing, and artist views
+
+### Audio
+- Fixed DSD DoP playback (crackling and silence after ~30 seconds)
+- Resolved silent Apple Music playback after disconnect/reconnect
+
+### User Interface
+- Fixed library columns (Artist, Album, Format, Duration) not displaying after update
+- Column widths automatically reset and are freely resizable
+- Restored Title column resizing in library view
+- Smoother cover art loading and window resizing
+
 ## Features
 
 **Playback Engine**
@@ -67,7 +84,7 @@
 
 ## Installation
 
-**Download** the latest DMG from [Releases](https://github.com/ruki7423/Soranaflow/releases/latest) or [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.5.4](https://github.com/ruki7423/Soranaflow/releases/download/v1.5.4/Soranaflow.1.5.4.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -110,29 +127,23 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## Changelog
 
-### v1.5.4 — Column Resize Lag Fix
+### v1.5.4 — Performance & Column Fixes
 
-- Fixed lag when dragging column headers to resize
-- Column width save debounced (300ms) — was triggering disk I/O per pixel
+- Fixed startup delay, column resize lag, DSD playback, and library display issues
+- See [What's New (v1.5.4)](#whats-new-v154) for full details
 
 ### v1.5.3 — Header State Migration
 
 - Fixed library columns not visible after updating from older versions
-- One-time migration resets stale column widths to defaults
 
 ### v1.5.2 — Startup Performance Fix
 
-- Fix ~100s startup delay when external volume bookmarks are disconnected
-- Pre-filter security-scoped bookmarks: skip unmounted `/Volumes/` paths before XPC resolution
-- Bookmark restoration: ~3ms (was ~100s with stale volume bookmarks)
+- Fixed ~2 minute startup delay when external drives were disconnected
 
 ### v1.5.1 — Performance & DSD Fix
 
-- Search: 200ms debounce + async DB queries, O(1) album/artist cache
-- Cover art: async extraction, bounded QThreadPool, pre-computed artist cover map
-- Views: resize/filter debounce, skip rebuild when hidden, cached hero pixmap
-- DSD: DoP passthrough bypasses all DSP stages, buffer size range validation
-- Bug fix: silent playback after Apple Music disconnect, title column resizable
+- Faster search, album browsing, and cover art loading
+- Fixed DSD playback issues and silent Apple Music playback
 
 ### v1.5.0 — Architecture Refactoring
 
