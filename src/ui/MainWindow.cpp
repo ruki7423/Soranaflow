@@ -79,6 +79,18 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
     s_instance = this;
+
+    // One-time migration: clear stale Stretch-era header widths (v1.5.1 → Interactive)
+    {
+        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
+        if (!settings.value(QStringLiteral("migrations/headerStretchFixed")).toBool()) {
+            settings.remove(QStringLiteral("trackTable"));
+            settings.setValue(QStringLiteral("migrations/headerStretchFixed"), true);
+            settings.sync();
+            qDebug() << "[Migration] Cleared stale header state from Stretch era";
+        }
+    }
+
     setupUI();
     connectSignals();
 
