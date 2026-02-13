@@ -40,8 +40,8 @@
                                   Qt::QueuedConnection);
     }
     else if ([name isEqualToString:@"playbackState"]) {
-        bool playing = [body boolValue];
-        QMetaObject::invokeMethod(p, [p, playing]() { p->onPlaybackStateChanged(playing); },
+        int state = [body intValue];
+        QMetaObject::invokeMethod(p, [p, state]() { p->onMusicKitStateChanged(state); },
                                   Qt::QueuedConnection);
     }
     else if ([name isEqualToString:@"nowPlaying"]) {
@@ -250,6 +250,11 @@ MusicKitPlayer* MusicKitPlayer::instance()
 MusicKitPlayer::MusicKitPlayer(QObject* parent)
     : QObject(parent)
 {
+    m_stateTimeoutTimer = new QTimer(this);
+    m_stateTimeoutTimer->setSingleShot(true);
+    connect(m_stateTimeoutTimer, &QTimer::timeout, this, [this]() {
+        onStateTimeout();
+    });
 }
 
 // ── cleanup — explicit shutdown before app exit ─────────────────────
@@ -277,6 +282,9 @@ void MusicKitPlayer::cleanup()
     m_ready = false;
     m_initialized = false;
     m_webViewReady = false;
+    m_amState = AMState::Idle;
+    m_pendingPlay.reset();
+    if (m_stateTimeoutTimer) m_stateTimeoutTimer->stop();
     qDebug() << "[MusicKitPlayer] cleanup DONE";
 }
 
@@ -380,7 +388,7 @@ void MusicKitPlayer::ensureWebView()
     }
 }
 
-// ── play ────────────────────────────────────────────────────────────
+// ── play — public entry point, routes through state machine ─────────
 void MusicKitPlayer::play(const QString& songId)
 {
     qDebug() << "[MusicKitPlayer] play() called with songId:" << songId;
@@ -389,7 +397,6 @@ void MusicKitPlayer::play(const QString& songId)
         m_pendingSongId = songId;
         if (m_pendingUserToken.isEmpty()) {
             qDebug() << "[MusicKitPlayer] No token yet — queuing song, waiting for token";
-            emit playbackStateChanged(false);
             return;
         }
         qDebug() << "[MusicKitPlayer] Token available, creating WebView for queued song";
@@ -403,6 +410,33 @@ void MusicKitPlayer::play(const QString& songId)
         return;
     }
 
+    switch (m_amState) {
+    case AMState::Idle:
+        // Ready — execute immediately
+        executePlay(songId);
+        break;
+
+    case AMState::Loading:
+    case AMState::Playing:
+    case AMState::Stalled:
+        // Busy — queue and stop current
+        m_pendingPlay = PendingPlay{songId};
+        qDebug() << "[MusicKit] Queued:" << songId << "— stopping current";
+        stop();
+        break;
+
+    case AMState::Stopping:
+        // Already stopping — just update queue
+        m_pendingPlay = PendingPlay{songId};
+        qDebug() << "[MusicKit] Queued:" << songId << "— already stopping";
+        break;
+    }
+}
+
+// ── executePlay — internal, does the actual JS work ─────────────────
+void MusicKitPlayer::executePlay(const QString& songId)
+{
+    setAMState(AMState::Loading);
     qDebug() << "[MusicKitPlayer] Calling JS playSong()...";
     runJS(QStringLiteral("playSong('%1')").arg(songId));
 }
@@ -431,6 +465,13 @@ void MusicKitPlayer::togglePlayPause()
 // ── stop ────────────────────────────────────────────────────────────
 void MusicKitPlayer::stop()
 {
+    if (m_amState == AMState::Idle || m_amState == AMState::Stopping) {
+        if (m_ready)
+            runJS(QStringLiteral("stopPlayback()"));
+        return;
+    }
+
+    setAMState(AMState::Stopping);
     if (m_ready)
         runJS(QStringLiteral("stopPlayback()"));
 }
@@ -510,10 +551,148 @@ void MusicKitPlayer::onMusicKitReady()
     }
 }
 
-void MusicKitPlayer::onPlaybackStateChanged(bool playing)
+void MusicKitPlayer::onMusicKitStateChanged(int state)
 {
-    qDebug() << "[MusicKitPlayer] Playback state changed:" << playing;
-    emit playbackStateChanged(playing);
+    const char* names[] = {"none","loading","playing","paused","stopped",
+                           "ended","seeking","waiting","stalled","completed"};
+    const char* name = (state >= 0 && state <= 9) ? names[state] : "unknown";
+    qDebug() << "[MusicKitPlayer] MusicKit state:" << state << "(" << name << ")";
+    processStateTransition(state);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  State machine
+// ═════════════════════════════════════════════════════════════════════
+
+void MusicKitPlayer::setAMState(AMState newState)
+{
+    if (m_amState == newState) return;
+
+    AMState oldState = m_amState;
+    m_amState = newState;
+
+    const char* stateNames[] = {"Idle", "Loading", "Playing", "Stalled", "Stopping"};
+    qDebug() << "[MusicKit] State:" << stateNames[static_cast<int>(oldState)]
+             << "→" << stateNames[static_cast<int>(newState)];
+
+    switch (newState) {
+    case AMState::Playing:
+        emit playbackStateChanged(true);
+        m_stateTimeoutTimer->stop();
+        break;
+    case AMState::Idle:
+        m_stateTimeoutTimer->stop();
+        if (m_pendingPlay) {
+            // Don't emit false — about to play next song
+            processPendingPlay();
+        } else {
+            emit playbackStateChanged(false);
+        }
+        break;
+    case AMState::Loading:
+        startStateTimeout(30000);  // MusicKit DRM + CDN can take 15-20s
+        break;
+    case AMState::Stalled:
+        startStateTimeout(30000);  // Buffering can be slow
+        break;
+    case AMState::Stopping:
+        startStateTimeout(5000);
+        break;
+    }
+}
+
+void MusicKitPlayer::processStateTransition(int mkState)
+{
+    // MusicKit states:
+    // 0=none, 1=loading, 2=playing, 3=paused, 4=stopped,
+    // 5=ended, 6=seeking, 7=waiting, 8=stalled, 9=completed
+
+    switch (m_amState) {
+
+    case AMState::Idle:
+        if (mkState == 2) {
+            // Playing while Idle — e.g. resume() bypassed state machine
+            setAMState(AMState::Playing);
+        }
+        break;
+
+    case AMState::Loading:
+        if (mkState == 2) {
+            setAMState(AMState::Playing);
+        } else if (mkState == 8 || mkState == 1) {
+            // stalled or loading — MusicKit is buffering, stay in Loading
+            startStateTimeout(30000);  // reset timeout — still actively loading
+        } else if (mkState == 4 || mkState == 0) {
+            qDebug() << "[MusicKit] Loading: stopped unexpectedly";
+            setAMState(AMState::Idle);
+        } else if (mkState == 3) {
+            qDebug() << "[MusicKit] Loading: paused unexpectedly";
+            setAMState(AMState::Idle);
+        }
+        break;
+
+    case AMState::Playing:
+        if (mkState == 8 || mkState == 1) {
+            setAMState(AMState::Stalled);
+        } else if (mkState == 3) {
+            setAMState(AMState::Idle);
+        } else if (mkState == 4 || mkState == 0 || mkState == 9 || mkState == 5) {
+            // stopped, none, completed, ended
+            setAMState(AMState::Idle);
+        }
+        // mkState == 2 while Playing → ignore (no change)
+        break;
+
+    case AMState::Stalled:
+        if (mkState == 2) {
+            // Recovered!
+            setAMState(AMState::Playing);
+        } else if (mkState == 4 || mkState == 0 || mkState == 3) {
+            setAMState(AMState::Idle);
+        } else if (mkState == 1 || mkState == 8) {
+            // loading or re-stalled — MusicKit is actively buffering
+            startStateTimeout(30000);  // reset timeout
+        }
+        break;
+
+    case AMState::Stopping:
+        if (mkState == 4 || mkState == 0 || mkState == 3) {
+            // stopped, none, paused — stop confirmed
+            setAMState(AMState::Idle);
+        }
+        // Any other state while Stopping → keep waiting
+        break;
+    }
+}
+
+void MusicKitPlayer::processPendingPlay()
+{
+    if (!m_pendingPlay) return;
+
+    auto next = *m_pendingPlay;
+    m_pendingPlay.reset();
+
+    qDebug() << "[MusicKit] Processing queued:" << next.songId;
+    executePlay(next.songId);
+}
+
+void MusicKitPlayer::startStateTimeout(int ms)
+{
+    m_stateTimeoutTimer->start(ms);
+}
+
+void MusicKitPlayer::onStateTimeout()
+{
+    const char* stateNames[] = {"Idle", "Loading", "Playing", "Stalled", "Stopping"};
+    qDebug() << "[MusicKit] State timeout in"
+             << stateNames[static_cast<int>(m_amState)] << "— forcing Idle";
+    m_amState = AMState::Idle;  // bypass setAMState to avoid re-entrant timeout
+    m_stateTimeoutTimer->stop();
+    if (m_pendingPlay) {
+        processPendingPlay();
+    } else {
+        emit playbackStateChanged(false);
+    }
 }
 
 void MusicKitPlayer::onPlaybackEnded()
@@ -914,7 +1093,7 @@ async function configureMusicKit() {
             var name = names[state] || 'unknown(' + state + ')';
             var isPlaying = (state === MusicKit.PlaybackStates.playing);
             log('[MusicKit] playbackStateDidChange: ' + state + ' (' + name + ') playing: ' + isPlaying);
-            msg('playbackState', isPlaying);
+            msg('playbackState', state);
 
             if (state === MusicKit.PlaybackStates.ended ||
                 state === MusicKit.PlaybackStates.completed) {

@@ -11,7 +11,6 @@
 #include <QNetworkAccessManager>
 #include <QPushButton>
 #include <QStack>
-#include <QElapsedTimer>
 #include <QFontMetrics>
 
 class StyledInput;
@@ -108,9 +107,6 @@ private:
     QVBoxLayout* m_resultsLayout = nullptr;
 
     QNetworkAccessManager* m_networkManager = nullptr;
-
-    // Play debounce — prevents duplicate playSong from button + row dblclick
-    QElapsedTimer m_playDebounce;
 
     // Music User Token
     QString m_musicUserToken;

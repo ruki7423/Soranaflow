@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
+#include <optional>
 
 // Opaque pointer for Objective-C++ WKWebView implementation
 struct MusicKitWebViewPrivate;
@@ -15,6 +17,10 @@ public:
     ~MusicKitPlayer() override;
 
     bool isReady() const { return m_ready; }
+
+    // State machine states
+    enum class AMState { Idle, Loading, Playing, Stalled, Stopping };
+    AMState amState() const { return m_amState; }
 
     // Playback controls
     Q_INVOKABLE void play(const QString& songId);
@@ -38,7 +44,7 @@ public:
 
     // Called from JS via WKScriptMessageHandler
     void onMusicKitReady();
-    void onPlaybackStateChanged(bool playing);
+    void onMusicKitStateChanged(int state);
     void onNowPlayingChanged(const QString& title, const QString& artist,
                               const QString& album, double duration);
     void onPlaybackTimeChanged(double currentTime, double totalTime);
@@ -68,6 +74,24 @@ private:
     QString generateHTML();
     void runJS(const QString& js);
     Q_INVOKABLE void webViewDidFinishLoad();
+
+    // State machine
+    AMState m_amState = AMState::Idle;
+    void setAMState(AMState newState);
+    void processStateTransition(int musicKitState);
+    void processPendingPlay();
+
+    // Command queue (last-wins, max 1)
+    struct PendingPlay { QString songId; };
+    std::optional<PendingPlay> m_pendingPlay;
+
+    // Internal play execution (separated from public play)
+    void executePlay(const QString& songId);
+
+    // Timeout timer
+    QTimer* m_stateTimeoutTimer = nullptr;
+    void startStateTimeout(int ms);
+    void onStateTimeout();
 
     MusicKitWebViewPrivate* m_wk = nullptr;
     bool m_ready = false;
