@@ -551,6 +551,7 @@ void AudioProcessTap::prepareForPlayback()
         QVector<pid_t> children = findDescendantPids(myPid);
 
         NSMutableArray* processObjects = [NSMutableArray array];
+        bool webkitXpcMissed = false;
         AudioObjectID myObj = translatePIDToProcessObject(myPid);
         if (myObj != kAudioObjectUnknown)
             [processObjects addObject:@(myObj)];
@@ -562,19 +563,40 @@ void AudioProcessTap::prepareForPlayback()
                 proc_pidpath(child, pathBuf, sizeof(pathBuf));
                 qDebug() << "[ProcessTap] Prepare: including child PID:" << child
                          << QString::fromUtf8(pathBuf);
+            } else {
+                char pathBuf[PROC_PIDPATHINFO_MAXSIZE];
+                if (proc_pidpath(child, pathBuf, sizeof(pathBuf)) > 0) {
+                    QString path = QString::fromUtf8(pathBuf);
+                    if (path.contains(QStringLiteral("WebKit.WebContent")) ||
+                        path.contains(QStringLiteral("WebKit.GPU"))) {
+                        webkitXpcMissed = true;
+                        qDebug() << "[ProcessTap] Prepare: WebKit XPC PID" << child
+                                 << "not translatable — will use global tap";
+                    }
+                }
             }
         }
 
+        // Build exclusion list for global tap: exclude self so aggregate
+        // output isn't re-captured (CATapMuted feedback loop).
+        NSArray* selfExclude = (myObj != kAudioObjectUnknown)
+            ? @[@(myObj)] : @[];
+
         CATapDescription* tapDesc;
-        if (processObjects.count > 0) {
+        if (webkitXpcMissed) {
+            tapDesc = [[CATapDescription alloc]
+                initStereoGlobalTapButExcludeProcesses:selfExclude];
+            qDebug() << "[ProcessTap] Prepare: global tap excluding self"
+                     << "(WebKit XPC not translatable)";
+        } else if (processObjects.count > 0) {
             tapDesc = [[CATapDescription alloc]
                 initStereoMixdownOfProcesses:processObjects];
             qDebug() << "[ProcessTap] Prepare: per-process tap,"
                      << (int)processObjects.count << "processes (self + descendants)";
         } else {
             tapDesc = [[CATapDescription alloc]
-                initStereoGlobalTapButExcludeProcesses:@[]];
-            qDebug() << "[ProcessTap] Prepare: global tap fallback";
+                initStereoGlobalTapButExcludeProcesses:selfExclude];
+            qDebug() << "[ProcessTap] Prepare: global tap fallback (excluding self)";
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
@@ -781,6 +803,7 @@ bool AudioProcessTap::start()
         QVector<pid_t> children = findDescendantPids(myPid);
 
         NSMutableArray* processObjects = [NSMutableArray array];
+        bool webkitXpcMissed = false;
         AudioObjectID myObj = translatePIDToProcessObject(myPid);
         if (myObj != kAudioObjectUnknown)
             [processObjects addObject:@(myObj)];
@@ -792,19 +815,44 @@ bool AudioProcessTap::start()
                 proc_pidpath(child, pathBuf, sizeof(pathBuf));
                 qDebug() << "[ProcessTap] Including child PID:" << child
                          << QString::fromUtf8(pathBuf);
+            } else {
+                // Check if this is a WebKit XPC process that we need for audio
+                char pathBuf[PROC_PIDPATHINFO_MAXSIZE];
+                if (proc_pidpath(child, pathBuf, sizeof(pathBuf)) > 0) {
+                    QString path = QString::fromUtf8(pathBuf);
+                    if (path.contains(QStringLiteral("WebKit.WebContent")) ||
+                        path.contains(QStringLiteral("WebKit.GPU"))) {
+                        webkitXpcMissed = true;
+                        qDebug() << "[ProcessTap] WebKit XPC PID" << child
+                                 << "not translatable — will use global tap";
+                    }
+                }
             }
         }
 
+        // Build exclusion list for global tap: exclude self so aggregate
+        // output isn't re-captured (CATapMuted feedback loop).
+        NSArray* selfExclude = (myObj != kAudioObjectUnknown)
+            ? @[@(myObj)] : @[];
+
         CATapDescription* tapDesc;
-        if (processObjects.count > 0) {
+        if (webkitXpcMissed) {
+            // WebKit audio process can't be included in per-process tap
+            // (translatePIDToProcessObject fails on macOS 15+).
+            // Fall back to global tap excluding self to avoid feedback loop.
+            tapDesc = [[CATapDescription alloc]
+                initStereoGlobalTapButExcludeProcesses:selfExclude];
+            qDebug() << "[ProcessTap] Global tap excluding self"
+                     << "(WebKit XPC not translatable)";
+        } else if (processObjects.count > 0) {
             tapDesc = [[CATapDescription alloc]
                 initStereoMixdownOfProcesses:processObjects];
             qDebug() << "[ProcessTap] Per-process tap:"
                      << (int)processObjects.count << "processes (self + descendants)";
         } else {
             tapDesc = [[CATapDescription alloc]
-                initStereoGlobalTapButExcludeProcesses:@[]];
-            qDebug() << "[ProcessTap] Global tap fallback (no process objects)";
+                initStereoGlobalTapButExcludeProcesses:selfExclude];
+            qDebug() << "[ProcessTap] Global tap fallback (excluding self)";
         }
         tapDesc.name = @"SoranaFlow DSP Tap";
         tapDesc.privateTap = YES;
@@ -1076,7 +1124,9 @@ void AudioProcessTap::stop()
 
     // Destroy the tap object
     if (d->tapID != kAudioObjectUnknown) {
-        AudioHardwareDestroyProcessTap(d->tapID);
+        if (@available(macOS 14.2, *)) {
+            AudioHardwareDestroyProcessTap(d->tapID);
+        }
         d->tapID = kAudioObjectUnknown;
     }
 
