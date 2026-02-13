@@ -655,6 +655,7 @@ QWidget* AppleMusicView::createSongRow(const QJsonObject& song)
     playBtn->setCursor(Qt::PointingHandCursor);
     playBtn->setFocusPolicy(Qt::NoFocus);
     playBtn->setAttribute(Qt::WA_MacShowFocusRect, false);
+    playBtn->setAttribute(Qt::WA_NoMousePropagation);
     playBtn->setStyleSheet(QStringLiteral(
         "QPushButton { background: transparent; border: none; border-radius: %1px; outline: none; }"
         "QPushButton:hover { background: %2; }"
