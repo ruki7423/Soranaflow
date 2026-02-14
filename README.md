@@ -25,6 +25,19 @@
 
 ---
 
+## What's New (v1.7.0)
+
+### Features
+- Year display in Now Playing and Album Detail views
+- Album Artist standalone sort option in Albums view
+- Internet metadata lookup toggle in Settings
+
+### Bug Fixes
+- Fixed album artist and year not populated from file tags
+- VST plugin loading now shows clear error messages on failure
+
+---
+
 ## What's New (v1.6.1)
 
 ### Bug Fixes
@@ -97,7 +110,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.6.1](https://github.com/ruki7423/Soranaflow/releases/download/v1.6.1/SoranaFlow-1.6.1.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.0/SoranaFlow-1.7.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -132,13 +145,17 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 21 (v1.0.0 → v1.6.1) |
+| GitHub Releases | 22 (v1.0.0 → v1.7.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.0 — Year & Album Artist
+
+- Year display, Album Artist sort, VST error feedback, internet metadata toggle
 
 ### v1.6.1 — Upsampling Crash Fix
 
