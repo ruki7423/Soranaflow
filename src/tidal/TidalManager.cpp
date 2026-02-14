@@ -951,3 +951,31 @@ void TidalManager::loadTokens()
         m_userLoggedIn = false;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  IStreamingService stubs (API disabled since 2025-02)
+// ═══════════════════════════════════════════════════════════════════
+
+void TidalManager::searchCatalog(const QString& /*term*/, int /*limit*/)
+{
+    qDebug() << "[TidalManager] searchCatalog unavailable — API disabled";
+    emit networkError(QStringLiteral("Tidal search API is currently unavailable"));
+}
+
+void TidalManager::fetchAlbumTracks(const QString& /*albumId*/)
+{
+    qDebug() << "[TidalManager] fetchAlbumTracks unavailable — API disabled";
+    emit networkError(QStringLiteral("Tidal API is currently unavailable"));
+}
+
+void TidalManager::fetchArtistAlbums(const QString& /*artistId*/)
+{
+    qDebug() << "[TidalManager] fetchArtistAlbums unavailable — API disabled";
+    emit networkError(QStringLiteral("Tidal API is currently unavailable"));
+}
+
+void TidalManager::fetchArtistSongs(const QString& /*artistId*/)
+{
+    qDebug() << "[TidalManager] fetchArtistSongs unavailable — API disabled";
+    emit networkError(QStringLiteral("Tidal API is currently unavailable"));
+}

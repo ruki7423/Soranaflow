@@ -8,11 +8,12 @@
 #include <QDateTime>
 #include <QNetworkAccessManager>
 #include <functional>
+#include "../core/IStreamingService.h"
 
 class QNetworkReply;
 class QTcpServer;
 
-class TidalManager : public QObject
+class TidalManager : public QObject, public IStreamingService
 {
     Q_OBJECT
 
@@ -42,6 +43,20 @@ public:
 
     // Cover art URL helper (converts image ID to URL)
     static QString coverArtUrl(const QString& imageId, int size = 750);
+
+    // ── IStreamingService ────────────────────────────────────────
+    QString serviceName() const override { return QStringLiteral("Tidal"); }
+    QString serviceId() const override { return QStringLiteral("tidal"); }
+    bool isServiceAuthorized() const override { return isAuthenticated(); }
+    void authorize() override { authenticate(); }
+    void deauthorize() override { logout(); }
+    QString region() const override { return countryCode(); }
+    void setRegion(const QString& r) override { setCountryCode(r); }
+    void searchCatalog(const QString& term, int limit = 25) override;
+    void fetchAlbumTracks(const QString& albumId) override;
+    void fetchArtistAlbums(const QString& artistId) override;
+    void fetchArtistSongs(const QString& artistId) override;
+    QObject* asQObject() override { return this; }
 
     // === API SEARCH DISABLED — openapi.tidal.com returning 404 (2025-02) ===
     // Uncomment when Tidal restores API endpoints

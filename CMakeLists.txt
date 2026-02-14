@@ -79,6 +79,7 @@ endif()
 
 # Source files
 set(CORE_SOURCES
+    src/core/IStreamingService.h
     src/core/MusicData.h
     src/core/MusicData.cpp
     src/core/ThemeManager.h

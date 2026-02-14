@@ -3,12 +3,13 @@
 #include <QObject>
 #include <QString>
 #include <QJsonArray>
+#include "../core/IStreamingService.h"
 
 class QNetworkAccessManager;
 class QNetworkReply;
 class AppleMusicManagerPrivate;
 
-class AppleMusicManager : public QObject
+class AppleMusicManager : public QObject, public IStreamingService
 {
     Q_OBJECT
 
@@ -35,16 +36,26 @@ public:
     Q_INVOKABLE void checkSubscriptionStatus();
     Q_INVOKABLE void requestMusicUserToken();
     QString musicUserToken() const;
-    Q_INVOKABLE void searchCatalog(const QString& term, int limit = 25);
-    Q_INVOKABLE void fetchArtistSongs(const QString& artistId);
-    Q_INVOKABLE void fetchArtistAlbums(const QString& artistId);
-    Q_INVOKABLE void fetchAlbumTracks(const QString& albumId);
+    Q_INVOKABLE void searchCatalog(const QString& term, int limit = 25) override;
+    Q_INVOKABLE void fetchArtistSongs(const QString& artistId) override;
+    Q_INVOKABLE void fetchArtistAlbums(const QString& artistId) override;
+    Q_INVOKABLE void fetchAlbumTracks(const QString& albumId) override;
 
     // Developer credentials for REST API fallback
     void loadDeveloperCredentials(const QString& teamId,
                                   const QString& keyId,
                                   const QString& privateKeyPath);
     void setStorefront(const QString& storefront);
+
+    // ── IStreamingService ────────────────────────────────────────
+    QString serviceName() const override { return QStringLiteral("Apple Music"); }
+    QString serviceId() const override { return QStringLiteral("apple-music"); }
+    bool isServiceAuthorized() const override { return isAuthorized(); }
+    void authorize() override { requestAuthorization(); }
+    void deauthorize() override { disconnectAppleMusic(); }
+    QString region() const override { return storefront(); }
+    void setRegion(const QString& r) override { setStorefront(r); }
+    QObject* asQObject() override { return this; }
 
 signals:
     void authorizationStatusChanged(AuthStatus status);
