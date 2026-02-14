@@ -678,3 +678,10 @@ if(APPLE)
         message(WARNING "macdeployqt not found — app bundle will not be self-contained")
     endif()
 endif()
+
+# ── Unit Tests (Qt Test + CTest) ──────────────────────────────────
+option(BUILD_TESTS "Build unit tests" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
