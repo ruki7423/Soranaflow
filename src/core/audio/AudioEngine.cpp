@@ -458,6 +458,10 @@ bool AudioEngine::load(const QString& filePath)
     });
     m_output->setVolume(m_volume);
 
+    // DoP passthrough: skip volume scaling in CoreAudio callback so DoP markers survive
+    bool isDoPMode = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+    m_output->setDoPPassthrough(isDoPMode);
+
     if (!m_output->open(outputFmt, m_currentDeviceId)) {
         // If a specific device was requested and failed, fall back to default
         if (m_currentDeviceId != 0) {
@@ -1332,9 +1336,13 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     newFrames = m_decoder->read(buf, maxFrames);
                 }
 
-                if (newFrames > 0 && !m_bitPerfect.load(std::memory_order_relaxed)) {
+                bool gaplessDoPPassthrough = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+                if (newFrames > 0 && !gaplessDoPPassthrough
+                    && !m_bitPerfect.load(std::memory_order_relaxed)) {
                     m_dspPipeline->process(buf, newFrames, channels);
                 }
+                // Update DoP passthrough flag for the new track
+                m_output->setDoPPassthrough(gaplessDoPPassthrough);
                 m_framesRendered.fetch_add(newFrames, std::memory_order_relaxed);
             }
 

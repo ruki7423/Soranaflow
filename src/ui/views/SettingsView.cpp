@@ -844,11 +844,13 @@ QWidget* SettingsView::createAudioTab()
         uint32_t actualBuf = devMgr->currentBufferSize(curDevId);
 
         static const uint32_t standardSizes[] = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
+        auto bsRange = devMgr->supportedBufferSizes(curDevId);
         double sampleRate = devMgr->currentSampleRate(curDevId);
         if (sampleRate <= 0) sampleRate = 44100.0;
 
         int selIdx = -1;
         for (uint32_t sz : standardSizes) {
+            if (sz < bsRange.minimum || sz > bsRange.maximum) continue;
             double latencyMs = static_cast<double>(sz) / sampleRate * 1000.0;
             bufferSizeCombo->addItem(
                 QStringLiteral("%1 samples (~%2ms)").arg(sz).arg(latencyMs, 0, 'f', 1), sz);

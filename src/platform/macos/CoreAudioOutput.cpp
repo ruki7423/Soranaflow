@@ -20,6 +20,7 @@ struct CoreAudioOutput::Impl {
     std::atomic<bool>       swappingCallback{false};
     float                   volume  = 1.0f;
     bool                    bitPerfect = false;
+    std::atomic<bool>       dopPassthrough{false};
 
     static OSStatus renderCallback(void* inRefCon,
                                    AudioUnitRenderActionFlags* ioActionFlags,
@@ -67,11 +68,13 @@ struct CoreAudioOutput::Impl {
                         (totalSamples - samplesWritten) * sizeof(float));
         }
 
-        // Apply volume
-        float vol = self->volume;
-        if (vol < 1.0f) {
-            for (int i = 0; i < totalSamples; ++i) {
-                outBuf[i] *= vol;
+        // Apply volume (skip for DoP — scaling destroys DoP markers)
+        if (!self->dopPassthrough.load(std::memory_order_relaxed)) {
+            float vol = self->volume;
+            if (vol < 1.0f) {
+                for (int i = 0; i < totalSamples; ++i) {
+                    outBuf[i] *= vol;
+                }
             }
         }
 
@@ -963,6 +966,11 @@ void CoreAudioOutput::setBitPerfectMode(bool enabled)
 bool CoreAudioOutput::bitPerfectMode() const
 {
     return m_impl->bitPerfect;
+}
+
+void CoreAudioOutput::setDoPPassthrough(bool enabled)
+{
+    m_impl->dopPassthrough.store(enabled, std::memory_order_release);
 }
 
 std::vector<AudioDevice> CoreAudioOutput::enumerateDevices() const { return enumerateDevicesStatic(); }

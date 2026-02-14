@@ -607,6 +607,22 @@ if(APPLE)
                 COMMENT "Embedding Sparkle.framework (preserving symlinks)..."
             )
         endif()
+        # Step 6b: Bundle libmysofa (HRTF) — not handled by macdeployqt
+        if(MYSOFA_FOUND)
+            find_library(MYSOFA_DYLIB_PATH libmysofa.1.dylib
+                PATHS /usr/local/lib /opt/homebrew/lib NO_DEFAULT_PATH)
+            if(MYSOFA_DYLIB_PATH)
+                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${MYSOFA_DYLIB_PATH}"
+                        "${APP_BUNDLE}/Contents/Frameworks/libmysofa.1.dylib"
+                    COMMAND chmod u+w "${APP_BUNDLE}/Contents/Frameworks/libmysofa.1.dylib"
+                    COMMAND install_name_tool -id "@rpath/libmysofa.1.dylib"
+                        "${APP_BUNDLE}/Contents/Frameworks/libmysofa.1.dylib"
+                    COMMENT "Bundling libmysofa.1.dylib (HRTF binaural audio)..."
+                )
+            endif()
+        endif()
         # Step 7: Re-sign after all modifications (must be last)
         set(ADHOC_SIGN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/adhoc_sign.sh")
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

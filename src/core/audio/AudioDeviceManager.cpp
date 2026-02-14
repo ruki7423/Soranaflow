@@ -454,18 +454,20 @@ bool AudioDeviceManager::setBufferSize(uint32_t frames)
 
     UInt32 bufSize = frames;
     OSStatus status = AudioObjectSetPropertyData(devId, &prop, 0, nullptr, sizeof(UInt32), &bufSize);
-    if (status != noErr) {
-        qWarning() << "[AudioDeviceManager] Failed to set buffer size to" << frames
-                    << "for device" << devId << ", OSStatus:" << status;
-        emit deviceError(QStringLiteral("Failed to set buffer size to %1 frames (error %2)")
-                             .arg(frames).arg(status));
-        return false;
-    }
 
-    // Read back actual value (device may choose closest supported size)
+    // Always read back actual value and emit — even on failure the UI must sync
     UInt32 actualSize = 0;
     UInt32 propSize = sizeof(actualSize);
     AudioObjectGetPropertyData(devId, &prop, 0, nullptr, &propSize, &actualSize);
+
+    if (status != noErr) {
+        qWarning() << "[AudioDeviceManager] Failed to set buffer size to" << frames
+                    << "for device" << devId << ", OSStatus:" << status
+                    << "actual:" << actualSize;
+        emit bufferSizeChanged(actualSize);
+        return false;
+    }
+
     qDebug() << "[AudioDeviceManager] Buffer size requested:" << frames
              << "actual:" << actualSize << "for device" << devId;
 

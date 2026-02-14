@@ -51,6 +51,9 @@ public:
     virtual void setBitPerfectMode(bool enabled) = 0;
     virtual bool bitPerfectMode() const = 0;
 
+    // DoP passthrough — disables volume scaling so DoP markers survive intact
+    virtual void setDoPPassthrough(bool) {}
+
     // Device queries (were static on CoreAudioOutput — const since they are pure queries)
     virtual std::vector<AudioDevice> enumerateDevices() const = 0;
     virtual double getMaxSampleRate(uint32_t deviceId = 0) const = 0;
