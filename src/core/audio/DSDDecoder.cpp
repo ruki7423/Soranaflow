@@ -405,7 +405,12 @@ struct DSDDecoder::Impl {
 DSDDecoder::DSDDecoder() : m_impl(std::make_unique<Impl>()) {}
 DSDDecoder::~DSDDecoder() { close(); }
 
-bool DSDDecoder::open(const std::string& filePath, bool dopMode)
+bool DSDDecoder::open(const std::string& filePath)
+{
+    return openDSD(filePath, false);
+}
+
+bool DSDDecoder::openDSD(const std::string& filePath, bool dopMode)
 {
     close();
 

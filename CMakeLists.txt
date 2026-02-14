@@ -113,6 +113,7 @@ set(AUDIO_SOURCES
     src/core/audio/SignalPathBuilder.cpp
     src/core/audio/VolumeLevelingManager.h
     src/core/audio/VolumeLevelingManager.cpp
+    src/core/audio/IDecoder.h
     src/core/audio/AudioDecoder.h
     src/core/audio/AudioDecoder.cpp
     src/core/audio/DSDDecoder.h

@@ -357,7 +357,7 @@ bool AudioEngine::load(const QString& filePath)
         if (dsdMode == QStringLiteral("dop")) {
             // Native DoP mode — encode DSD into DoP frames at DSD_rate/16
             // DAC sample rate will be set to the DoP rate by CoreAudioOutput
-            if (m_dsdDecoder->open(filePath.toStdString(), true)) {
+            if (m_dsdDecoder->openDSD(filePath.toStdString(), true)) {
                 fmt = m_dsdDecoder->format();
                 // Check if the output device supports the required DoP rate
                 double maxRate = m_output->getMaxSampleRate(m_currentDeviceId);
@@ -914,7 +914,7 @@ void AudioEngine::prepareNextTrack(const QString& filePath)
     if (isDSD) {
         QString dsdMode = Settings::instance()->dsdPlaybackMode();
         if (dsdMode == QStringLiteral("dop")) {
-            if (m_nextDsdDecoder->open(filePath.toStdString(), true)) {
+            if (m_nextDsdDecoder->openDSD(filePath.toStdString(), true)) {
                 AudioStreamFormat fmt = m_nextDsdDecoder->format();
                 double maxRate = m_output->getMaxSampleRate(m_currentDeviceId);
                 if (maxRate > 0 && fmt.sampleRate > maxRate) {

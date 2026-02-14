@@ -1,32 +1,27 @@
 #pragma once
 #include <string>
 #include <memory>
-#include <QString>
-#include "AudioFormat.h"
+#include "IDecoder.h"
 
-class AudioDecoder {
+class AudioDecoder : public IDecoder {
 public:
     AudioDecoder();
-    ~AudioDecoder();
+    ~AudioDecoder() override;
 
     AudioDecoder(const AudioDecoder&) = delete;
     AudioDecoder& operator=(const AudioDecoder&) = delete;
 
-    bool open(const std::string& filePath);
-    void close();
-    bool isOpen() const;
+    bool open(const std::string& filePath) override;
+    void close() override;
+    bool isOpen() const override;
 
-    // Read interleaved float32 samples into buf. Returns frames actually read.
-    int read(float* buf, int maxFrames);
+    int read(float* buf, int maxFrames) override;
+    bool seek(double secs) override;
 
-    // Seek to a position in seconds. Returns true on success.
-    bool seek(double secs);
+    AudioStreamFormat format() const override;
+    double currentPositionSecs() const override;
 
-    AudioStreamFormat format() const;
-    double currentPositionSecs() const;
-
-    // Returns the FFmpeg codec name (e.g. "flac", "alac", "mp3") or empty if not loaded
-    QString codecName() const;
+    QString codecName() const override;
 
 private:
     struct Impl;

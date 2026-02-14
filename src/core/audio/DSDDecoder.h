@@ -2,7 +2,7 @@
 
 #include <string>
 #include <memory>
-#include "AudioFormat.h"
+#include "IDecoder.h"
 
 // DSD decoder for DSF and DFF file formats.
 //
@@ -15,47 +15,40 @@
 //     (0x05/0xFA alternating). Output at DSD_rate/16:
 //     DSD64 → 176.4 kHz, DSD128 → 352.8 kHz, DSD256 → 705.6 kHz
 //     The DAC recognizes the markers and reconstructs the DSD stream.
-class DSDDecoder {
+class DSDDecoder : public IDecoder {
 public:
     DSDDecoder();
-    ~DSDDecoder();
+    ~DSDDecoder() override;
 
     DSDDecoder(const DSDDecoder&) = delete;
     DSDDecoder& operator=(const DSDDecoder&) = delete;
 
-    // Open a DSD file. If dopMode is true, output DoP-encoded data
-    // at DSD_rate/16 instead of FIR-filtered PCM at 44.1 kHz.
-    bool open(const std::string& filePath, bool dopMode = false);
-    void close();
-    bool isOpen() const;
+    // IDecoder interface — open() ignores dopMode, use openDSD() for DoP
+    bool open(const std::string& filePath) override;
+    void close() override;
+    bool isOpen() const override;
 
-    // Read interleaved float32 samples. Returns frames actually read.
-    // In PCM mode: filtered PCM at 44.1 kHz
-    // In DoP mode: DoP-encoded data at DSD_rate/16
-    int read(float* buf, int maxFrames);
+    int read(float* buf, int maxFrames) override;
+    bool seek(double secs) override;
 
-    // Seek to position in seconds.
-    bool seek(double secs);
+    AudioStreamFormat format() const override;
+    double currentPositionSecs() const override;
 
-    AudioStreamFormat format() const;
-    double currentPositionSecs() const;
+    // DSD-specific open — if dopMode is true, output DoP-encoded data
+    bool openDSD(const std::string& filePath, bool dopMode);
 
-    // DSD-specific info (range-based detection)
-    bool isDSD64() const;
-    bool isDSD128() const;
-    bool isDSD256() const;
-    bool isDSD512() const;
-    bool isDSD1024() const;
-    bool isDSD2048() const;
-    double dsdSampleRate() const;
-    bool isDoPMode() const;
+    // DSD-specific info (overrides from IDecoder)
+    bool isDSD64() const override;
+    bool isDSD128() const override;
+    bool isDSD256() const override;
+    bool isDSD512() const override;
+    bool isDSD1024() const override;
+    bool isDSD2048() const override;
+    double dsdSampleRate() const override;
+    bool isDoPMode() const override;
 
-    // DoP marker state — used for gapless transition marker continuity.
-    // The marker alternates 0x05/0xFA each frame. To avoid crackling on
-    // gapless DSD→DSD transitions, transfer the marker state from the
-    // old decoder to the new one before reading.
-    bool dopMarkerState() const;
-    void setDoPMarkerState(bool marker);
+    bool dopMarkerState() const override;
+    void setDoPMarkerState(bool marker) override;
 
 private:
     struct Impl;
