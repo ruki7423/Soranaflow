@@ -484,6 +484,12 @@ int DSDDecoder::read(float* buf, int maxFrames)
 {
     if (!m_impl->opened) return 0;
 
+    // Clamp to actual audio content — DSF files have zero-padded last blocks
+    // that produce 0x00 DSD payload in DoP mode (= max negative DC offset = pop)
+    int64_t remaining = m_impl->totalPCMFrames - m_impl->pcmFramesRead;
+    if (remaining <= 0) return 0;
+    if (maxFrames > (int)remaining) maxFrames = (int)remaining;
+
     const int ch = m_impl->channels;
     const int bytesPerCh = m_impl->bytesPerPCMSample;
     int framesWritten = 0;
