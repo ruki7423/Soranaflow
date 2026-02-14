@@ -11,6 +11,11 @@
 #include <atomic>
 
 #include "../MusicData.h"
+#include "DatabaseContext.h"
+#include "TrackRepository.h"
+#include "AlbumRepository.h"
+#include "ArtistRepository.h"
+#include "PlaylistRepository.h"
 
 class LibraryDatabase : public QObject {
     Q_OBJECT
@@ -126,11 +131,6 @@ private:
     void createIndexes();
     void doRebuildInternal();
 
-    QString generateId() const;
-    Track trackFromQuery(const QSqlQuery& query) const;
-    AudioFormat audioFormatFromString(const QString& str) const;
-    QString audioFormatToString(AudioFormat fmt) const;
-
     QSqlDatabase m_db;        // write connection (scanner, inserts, updates)
     QSqlDatabase m_readDb;    // read connection (MDP, search, UI queries)
     QString m_dbPath;
@@ -144,4 +144,11 @@ private:
     // Incremental caches
     QHash<QString, QString> m_artistNameToIdCache;  // lowercase name → artistId
     QHash<QString, QString> m_albumKeyToIdCache;     // "album||artist" → albumId
+
+    // Repository delegation
+    DatabaseContext m_ctx;
+    TrackRepository* m_trackRepo = nullptr;
+    AlbumRepository* m_albumRepo = nullptr;
+    ArtistRepository* m_artistRepo = nullptr;
+    PlaylistRepository* m_playlistRepo = nullptr;
 };

@@ -16,22 +16,6 @@
 #include <QCoreApplication>
 #include <QSet>
 
-// ── String pool for deduplicating artist/album names ─────────────────
-namespace {
-class StringPool {
-public:
-    const QString& intern(const QString& s) {
-        auto it = m_pool.find(s);
-        if (it != m_pool.end()) return *it;
-        auto result = m_pool.insert(s);
-        return *result;
-    }
-    int uniqueCount() const { return m_pool.size(); }
-private:
-    QSet<QString> m_pool;
-};
-} // anonymous namespace
-
 // ── Singleton ───────────────────────────────────────────────────────
 LibraryDatabase* LibraryDatabase::instance()
 {
@@ -45,11 +29,27 @@ LibraryDatabase::LibraryDatabase(QObject* parent)
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);
     m_dbPath = dataDir + QStringLiteral("/library.db");
+
+    // Initialize DatabaseContext — points to our owned DB connections & mutexes
+    m_ctx.writeDb = &m_db;
+    m_ctx.readDb = &m_readDb;
+    m_ctx.writeMutex = &m_writeMutex;
+    m_ctx.readMutex = &m_readMutex;
+
+    // Create repositories
+    m_trackRepo = new TrackRepository(&m_ctx);
+    m_albumRepo = new AlbumRepository(&m_ctx);
+    m_artistRepo = new ArtistRepository(&m_ctx);
+    m_playlistRepo = new PlaylistRepository(&m_ctx);
 }
 
 LibraryDatabase::~LibraryDatabase()
 {
     close();
+    delete m_trackRepo;
+    delete m_albumRepo;
+    delete m_artistRepo;
+    delete m_playlistRepo;
 }
 
 // ── open / close ────────────────────────────────────────────────────
@@ -332,217 +332,22 @@ void LibraryDatabase::createIndexes()
         "ON tracks(file_path, file_size, file_mtime)"));
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
-QString LibraryDatabase::generateId() const
-{
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
-}
+// ── Helpers moved to DatabaseContext.cpp ─────────────────────────────
 
-QString LibraryDatabase::audioFormatToString(AudioFormat fmt) const
-{
-    switch (fmt) {
-    case AudioFormat::FLAC:    return QStringLiteral("FLAC");
-    case AudioFormat::DSD64:   return QStringLiteral("DSD64");
-    case AudioFormat::DSD128:  return QStringLiteral("DSD128");
-    case AudioFormat::DSD256:  return QStringLiteral("DSD256");
-    case AudioFormat::DSD512:  return QStringLiteral("DSD512");
-    case AudioFormat::DSD1024: return QStringLiteral("DSD1024");
-    case AudioFormat::DSD2048: return QStringLiteral("DSD2048");
-    case AudioFormat::ALAC:    return QStringLiteral("ALAC");
-    case AudioFormat::WAV:     return QStringLiteral("WAV");
-    case AudioFormat::MP3:     return QStringLiteral("MP3");
-    case AudioFormat::AAC:     return QStringLiteral("AAC");
-    }
-    return QStringLiteral("Unknown");
-}
-
-AudioFormat LibraryDatabase::audioFormatFromString(const QString& str) const
-{
-    if (str == QStringLiteral("FLAC"))    return AudioFormat::FLAC;
-    if (str == QStringLiteral("DSD64"))   return AudioFormat::DSD64;
-    if (str == QStringLiteral("DSD128"))  return AudioFormat::DSD128;
-    if (str == QStringLiteral("DSD256"))  return AudioFormat::DSD256;
-    if (str == QStringLiteral("DSD512"))  return AudioFormat::DSD512;
-    if (str == QStringLiteral("DSD1024")) return AudioFormat::DSD1024;
-    if (str == QStringLiteral("DSD2048")) return AudioFormat::DSD2048;
-    if (str == QStringLiteral("ALAC"))    return AudioFormat::ALAC;
-    if (str == QStringLiteral("WAV"))     return AudioFormat::WAV;
-    if (str == QStringLiteral("MP3"))     return AudioFormat::MP3;
-    if (str == QStringLiteral("AAC"))     return AudioFormat::AAC;
-    return AudioFormat::FLAC; // fallback
-}
-
-Track LibraryDatabase::trackFromQuery(const QSqlQuery& query) const
-{
-    Track t;
-    t.id          = query.value(QStringLiteral("id")).toString();
-    t.title       = query.value(QStringLiteral("title")).toString();
-    t.artist      = query.value(QStringLiteral("artist")).toString();
-    t.album       = query.value(QStringLiteral("album")).toString();
-    t.albumId     = query.value(QStringLiteral("album_id")).toString();
-
-    // album_artist (migration column — may not exist in old DBs)
-    int aaIdx = query.record().indexOf(QStringLiteral("album_artist"));
-    if (aaIdx >= 0)
-        t.albumArtist = query.value(aaIdx).toString();
-    t.artistId    = query.value(QStringLiteral("artist_id")).toString();
-    t.duration    = query.value(QStringLiteral("duration")).toInt();
-    t.format      = audioFormatFromString(query.value(QStringLiteral("format")).toString());
-    t.sampleRate  = query.value(QStringLiteral("sample_rate")).toString();
-    t.bitDepth    = query.value(QStringLiteral("bit_depth")).toString();
-    t.bitrate     = query.value(QStringLiteral("bitrate")).toString();
-    t.coverUrl    = query.value(QStringLiteral("cover_url")).toString();
-    t.trackNumber = query.value(QStringLiteral("track_number")).toInt();
-    t.discNumber       = query.value(QStringLiteral("disc_number")).toInt();
-    t.filePath         = query.value(QStringLiteral("file_path")).toString();
-    t.recordingMbid    = query.value(QStringLiteral("recording_mbid")).toString();
-    t.artistMbid       = query.value(QStringLiteral("artist_mbid")).toString();
-    t.albumMbid        = query.value(QStringLiteral("album_mbid")).toString();
-    t.releaseGroupMbid = query.value(QStringLiteral("release_group_mbid")).toString();
-
-    // Channel count
-    int chIdx = query.record().indexOf(QStringLiteral("channel_count"));
-    if (chIdx >= 0) {
-        int ch = query.value(chIdx).toInt();
-        t.channelCount = (ch > 0) ? ch : 2;
-    }
-
-    // Load cached R128 loudness if available
-    int r128Idx = query.record().indexOf(QStringLiteral("r128_loudness"));
-    if (r128Idx >= 0) {
-        t.r128Loudness = query.value(r128Idx).toDouble();
-        t.r128Peak = query.value(QStringLiteral("r128_peak")).toDouble();
-        if (t.r128Loudness != 0.0) t.hasR128 = true;
-    }
-
-    // File size/mtime for scan skip
-    int fsIdx = query.record().indexOf(QStringLiteral("file_size"));
-    if (fsIdx >= 0) t.fileSize = query.value(fsIdx).toLongLong();
-    int mtIdx = query.record().indexOf(QStringLiteral("file_mtime"));
-    if (mtIdx >= 0) t.fileMtime = query.value(mtIdx).toLongLong();
-
-    return t;
-}
-
-// ── Tracks ──────────────────────────────────────────────────────────
-bool LibraryDatabase::trackExists(const QString& filePath) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM tracks WHERE file_path = ?"));
-    q.addBindValue(filePath);
-    if (q.exec() && q.next()) {
-        return q.value(0).toInt() > 0;
-    }
-    return false;
-}
-
-QHash<QString, QPair<qint64, qint64>> LibraryDatabase::allTrackFileMeta() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QElapsedTimer t; t.start();
-    QHash<QString, QPair<qint64, qint64>> result;
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT file_path, file_size, file_mtime FROM tracks"));
-    result.reserve(10000);
-    while (q.next()) {
-        result.insert(q.value(0).toString(),
-                      qMakePair(q.value(1).toLongLong(), q.value(2).toLongLong()));
-    }
-    qDebug() << "[TIMING] allTrackFileMeta:" << result.size() << "entries in" << t.elapsed() << "ms";
-    return result;
-}
+// ── Tracks (delegated to TrackRepository) ───────────────────────────
+bool LibraryDatabase::trackExists(const QString& filePath) const { return m_trackRepo->trackExists(filePath); }
+QHash<QString, QPair<qint64, qint64>> LibraryDatabase::allTrackFileMeta() const { return m_trackRepo->allTrackFileMeta(); }
 
 void LibraryDatabase::removeDuplicates()
 {
-    QMutexLocker lock(&m_writeMutex);
-    QElapsedTimer t; t.start();
-    qDebug() << "=== LibraryDatabase::removeDuplicates ===";
-
-    QSqlQuery countBefore(m_db);
-    countBefore.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));
-    int before = 0;
-    if (countBefore.next()) before = countBefore.value(0).toInt();
-    qDebug() << "  Tracks before cleanup:" << before;
-
-    // 1) Remove exact duplicates by file_path (keep first inserted)
-    QSqlQuery q1(m_db);
-    q1.exec(QStringLiteral(
-        "DELETE FROM tracks WHERE id NOT IN ("
-        "  SELECT MIN(id) FROM tracks GROUP BY file_path"
-        ")"
-    ));
-    qDebug() << "  Removed by file_path:" << q1.numRowsAffected();
-
-    // 2) Remove duplicates by metadata match (title+artist+album+duration)
-    QSqlQuery q2(m_db);
-    q2.exec(QStringLiteral(
-        "DELETE FROM tracks WHERE id NOT IN ("
-        "  SELECT MIN(id) FROM tracks "
-        "  GROUP BY LOWER(title), LOWER(artist), LOWER(album), CAST(duration AS INTEGER)"
-        ")"
-    ));
-    qDebug() << "  Removed by metadata match:" << q2.numRowsAffected();
-
-    // 3) Remove tracks whose files no longer exist on disk
-    QSqlQuery selectAll(m_db);
-    selectAll.exec(QStringLiteral("SELECT id, file_path FROM tracks"));
-
-    QStringList toRemove;
-    while (selectAll.next()) {
-        QString id = selectAll.value(0).toString();
-        QString path = selectAll.value(1).toString();
-        if (!path.isEmpty() && !QFile::exists(path)) {
-            toRemove.append(id);
-        }
-    }
-
-    if (!toRemove.isEmpty()) {
-        for (const QString& id : toRemove) {
-            QSqlQuery del(m_db);
-            del.prepare(QStringLiteral("DELETE FROM tracks WHERE id = ?"));
-            del.addBindValue(id);
-            del.exec();
-        }
-        qDebug() << "  Removed missing files:" << toRemove.size();
-    }
-
-    QSqlQuery countAfter(m_db);
-    countAfter.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));
-    int after = 0;
-    if (countAfter.next()) after = countAfter.value(0).toInt();
-    qDebug() << "  Tracks after cleanup:" << after;
-    qDebug() << "  Total removed:" << (before - after);
-    qDebug() << "[TIMING] removeDuplicates:" << t.elapsed() << "ms";
-    qDebug() << "=== Duplicate removal complete ===";
-
-    if (before != after) {
+    if (m_trackRepo->removeDuplicates())
         emit databaseChanged();
-    }
 }
 
 void LibraryDatabase::clearAllData(bool preservePlaylists)
 {
-    QMutexLocker lock(&m_writeMutex);
-    qDebug() << "=== LibraryDatabase::clearAllData ===" << "preservePlaylists:" << preservePlaylists;
-
-    QSqlQuery q(m_db);
-    m_db.transaction();
-    q.exec(QStringLiteral("DELETE FROM play_history"));
-    q.exec(QStringLiteral("DELETE FROM metadata_backups"));
-    if (!preservePlaylists) {
-        q.exec(QStringLiteral("DELETE FROM playlist_tracks"));
-        q.exec(QStringLiteral("DELETE FROM playlists"));
-    }
-    q.exec(QStringLiteral("DELETE FROM tracks"));
-    q.exec(QStringLiteral("DELETE FROM albums"));
-    q.exec(QStringLiteral("DELETE FROM artists"));
-    m_db.commit();
-    q.exec(QStringLiteral("VACUUM"));
-
+    m_trackRepo->clearAllData(preservePlaylists);
     clearIncrementalCaches();
-
-    qDebug() << "=== clearAllData complete ===";
     emit databaseChanged();
 }
 
@@ -556,132 +361,29 @@ bool LibraryDatabase::insertTrack(const Track& track)
     QString albumId = track.albumId;
 
     if (!m_batchMode) {
-        if (!track.artist.trimmed().isEmpty() && artistId.isEmpty()) {
+        if (!track.artist.trimmed().isEmpty() && artistId.isEmpty())
             artistId = findOrCreateArtist(track.artist);
-        }
-        if (!track.album.trimmed().isEmpty() && albumId.isEmpty()) {
+        if (!track.album.trimmed().isEmpty() && albumId.isEmpty())
             albumId = findOrCreateAlbum(track.album, track.artist, artistId);
-        }
     }
 
-    QSqlQuery q(m_db);
-    if (!q.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO tracks "
-        "(id, title, artist, album, album_id, artist_id, duration, format, "
-        "sample_rate, bit_depth, bitrate, cover_url, track_number, disc_number, file_path, "
-        "recording_mbid, artist_mbid, album_mbid, release_group_mbid, channel_count, "
-        "file_size, file_mtime, album_artist) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ))) {
-        qWarning() << "LibraryDatabase::insertTrack PREPARE failed:" << q.lastError().text();
-        return false;
-    }
-
-    QString id = track.id.isEmpty() ? generateId() : track.id;
-    q.addBindValue(id);
-    q.addBindValue(track.title);
-    q.addBindValue(track.artist);
-    q.addBindValue(track.album);
-    q.addBindValue(albumId);
-    q.addBindValue(artistId);
-    q.addBindValue(track.duration);
-    q.addBindValue(audioFormatToString(track.format));
-    q.addBindValue(track.sampleRate);
-    q.addBindValue(track.bitDepth);
-    q.addBindValue(track.bitrate);
-    q.addBindValue(track.coverUrl);
-    q.addBindValue(track.trackNumber);
-    q.addBindValue(track.discNumber);
-    q.addBindValue(track.filePath);
-    q.addBindValue(track.recordingMbid);
-    q.addBindValue(track.artistMbid);
-    q.addBindValue(track.albumMbid);
-    q.addBindValue(track.releaseGroupMbid);
-    q.addBindValue(track.channelCount);
-    q.addBindValue(track.fileSize);
-    q.addBindValue(track.fileMtime);
-    q.addBindValue(track.albumArtist);
-
-    if (!q.exec()) {
-        qWarning() << "LibraryDatabase::insertTrack failed:" << q.lastError().text();
-        return false;
-    }
+    bool ok = m_trackRepo->insertTrack(track, artistId, albumId);
 
     // Update album stats after successful insert (skip in batch mode)
-    if (!m_batchMode && !albumId.isEmpty()) {
+    if (ok && !m_batchMode && !albumId.isEmpty())
         updateAlbumStatsIncremental(albumId);
-    }
 
-    return true;
+    return ok;
 }
 
 bool LibraryDatabase::updateTrack(const Track& track)
 {
-    QMutexLocker lock(&m_writeMutex);
     if (track.id.isEmpty()) {
         qWarning() << "LibraryDatabase::updateTrack - track has no ID, falling back to insertTrack";
         return insertTrack(track);
     }
-
-    qDebug() << "=== LibraryDatabase::updateTrack ===";
-    qDebug() << "  ID:" << track.id;
-    qDebug() << "  Title:" << track.title;
-    qDebug() << "  Artist:" << track.artist;
-    qDebug() << "  Album:" << track.album;
-    qDebug() << "  FilePath:" << track.filePath;
-    qDebug() << "  Recording MBID:" << track.recordingMbid;
-    qDebug() << "  Artist MBID:" << track.artistMbid;
-    qDebug() << "  Album MBID:" << track.albumMbid;
-    qDebug() << "  ReleaseGroup MBID:" << track.releaseGroupMbid;
-
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE tracks SET "
-        "title = ?, artist = ?, album = ?, album_id = ?, artist_id = ?, "
-        "duration = ?, format = ?, sample_rate = ?, bit_depth = ?, bitrate = ?, "
-        "cover_url = ?, track_number = ?, disc_number = ?, file_path = ?, "
-        "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ?, "
-        "channel_count = ?, file_size = ?, file_mtime = ?, album_artist = ? "
-        "WHERE id = ?"
-    ));
-
-    q.addBindValue(track.title);
-    q.addBindValue(track.artist);
-    q.addBindValue(track.album);
-    q.addBindValue(track.albumId);
-    q.addBindValue(track.artistId);
-    q.addBindValue(track.duration);
-    q.addBindValue(audioFormatToString(track.format));
-    q.addBindValue(track.sampleRate);
-    q.addBindValue(track.bitDepth);
-    q.addBindValue(track.bitrate);
-    q.addBindValue(track.coverUrl);
-    q.addBindValue(track.trackNumber);
-    q.addBindValue(track.discNumber);
-    q.addBindValue(track.filePath);
-    q.addBindValue(track.recordingMbid);
-    q.addBindValue(track.artistMbid);
-    q.addBindValue(track.albumMbid);
-    q.addBindValue(track.releaseGroupMbid);
-    q.addBindValue(track.channelCount);
-    q.addBindValue(track.fileSize);
-    q.addBindValue(track.fileMtime);
-    q.addBindValue(track.albumArtist);
-    q.addBindValue(track.id);
-
-    if (!q.exec()) {
-        qWarning() << "  UPDATE FAILED:" << q.lastError().text();
-        return false;
-    }
-
-    int rows = q.numRowsAffected();
-    qDebug() << "  UPDATE SUCCESS: rows affected:" << rows;
-
-    if (rows == 0) {
-        qWarning() << "  No rows matched id=" << track.id << ", falling back to insertTrack";
+    if (!m_trackRepo->updateTrack(track))
         return insertTrack(track);
-    }
-
     return true;
 }
 
@@ -694,43 +396,8 @@ bool LibraryDatabase::updateTrackMetadata(const QString& trackId,
                                            const QString& albumMbid,
                                            const QString& releaseGroupMbid)
 {
-    QMutexLocker lock(&m_writeMutex);
-    if (trackId.isEmpty()) {
-        qWarning() << "LibraryDatabase::updateTrackMetadata - empty track ID";
-        return false;
-    }
-
-    qDebug() << "=== LibraryDatabase::updateTrackMetadata ===";
-    qDebug() << "  ID:" << trackId;
-    qDebug() << "  Title:" << title << "Artist:" << artist << "Album:" << album;
-    qDebug() << "  MBIDs: rec=" << recordingMbid << "artist=" << artistMbid
-             << "album=" << albumMbid << "rg=" << releaseGroupMbid;
-
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE tracks SET "
-        "title = ?, artist = ?, album = ?, "
-        "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ? "
-        "WHERE id = ?"
-    ));
-
-    q.addBindValue(title);
-    q.addBindValue(artist);
-    q.addBindValue(album);
-    q.addBindValue(recordingMbid);
-    q.addBindValue(artistMbid);
-    q.addBindValue(albumMbid);
-    q.addBindValue(releaseGroupMbid);
-    q.addBindValue(trackId);
-
-    if (!q.exec()) {
-        qWarning() << "  UPDATE FAILED:" << q.lastError().text();
-        return false;
-    }
-
-    int rows = q.numRowsAffected();
-    qDebug() << "  UPDATE SUCCESS: rows affected:" << rows;
-    return rows > 0;
+    return m_trackRepo->updateTrackMetadata(trackId, title, artist, album,
+                                            recordingMbid, artistMbid, albumMbid, releaseGroupMbid);
 }
 
 bool LibraryDatabase::removeTrack(const QString& id)
@@ -740,12 +407,9 @@ bool LibraryDatabase::removeTrack(const QString& id)
     // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
     std::optional<Track> existing;
     if (!m_batchMode)
-        existing = trackById(id);
+        existing = m_trackRepo->trackById(id);
 
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("DELETE FROM tracks WHERE id = ?"));
-    q.addBindValue(id);
-    bool ok = q.exec();
+    bool ok = m_trackRepo->removeTrack(id);
 
     if (!m_batchMode && ok && existing.has_value()) {
         if (!existing->albumId.isEmpty())
@@ -762,12 +426,9 @@ bool LibraryDatabase::removeTrackByPath(const QString& filePath)
     // Capture album/artist before deletion for incremental cleanup (skip in batch mode)
     std::optional<Track> existing;
     if (!m_batchMode)
-        existing = trackByPath(filePath);
+        existing = m_trackRepo->trackByPath(filePath);
 
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("DELETE FROM tracks WHERE file_path = ?"));
-    q.addBindValue(filePath);
-    bool ok = q.exec();
+    bool ok = m_trackRepo->removeTrackByPath(filePath);
 
     if (!m_batchMode && ok && existing.has_value()) {
         if (!existing->albumId.isEmpty())
@@ -777,888 +438,59 @@ bool LibraryDatabase::removeTrackByPath(const QString& filePath)
     return ok;
 }
 
-std::optional<Track> LibraryDatabase::trackById(const QString& id) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT * FROM tracks WHERE id = ?"));
-    q.addBindValue(id);
-    if (q.exec() && q.next()) {
-        return trackFromQuery(q);
-    }
-    return std::nullopt;
-}
-
-std::optional<Track> LibraryDatabase::trackByPath(const QString& filePath) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT * FROM tracks WHERE file_path = ?"));
-    q.addBindValue(filePath);
-    if (q.exec() && q.next()) {
-        return trackFromQuery(q);
-    }
-    return std::nullopt;
-}
-
-QVector<Track> LibraryDatabase::allTracks() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QElapsedTimer t; t.start();
-    QVector<Track> result;
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT * FROM tracks ORDER BY artist, album, disc_number, track_number"));
-    while (q.next()) {
-        result.append(trackFromQuery(q));
-    }
-    qDebug() << "[TIMING] allTracks (FULL):" << result.size() << "tracks in" << t.elapsed() << "ms";
-    return result;
-}
-
-QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QElapsedTimer t; t.start();
-    QVector<TrackIndex> result;
-    StringPool pool;  // deduplicates artist/album names (~60% memory savings)
-
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral(
-        "SELECT id, title, artist, album, duration, format, sample_rate, bit_depth, "
-        "track_number, disc_number, file_path, r128_loudness, r128_peak, album_artist "
-        "FROM tracks ORDER BY artist, album, disc_number, track_number"));
-    result.reserve(100000);
-    while (q.next()) {
-        TrackIndex ti;
-        ti.id          = q.value(0).toString();
-        ti.title       = q.value(1).toString();
-        ti.artist      = pool.intern(q.value(2).toString());  // pooled
-        ti.album       = pool.intern(q.value(3).toString());  // pooled
-        ti.duration    = q.value(4).toInt();
-        ti.format      = audioFormatFromString(q.value(5).toString());
-        ti.sampleRate  = q.value(6).toString();
-        ti.bitDepth    = q.value(7).toString();
-        ti.trackNumber = q.value(8).toInt();
-        ti.discNumber  = q.value(9).toInt();
-        ti.filePath    = q.value(10).toString();
-        ti.r128Loudness = q.value(11).toDouble();
-        ti.r128Peak     = q.value(12).toDouble();
-        ti.hasR128      = (ti.r128Loudness != 0.0);
-        ti.albumArtist  = pool.intern(q.value(13).toString());  // pooled
-        result.append(std::move(ti));
-    }
-    qDebug() << "[TIMING] allTrackIndexes:" << result.size() << "tracks in" << t.elapsed() << "ms";
-    qDebug() << "[LibraryDB] Loaded" << result.size() << "track indexes,"
-             << "unique strings:" << pool.uniqueCount();
-    return result;
-}
-
-QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<QString> ids;
-    if (query.isEmpty()) return ids;
-
-    // FTS5 query: prefix search with *
-    QString ftsQuery = query;
-    ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
-    ftsQuery += QStringLiteral("*");
-
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT t.id FROM tracks t "
-        "INNER JOIN tracks_fts f ON t.rowid = f.rowid "
-        "WHERE tracks_fts MATCH :query "
-        "ORDER BY rank LIMIT 5000"
-    ));
-    q.bindValue(QStringLiteral(":query"), ftsQuery);
-
-    if (q.exec()) {
-        ids.reserve(1000);
-        while (q.next()) {
-            ids.append(q.value(0).toString());
-        }
-    }
-    qDebug() << "[LibraryDB] FTS5 search:" << query << "→" << ids.size() << "results";
-    return ids;
-}
-
-void LibraryDatabase::rebuildFTSIndex()
-{
-    QMutexLocker lock(&m_writeMutex);
-    QElapsedTimer t; t.start();
-    QSqlQuery q(m_db);
-    m_db.transaction();
-    q.exec(QStringLiteral("DELETE FROM tracks_fts"));
-    q.exec(QStringLiteral(
-        "INSERT INTO tracks_fts(rowid, title, artist, album) "
-        "SELECT rowid, title, artist, album FROM tracks"
-    ));
-    m_db.commit();
-    qDebug() << "[TIMING] rebuildFTSIndex internal:" << t.elapsed() << "ms";
-    qDebug() << "[LibraryDB] FTS5 index rebuilt";
-}
-
-QVector<Track> LibraryDatabase::searchTracks(const QString& query) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Track> result;
-    if (query.isEmpty()) return result;
-
-    if (query.length() >= 2) {
-        // Use FTS5 for 2+ char queries (< 1ms vs table scan)
-        QString ftsQuery = query;
-        ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
-        ftsQuery += QStringLiteral("*");
-
-        QSqlQuery q(m_readDb);
-        q.prepare(QStringLiteral(
-            "SELECT t.* FROM tracks t "
-            "INNER JOIN tracks_fts f ON t.rowid = f.rowid "
-            "WHERE tracks_fts MATCH :query "
-            "ORDER BY rank LIMIT 200"
-        ));
-        q.bindValue(QStringLiteral(":query"), ftsQuery);
-
-        if (q.exec()) {
-            while (q.next()) {
-                result.append(trackFromQuery(q));
-            }
-        }
-        qDebug() << "[LibraryDB] FTS5 search:" << query << "→" << result.size() << "tracks";
-    } else {
-        // 1 char: fallback to LIKE (FTS5 too broad for single chars)
-        QSqlQuery q(m_readDb);
-        q.prepare(QStringLiteral(
-            "SELECT * FROM tracks WHERE "
-            "title LIKE ? OR artist LIKE ? OR album LIKE ? "
-            "ORDER BY artist, album, track_number"
-        ));
-        QString pattern = QStringLiteral("%%1%").arg(query);
-        q.addBindValue(pattern);
-        q.addBindValue(pattern);
-        q.addBindValue(pattern);
-
-        if (q.exec()) {
-            while (q.next()) {
-                result.append(trackFromQuery(q));
-            }
-        }
-    }
-    return result;
-}
-
-int LibraryDatabase::trackCount() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT COUNT(*) FROM tracks"));
-    if (q.next()) {
-        return q.value(0).toInt();
-    }
-    return 0;
-}
-
-// ── Albums ──────────────────────────────────────────────────────────
-bool LibraryDatabase::insertAlbum(const Album& album)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO albums "
-        "(id, title, artist, artist_id, year, cover_url, format, total_tracks, duration, genres) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ));
-
-    q.addBindValue(album.id);
-    q.addBindValue(album.title);
-    q.addBindValue(album.artist);
-    q.addBindValue(album.artistId);
-    q.addBindValue(album.year);
-    q.addBindValue(album.coverUrl);
-    q.addBindValue(audioFormatToString(album.format));
-    q.addBindValue(album.totalTracks);
-    q.addBindValue(album.duration);
-    q.addBindValue(album.genres.join(QStringLiteral(",")));
-
-    if (!q.exec()) {
-        qWarning() << "LibraryDatabase::insertAlbum failed:" << q.lastError().text();
-        return false;
-    }
-    return true;
-}
-
-bool LibraryDatabase::updateAlbum(const Album& album)
-{
-    QMutexLocker lock(&m_writeMutex);
-    return insertAlbum(album);
-}
-
-QVector<Album> LibraryDatabase::allAlbums() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QElapsedTimer t; t.start();
-    QVector<Album> result;
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT * FROM albums ORDER BY artist, title"));
-
-    if (q.lastError().isValid()) {
-        qWarning() << "LibraryDatabase::allAlbums query error:" << q.lastError().text();
-    }
-
-    while (q.next()) {
-        Album a;
-        a.id          = q.value(QStringLiteral("id")).toString();
-        a.title       = q.value(QStringLiteral("title")).toString();
-        a.artist      = q.value(QStringLiteral("artist")).toString();
-        a.artistId    = q.value(QStringLiteral("artist_id")).toString();
-        a.year        = q.value(QStringLiteral("year")).toInt();
-        a.coverUrl    = q.value(QStringLiteral("cover_url")).toString();
-        a.format      = audioFormatFromString(q.value(QStringLiteral("format")).toString());
-        a.totalTracks = q.value(QStringLiteral("total_tracks")).toInt();
-        a.duration    = q.value(QStringLiteral("duration")).toInt();
-
-        QString genresStr = q.value(QStringLiteral("genres")).toString();
-        if (!genresStr.isEmpty())
-            a.genres = genresStr.split(QStringLiteral(","));
-
-        // Tracks loaded on demand via albumById() — avoids N+1 query problem
-        result.append(a);
-    }
-
-    qDebug() << "[TIMING] allAlbums:" << result.size() << "in" << t.elapsed() << "ms";
-    qDebug() << "LibraryDatabase::allAlbums returning" << result.size() << "albums";
-    return result;
-}
-
-Album LibraryDatabase::albumById(const QString& id) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT * FROM albums WHERE id = ?"));
-    q.addBindValue(id);
-    if (q.exec() && q.next()) {
-        Album a;
-        a.id          = q.value(QStringLiteral("id")).toString();
-        a.title       = q.value(QStringLiteral("title")).toString();
-        a.artist      = q.value(QStringLiteral("artist")).toString();
-        a.artistId    = q.value(QStringLiteral("artist_id")).toString();
-        a.year        = q.value(QStringLiteral("year")).toInt();
-        a.coverUrl    = q.value(QStringLiteral("cover_url")).toString();
-        a.format      = audioFormatFromString(q.value(QStringLiteral("format")).toString());
-        a.totalTracks = q.value(QStringLiteral("total_tracks")).toInt();
-        a.duration    = q.value(QStringLiteral("duration")).toInt();
-
-        QString genresStr = q.value(QStringLiteral("genres")).toString();
-        if (!genresStr.isEmpty())
-            a.genres = genresStr.split(QStringLiteral(","));
-
-        // Load tracks
-        QSqlQuery tq(m_db);
-        tq.prepare(QStringLiteral("SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number"));
-        tq.addBindValue(a.id);
-        if (tq.exec()) {
-            while (tq.next()) {
-                a.tracks.append(trackFromQuery(tq));
-            }
-        }
-        return a;
-    }
-    return Album{};
-}
-
-// ── Artists ─────────────────────────────────────────────────────────
-bool LibraryDatabase::insertArtist(const Artist& artist)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO artists (id, name, cover_url, genres) "
-        "VALUES (?, ?, ?, ?)"
-    ));
-
-    q.addBindValue(artist.id);
-    q.addBindValue(artist.name);
-    q.addBindValue(artist.coverUrl);
-    q.addBindValue(artist.genres.join(QStringLiteral(",")));
-
-    if (!q.exec()) {
-        qWarning() << "LibraryDatabase::insertArtist failed:" << q.lastError().text();
-        return false;
-    }
-    return true;
-}
-
-bool LibraryDatabase::updateArtist(const Artist& artist)
-{
-    QMutexLocker lock(&m_writeMutex);
-    return insertArtist(artist);
-}
-
-QVector<Artist> LibraryDatabase::allArtists() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QElapsedTimer t; t.start();
-    QVector<Artist> result;
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT * FROM artists ORDER BY name"));
-
-    if (q.lastError().isValid()) {
-        qWarning() << "LibraryDatabase::allArtists query error:" << q.lastError().text();
-    }
-
-    while (q.next()) {
-        Artist a;
-        a.id       = q.value(QStringLiteral("id")).toString();
-        a.name     = q.value(QStringLiteral("name")).toString();
-        a.coverUrl = q.value(QStringLiteral("cover_url")).toString();
-
-        QString genresStr = q.value(QStringLiteral("genres")).toString();
-        if (!genresStr.isEmpty())
-            a.genres = genresStr.split(QStringLiteral(","));
-
-        // Albums loaded on demand via artistById() — avoids N+1 query problem
-        result.append(a);
-    }
-
-    qDebug() << "[TIMING] allArtists:" << result.size() << "in" << t.elapsed() << "ms";
-    qDebug() << "LibraryDatabase::allArtists returning" << result.size() << "artists";
-    return result;
-}
-
-Artist LibraryDatabase::artistById(const QString& id) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT * FROM artists WHERE id = ?"));
-    q.addBindValue(id);
-    if (q.exec() && q.next()) {
-        Artist a;
-        a.id       = q.value(QStringLiteral("id")).toString();
-        a.name     = q.value(QStringLiteral("name")).toString();
-        a.coverUrl = q.value(QStringLiteral("cover_url")).toString();
-
-        QString genresStr = q.value(QStringLiteral("genres")).toString();
-        if (!genresStr.isEmpty())
-            a.genres = genresStr.split(QStringLiteral(","));
-
-        // Load albums
-        QSqlQuery aq(m_db);
-        aq.prepare(QStringLiteral("SELECT id FROM albums WHERE artist_id = ? ORDER BY year"));
-        aq.addBindValue(a.id);
-        if (aq.exec()) {
-            while (aq.next()) {
-                a.albums.append(albumById(aq.value(0).toString()));
-            }
-        }
-        return a;
-    }
-    return Artist{};
-}
-
-QVector<Album> LibraryDatabase::searchAlbums(const QString& query) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Album> result;
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT * FROM albums WHERE "
-        "title LIKE ? OR artist LIKE ? "
-        "ORDER BY artist, title LIMIT 20"
-    ));
-    QString pattern = QStringLiteral("%%1%").arg(query);
-    q.addBindValue(pattern);
-    q.addBindValue(pattern);
-
-    if (q.exec()) {
-        while (q.next()) {
-            Album a;
-            a.id          = q.value(QStringLiteral("id")).toString();
-            a.title       = q.value(QStringLiteral("title")).toString();
-            a.artist      = q.value(QStringLiteral("artist")).toString();
-            a.artistId    = q.value(QStringLiteral("artist_id")).toString();
-            a.year        = q.value(QStringLiteral("year")).toInt();
-            a.coverUrl    = q.value(QStringLiteral("cover_url")).toString();
-            a.format      = audioFormatFromString(q.value(QStringLiteral("format")).toString());
-            a.totalTracks = q.value(QStringLiteral("total_tracks")).toInt();
-            a.duration    = q.value(QStringLiteral("duration")).toInt();
-            QString genresStr = q.value(QStringLiteral("genres")).toString();
-            if (!genresStr.isEmpty())
-                a.genres = genresStr.split(QStringLiteral(","));
-            result.append(a);
-        }
-    }
-    return result;
-}
-
-QVector<Artist> LibraryDatabase::searchArtists(const QString& query) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Artist> result;
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT * FROM artists WHERE name LIKE ? ORDER BY name LIMIT 10"
-    ));
-    QString pattern = QStringLiteral("%%1%").arg(query);
-    q.addBindValue(pattern);
-
-    if (q.exec()) {
-        while (q.next()) {
-            Artist a;
-            a.id       = q.value(QStringLiteral("id")).toString();
-            a.name     = q.value(QStringLiteral("name")).toString();
-            a.coverUrl = q.value(QStringLiteral("cover_url")).toString();
-            QString genresStr = q.value(QStringLiteral("genres")).toString();
-            if (!genresStr.isEmpty())
-                a.genres = genresStr.split(QStringLiteral(","));
-            result.append(a);
-        }
-    }
-    return result;
-}
-
-// ── Playlists ───────────────────────────────────────────────────────
-bool LibraryDatabase::insertPlaylist(const Playlist& playlist)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO playlists (id, name, description, cover_url, is_smart, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)"
-    ));
-
-    QString id = playlist.id.isEmpty() ? generateId() : playlist.id;
-    q.addBindValue(id);
-    q.addBindValue(playlist.name);
-    q.addBindValue(playlist.description);
-    q.addBindValue(playlist.coverUrl);
-    q.addBindValue(playlist.isSmartPlaylist ? 1 : 0);
-    q.addBindValue(playlist.createdAt.isEmpty()
-        ? QDateTime::currentDateTimeUtc().toString(Qt::ISODate)
-        : playlist.createdAt);
-
-    if (!q.exec()) {
-        qWarning() << "LibraryDatabase::insertPlaylist failed:" << q.lastError().text();
-        return false;
-    }
-
-    // Insert playlist tracks
-    if (!playlist.tracks.isEmpty()) {
-        QSqlQuery del(m_db);
-        del.prepare(QStringLiteral("DELETE FROM playlist_tracks WHERE playlist_id = ?"));
-        del.addBindValue(id);
-        del.exec();
-
-        for (int i = 0; i < playlist.tracks.size(); ++i) {
-            addTrackToPlaylist(id, playlist.tracks[i].id, i);
-        }
-    }
-
-    return true;
-}
-
-bool LibraryDatabase::updatePlaylist(const Playlist& playlist)
-{
-    QMutexLocker lock(&m_writeMutex);
-    return insertPlaylist(playlist);
-}
-
-bool LibraryDatabase::removePlaylist(const QString& id)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("DELETE FROM playlists WHERE id = ?"));
-    q.addBindValue(id);
-    if (!q.exec()) return false;
-
-    // Cascade should handle playlist_tracks, but just in case
-    QSqlQuery q2(m_db);
-    q2.prepare(QStringLiteral("DELETE FROM playlist_tracks WHERE playlist_id = ?"));
-    q2.addBindValue(id);
-    q2.exec();
-
-    return true;
-}
-
-QVector<Playlist> LibraryDatabase::allPlaylists() const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Playlist> result;
-    QSqlQuery q(m_readDb);
-    q.exec(QStringLiteral("SELECT * FROM playlists ORDER BY created_at DESC"));
-
-    while (q.next()) {
-        Playlist p;
-        p.id              = q.value(QStringLiteral("id")).toString();
-        p.name            = q.value(QStringLiteral("name")).toString();
-        p.description     = q.value(QStringLiteral("description")).toString();
-        p.coverUrl        = q.value(QStringLiteral("cover_url")).toString();
-        p.isSmartPlaylist = q.value(QStringLiteral("is_smart")).toBool();
-        p.createdAt       = q.value(QStringLiteral("created_at")).toString();
-
-        // Load tracks
-        QSqlQuery tq(m_readDb);
-        tq.prepare(QStringLiteral(
-            "SELECT t.* FROM tracks t "
-            "JOIN playlist_tracks pt ON t.id = pt.track_id "
-            "WHERE pt.playlist_id = ? "
-            "ORDER BY pt.position"
-        ));
-        tq.addBindValue(p.id);
-        if (tq.exec()) {
-            while (tq.next()) {
-                p.tracks.append(trackFromQuery(tq));
-            }
-        }
-
-        result.append(p);
-    }
-    return result;
-}
-
-Playlist LibraryDatabase::playlistById(const QString& id) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral("SELECT * FROM playlists WHERE id = ?"));
-    q.addBindValue(id);
-    if (q.exec() && q.next()) {
-        Playlist p;
-        p.id              = q.value(QStringLiteral("id")).toString();
-        p.name            = q.value(QStringLiteral("name")).toString();
-        p.description     = q.value(QStringLiteral("description")).toString();
-        p.coverUrl        = q.value(QStringLiteral("cover_url")).toString();
-        p.isSmartPlaylist = q.value(QStringLiteral("is_smart")).toBool();
-        p.createdAt       = q.value(QStringLiteral("created_at")).toString();
-
-        // Load tracks
-        QSqlQuery tq(m_readDb);
-        tq.prepare(QStringLiteral(
-            "SELECT t.* FROM tracks t "
-            "JOIN playlist_tracks pt ON t.id = pt.track_id "
-            "WHERE pt.playlist_id = ? "
-            "ORDER BY pt.position"
-        ));
-        tq.addBindValue(p.id);
-        if (tq.exec()) {
-            while (tq.next()) {
-                p.tracks.append(trackFromQuery(tq));
-            }
-        }
-        return p;
-    }
-    return Playlist{};
-}
-
-bool LibraryDatabase::addTrackToPlaylist(const QString& playlistId, const QString& trackId, int position)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-
-    if (position < 0) {
-        // Append at end
-        QSqlQuery maxQ(m_db);
-        maxQ.prepare(QStringLiteral(
-            "SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlist_id = ?"));
-        maxQ.addBindValue(playlistId);
-        if (maxQ.exec() && maxQ.next()) {
-            position = maxQ.value(0).toInt() + 1;
-        } else {
-            position = 0;
-        }
-    }
-
-    q.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO playlist_tracks (playlist_id, track_id, position) "
-        "VALUES (?, ?, ?)"
-    ));
-    q.addBindValue(playlistId);
-    q.addBindValue(trackId);
-    q.addBindValue(position);
-    return q.exec();
-}
-
-bool LibraryDatabase::removeTrackFromPlaylist(const QString& playlistId, const QString& trackId)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?"));
-    q.addBindValue(playlistId);
-    q.addBindValue(trackId);
-    return q.exec();
-}
-
-bool LibraryDatabase::reorderPlaylistTrack(const QString& playlistId, int fromPos, int toPos)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    // Get the track at fromPos
-    q.prepare(QStringLiteral(
-        "SELECT track_id FROM playlist_tracks WHERE playlist_id = ? AND position = ?"));
-    q.addBindValue(playlistId);
-    q.addBindValue(fromPos);
-    if (!q.exec() || !q.next()) return false;
-    QString trackId = q.value(0).toString();
-
-    // Remove from old position
-    removeTrackFromPlaylist(playlistId, trackId);
-
-    // Shift other tracks
-    if (toPos > fromPos) {
-        QSqlQuery shift(m_db);
-        shift.prepare(QStringLiteral(
-            "UPDATE playlist_tracks SET position = position - 1 "
-            "WHERE playlist_id = ? AND position > ? AND position <= ?"));
-        shift.addBindValue(playlistId);
-        shift.addBindValue(fromPos);
-        shift.addBindValue(toPos);
-        shift.exec();
-    } else {
-        QSqlQuery shift(m_db);
-        shift.prepare(QStringLiteral(
-            "UPDATE playlist_tracks SET position = position + 1 "
-            "WHERE playlist_id = ? AND position >= ? AND position < ?"));
-        shift.addBindValue(playlistId);
-        shift.addBindValue(toPos);
-        shift.addBindValue(fromPos);
-        shift.exec();
-    }
-
-    // Insert at new position
-    return addTrackToPlaylist(playlistId, trackId, toPos);
-}
-
-// ── Volume Leveling ─────────────────────────────────────────────────
-void LibraryDatabase::updateR128Loudness(const QString& filePath, double loudness, double peak)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE tracks SET r128_loudness = ?, r128_peak = ? WHERE file_path = ?"));
-    q.addBindValue(loudness);
-    q.addBindValue(peak);
-    q.addBindValue(filePath);
-    if (!q.exec()) {
-        qWarning() << "LibraryDatabase::updateR128Loudness failed:" << q.lastError().text();
-    }
-}
-
-// ── Play History ────────────────────────────────────────────────────
-void LibraryDatabase::recordPlay(const QString& trackId)
-{
-    QMutexLocker lock(&m_writeMutex);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("INSERT INTO play_history (track_id) VALUES (?)"));
-    q.addBindValue(trackId);
-    q.exec();
-
-    // Increment play_count
-    QSqlQuery q2(m_db);
-    q2.prepare(QStringLiteral("UPDATE tracks SET play_count = play_count + 1 WHERE id = ?"));
-    q2.addBindValue(trackId);
-    q2.exec();
-}
-
-QVector<Track> LibraryDatabase::recentlyPlayed(int limit) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Track> result;
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT DISTINCT t.* FROM tracks t "
-        "JOIN play_history ph ON t.id = ph.track_id "
-        "ORDER BY ph.played_at DESC LIMIT ?"
-    ));
-    q.addBindValue(limit);
-    if (q.exec()) {
-        while (q.next()) {
-            result.append(trackFromQuery(q));
-        }
-    }
-    return result;
-}
-
-QVector<Track> LibraryDatabase::mostPlayed(int limit) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Track> result;
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT * FROM tracks WHERE play_count > 0 "
-        "ORDER BY play_count DESC LIMIT ?"
-    ));
-    q.addBindValue(limit);
-    if (q.exec()) {
-        while (q.next()) {
-            result.append(trackFromQuery(q));
-        }
-    }
-    return result;
-}
-
-QVector<Track> LibraryDatabase::recentlyAdded(int limit) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QVector<Track> result;
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT * FROM tracks ORDER BY added_at DESC LIMIT ?"
-    ));
-    q.addBindValue(limit);
-    if (q.exec()) {
-        while (q.next()) {
-            result.append(trackFromQuery(q));
-        }
-    }
-    return result;
-}
-
-// ── MBID Helpers ─────────────────────────────────────────────────────
-QString LibraryDatabase::releaseGroupMbidForAlbum(const QString& albumId) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT release_group_mbid, album_mbid FROM tracks "
-        "WHERE album_id = ? AND (release_group_mbid IS NOT NULL AND release_group_mbid != '') "
-        "LIMIT 1"));
-    q.addBindValue(albumId);
-    if (q.exec() && q.next()) {
-        QString rgMbid = q.value(0).toString();
-        if (!rgMbid.isEmpty()) return rgMbid;
-        return q.value(1).toString(); // fallback to album_mbid
-    }
-    // Fallback: try album_mbid
-    q.prepare(QStringLiteral(
-        "SELECT album_mbid FROM tracks "
-        "WHERE album_id = ? AND album_mbid IS NOT NULL AND album_mbid != '' "
-        "LIMIT 1"));
-    q.addBindValue(albumId);
-    if (q.exec() && q.next()) {
-        return q.value(0).toString();
-    }
-    return {};
-}
-
-QString LibraryDatabase::artistMbidForArtist(const QString& artistId) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT artist_mbid FROM tracks "
-        "WHERE artist_id = ? AND artist_mbid IS NOT NULL AND artist_mbid != '' "
-        "LIMIT 1"));
-    q.addBindValue(artistId);
-    if (q.exec() && q.next()) {
-        return q.value(0).toString();
-    }
-    return {};
-}
-
-QString LibraryDatabase::firstTrackPathForAlbum(const QString& albumId) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT file_path FROM tracks "
-        "WHERE album_id = ? AND file_path IS NOT NULL AND file_path != '' "
-        "LIMIT 1"));
-    q.addBindValue(albumId);
-    if (q.exec() && q.next())
-        return q.value(0).toString();
-    return {};
-}
-
-// ── Metadata Backup / Undo ────────────────────────────────────────────
-
-void LibraryDatabase::backupTrackMetadata(const QString& trackId)
-{
-    QMutexLocker lock(&m_writeMutex);
-    if (trackId.isEmpty()) return;
-
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "INSERT INTO metadata_backups "
-        "(track_id, title, artist, album, track_number, disc_number, "
-        " recording_mbid, artist_mbid, album_mbid, release_group_mbid) "
-        "SELECT id, title, artist, album, track_number, disc_number, "
-        "       recording_mbid, artist_mbid, album_mbid, release_group_mbid "
-        "FROM tracks WHERE id = ?"));
-    q.addBindValue(trackId);
-    if (q.exec()) {
-        qDebug() << "[LibraryDB] Backed up metadata for track:" << trackId;
-    } else {
-        qWarning() << "[LibraryDB] Failed to backup metadata:" << q.lastError().text();
-    }
-}
-
-bool LibraryDatabase::undoLastMetadataChange(const QString& trackId)
-{
-    QMutexLocker lock(&m_writeMutex);
-    if (trackId.isEmpty()) return false;
-
-    // Get the most recent backup
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "SELECT title, artist, album, track_number, disc_number, "
-        "       recording_mbid, artist_mbid, album_mbid, release_group_mbid "
-        "FROM metadata_backups WHERE track_id = ? "
-        "ORDER BY id DESC LIMIT 1"));
-    q.addBindValue(trackId);
-
-    if (!q.exec() || !q.next()) {
-        qDebug() << "[LibraryDB] No metadata backup found for track:" << trackId;
-        return false;
-    }
-
-    // Restore
-    QSqlQuery up(m_db);
-    up.prepare(QStringLiteral(
-        "UPDATE tracks SET title = ?, artist = ?, album = ?, "
-        "track_number = ?, disc_number = ?, "
-        "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ? "
-        "WHERE id = ?"));
-    up.addBindValue(q.value(0));  // title
-    up.addBindValue(q.value(1));  // artist
-    up.addBindValue(q.value(2));  // album
-    up.addBindValue(q.value(3));  // track_number
-    up.addBindValue(q.value(4));  // disc_number
-    up.addBindValue(q.value(5));  // recording_mbid
-    up.addBindValue(q.value(6));  // artist_mbid
-    up.addBindValue(q.value(7));  // album_mbid
-    up.addBindValue(q.value(8));  // release_group_mbid
-    up.addBindValue(trackId);
-
-    if (!up.exec()) {
-        qWarning() << "[LibraryDB] Failed to undo metadata:" << up.lastError().text();
-        return false;
-    }
-
-    // Remove the used backup
-    QSqlQuery del(m_db);
-    del.prepare(QStringLiteral("DELETE FROM metadata_backups WHERE track_id = ? "
-        "AND id = (SELECT MAX(id) FROM metadata_backups WHERE track_id = ?)"));
-    del.addBindValue(trackId);
-    del.addBindValue(trackId);
-    del.exec();
-
-    qDebug() << "[LibraryDB] Restored metadata for track:" << trackId;
-    return true;
-}
-
-bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const
-{
-    QMutexLocker lock(&m_readMutex);
-    QSqlQuery q(m_readDb);
-    q.prepare(QStringLiteral(
-        "SELECT COUNT(*) FROM metadata_backups WHERE track_id = ?"));
-    q.addBindValue(trackId);
-    if (q.exec() && q.next()) {
-        return q.value(0).toInt() > 0;
-    }
-    return false;
-}
+std::optional<Track> LibraryDatabase::trackById(const QString& id) const { return m_trackRepo->trackById(id); }
+std::optional<Track> LibraryDatabase::trackByPath(const QString& filePath) const { return m_trackRepo->trackByPath(filePath); }
+QVector<Track> LibraryDatabase::allTracks() const { return m_trackRepo->allTracks(); }
+QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const { return m_trackRepo->allTrackIndexes(); }
+QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const { return m_trackRepo->searchTracksFTS(query); }
+void LibraryDatabase::rebuildFTSIndex() { m_trackRepo->rebuildFTSIndex(); }
+QVector<Track> LibraryDatabase::searchTracks(const QString& query) const { return m_trackRepo->searchTracks(query); }
+int LibraryDatabase::trackCount() const { return m_trackRepo->trackCount(); }
+
+// ── Albums (delegated to AlbumRepository) ───────────────────────────
+bool LibraryDatabase::insertAlbum(const Album& album) { return m_albumRepo->insertAlbum(album); }
+bool LibraryDatabase::updateAlbum(const Album& album) { return m_albumRepo->updateAlbum(album); }
+QVector<Album> LibraryDatabase::allAlbums() const { return m_albumRepo->allAlbums(); }
+Album LibraryDatabase::albumById(const QString& id) const { return m_albumRepo->albumById(id); }
+QVector<Album> LibraryDatabase::searchAlbums(const QString& query) const { return m_albumRepo->searchAlbums(query); }
+
+// ── Artists (delegated to ArtistRepository) ─────────────────────────
+bool LibraryDatabase::insertArtist(const Artist& artist) { return m_artistRepo->insertArtist(artist); }
+bool LibraryDatabase::updateArtist(const Artist& artist) { return m_artistRepo->updateArtist(artist); }
+QVector<Artist> LibraryDatabase::allArtists() const { return m_artistRepo->allArtists(); }
+Artist LibraryDatabase::artistById(const QString& id) const { return m_artistRepo->artistById(id); }
+QVector<Artist> LibraryDatabase::searchArtists(const QString& query) const { return m_artistRepo->searchArtists(query); }
+
+// ── Playlists (delegated to PlaylistRepository) ─────────────────────
+bool LibraryDatabase::insertPlaylist(const Playlist& playlist) { return m_playlistRepo->insertPlaylist(playlist); }
+bool LibraryDatabase::updatePlaylist(const Playlist& playlist) { return m_playlistRepo->updatePlaylist(playlist); }
+bool LibraryDatabase::removePlaylist(const QString& id) { return m_playlistRepo->removePlaylist(id); }
+QVector<Playlist> LibraryDatabase::allPlaylists() const { return m_playlistRepo->allPlaylists(); }
+Playlist LibraryDatabase::playlistById(const QString& id) const { return m_playlistRepo->playlistById(id); }
+bool LibraryDatabase::addTrackToPlaylist(const QString& playlistId, const QString& trackId, int position) { return m_playlistRepo->addTrackToPlaylist(playlistId, trackId, position); }
+bool LibraryDatabase::removeTrackFromPlaylist(const QString& playlistId, const QString& trackId) { return m_playlistRepo->removeTrackFromPlaylist(playlistId, trackId); }
+bool LibraryDatabase::reorderPlaylistTrack(const QString& playlistId, int fromPos, int toPos) { return m_playlistRepo->reorderPlaylistTrack(playlistId, fromPos, toPos); }
+
+// ── Volume Leveling (delegated to TrackRepository) ──────────────────
+void LibraryDatabase::updateR128Loudness(const QString& filePath, double loudness, double peak) { m_trackRepo->updateR128Loudness(filePath, loudness, peak); }
+
+// ── Play History (delegated to TrackRepository) ─────────────────────
+void LibraryDatabase::recordPlay(const QString& trackId) { m_trackRepo->recordPlay(trackId); }
+QVector<Track> LibraryDatabase::recentlyPlayed(int limit) const { return m_trackRepo->recentlyPlayed(limit); }
+QVector<Track> LibraryDatabase::mostPlayed(int limit) const { return m_trackRepo->mostPlayed(limit); }
+QVector<Track> LibraryDatabase::recentlyAdded(int limit) const { return m_trackRepo->recentlyAdded(limit); }
+
+// ── MBID Helpers (delegated to AlbumRepository / ArtistRepository) ──
+QString LibraryDatabase::releaseGroupMbidForAlbum(const QString& albumId) const { return m_albumRepo->releaseGroupMbidForAlbum(albumId); }
+QString LibraryDatabase::artistMbidForArtist(const QString& artistId) const { return m_artistRepo->artistMbidForArtist(artistId); }
+
+// ── Cover Art Helpers (delegated to AlbumRepository) ────────────────
+QString LibraryDatabase::firstTrackPathForAlbum(const QString& albumId) const { return m_albumRepo->firstTrackPathForAlbum(albumId); }
+
+// ── Metadata Backup / Undo (delegated to TrackRepository) ───────────
+void LibraryDatabase::backupTrackMetadata(const QString& trackId) { m_trackRepo->backupTrackMetadata(trackId); }
+bool LibraryDatabase::undoLastMetadataChange(const QString& trackId) { return m_trackRepo->undoLastMetadataChange(trackId); }
+bool LibraryDatabase::hasMetadataBackup(const QString& trackId) const { return m_trackRepo->hasMetadataBackup(trackId); }
 
 // ── Transaction helpers ──────────────────────────────────────────────
 bool LibraryDatabase::beginTransaction() { QMutexLocker lock(&m_writeMutex); m_batchMode = true; return m_db.transaction(); }
@@ -2090,7 +922,7 @@ void LibraryDatabase::doRebuildInternal()
             a.title       = q.value(1).toString();
             a.artist      = q.value(2).toString();
             a.artistId    = q.value(3).toString();
-            a.format      = audioFormatFromString(q.value(4).toString());
+            a.format      = m_ctx.audioFormatFromString(q.value(4).toString());
             a.coverUrl    = q.value(5).toString();
             a.totalTracks = q.value(6).toInt();
             a.duration    = q.value(7).toInt();

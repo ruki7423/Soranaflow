@@ -102,6 +102,16 @@ set(CORE_SOURCES
 set(LIBRARY_SOURCES
     src/core/library/LibraryDatabase.h
     src/core/library/LibraryDatabase.cpp
+    src/core/library/DatabaseContext.h
+    src/core/library/DatabaseContext.cpp
+    src/core/library/TrackRepository.h
+    src/core/library/TrackRepository.cpp
+    src/core/library/AlbumRepository.h
+    src/core/library/AlbumRepository.cpp
+    src/core/library/ArtistRepository.h
+    src/core/library/ArtistRepository.cpp
+    src/core/library/PlaylistRepository.h
+    src/core/library/PlaylistRepository.cpp
     src/core/library/LibraryScanner.h
     src/core/library/LibraryScanner.cpp
     src/core/library/PlaylistManager.h
