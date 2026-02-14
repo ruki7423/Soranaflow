@@ -8,13 +8,14 @@
 #include <QPainterPath>
 #include <QLinearGradient>
 #include <QResizeEvent>
+#include <QPointer>
 #include <QtConcurrent>
-#include <QFutureWatcher>
 #include "../../core/ThemeManager.h"
-#include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
+#include "../services/CoverArtService.h"
 #include "../../metadata/MetadataService.h"
 #include "../dialogs/MetadataSearchDialog.h"
+#include "../services/MetadataFixService.h"
 
 // ── Constructor ────────────────────────────────────────────────────
 AlbumDetailView::AlbumDetailView(QWidget* parent)
@@ -35,6 +36,7 @@ AlbumDetailView::AlbumDetailView(QWidget* parent)
     , m_backBtn(nullptr)
     , m_scrollArea(nullptr)
     , m_mainLayout(nullptr)
+    , m_metadataFixService(new MetadataFixService(this))
 {
     setupUI();
 
@@ -281,53 +283,8 @@ void AlbumDetailView::updateDisplay()
         PlaybackState::instance()->playTrack(t);
     });
 
-    disconnect(m_trackTable, &TrackTableView::fixMetadataRequested, nullptr, nullptr);
-    connect(m_trackTable, &TrackTableView::fixMetadataRequested, this, [this](const Track& t) {
-        auto* dlg = new MetadataSearchDialog(t, this);
-        connect(dlg, &QDialog::accepted, this, [dlg, t]() {
-            MusicBrainzResult result = dlg->selectedResult();
-            Track updated = t;
-            if (!result.title.isEmpty())  updated.title  = result.title;
-            if (!result.artist.isEmpty()) updated.artist = result.artist;
-            if (!result.album.isEmpty())  updated.album  = result.album;
-            if (result.trackNumber > 0)   updated.trackNumber = result.trackNumber;
-            if (result.discNumber > 0)    updated.discNumber  = result.discNumber;
-            if (!result.mbid.isEmpty())             updated.recordingMbid    = result.mbid;
-            if (!result.artistMbid.isEmpty())       updated.artistMbid       = result.artistMbid;
-            if (!result.albumMbid.isEmpty())        updated.albumMbid        = result.albumMbid;
-            if (!result.releaseGroupMbid.isEmpty()) updated.releaseGroupMbid = result.releaseGroupMbid;
-
-            auto* db = LibraryDatabase::instance();
-            db->backupTrackMetadata(t.id);
-            db->updateTrack(updated);
-            db->updateAlbumsAndArtistsForTrack(updated);
-
-            if (!result.releaseGroupMbid.isEmpty())
-                MetadataService::instance()->fetchAlbumArt(result.releaseGroupMbid, true);
-            else if (!result.albumMbid.isEmpty())
-                MetadataService::instance()->fetchAlbumArt(result.albumMbid, false);
-            if (!result.artistMbid.isEmpty())
-                MetadataService::instance()->fetchArtistImages(result.artistMbid);
-
-            MusicDataProvider::instance()->reloadFromDatabase();
-        });
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        dlg->open();
-    });
-
-    disconnect(m_trackTable, &TrackTableView::undoMetadataRequested, nullptr, nullptr);
-    connect(m_trackTable, &TrackTableView::undoMetadataRequested, this, [](const Track& t) {
-        auto* db = LibraryDatabase::instance();
-        auto fresh = db->trackById(t.id);
-        if (fresh.has_value())
-            db->updateAlbumsAndArtistsForTrack(fresh.value());
-        MusicDataProvider::instance()->reloadFromDatabase();
-    });
-
-    disconnect(m_trackTable, &TrackTableView::identifyByAudioRequested, nullptr, nullptr);
-    connect(m_trackTable, &TrackTableView::identifyByAudioRequested, this, [](const Track& t) {
-        MetadataService::instance()->identifyByFingerprint(t);
-    });
+    m_metadataFixService->disconnectFromTable(m_trackTable);
+    m_metadataFixService->connectToTable(m_trackTable, this);
 
     // ── Reconnect action buttons ───────────────────────────────────
     disconnect(m_playAllBtn, nullptr, nullptr, nullptr);
@@ -378,8 +335,7 @@ void AlbumDetailView::loadCoverArt()
                 .arg(c.backgroundSecondary, c.foregroundMuted));
     }
 
-    // Gather data for background thread
-    QString coverUrl = m_album.coverUrl;
+    // Build lookup track from album data
     QString firstTrackPath;
     for (const auto& t : m_album.tracks) {
         if (!t.filePath.isEmpty()) {
@@ -388,100 +344,45 @@ void AlbumDetailView::loadCoverArt()
         }
     }
 
-    if (coverUrl.isEmpty() && firstTrackPath.isEmpty())
+    if (m_album.coverUrl.isEmpty() && firstTrackPath.isEmpty())
         return; // Nothing to load
 
-    // Invalidate any previous in-flight loads
     int loadId = ++m_coverLoadId;
 
-    auto* watcher = new QFutureWatcher<QImage>(this);
-    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, loadId]() {
-        watcher->deleteLater();
-        if (loadId != m_coverLoadId) return; // Album changed — discard
+    Track lookupTrack;
+    lookupTrack.coverUrl = m_album.coverUrl;
+    lookupTrack.filePath = firstTrackPath;
 
-        QImage img = watcher->result();
-        if (img.isNull()) return; // Keep placeholder
+    QPointer<AlbumDetailView> self = this;
+    CoverArtService::instance()->getCoverArtAsync(lookupTrack, 0,
+        [self, loadId, sz, radius](const QPixmap& pix) {
+            if (!self || loadId != self->m_coverLoadId) return;
+            if (pix.isNull()) return;
 
-        QPixmap pix = QPixmap::fromImage(img);
-        m_heroSourcePixmap = pix;
-        applyHeroBackground(pix);
+            self->m_heroSourcePixmap = pix;
+            self->applyHeroBackground(pix);
 
-        // Scale and crop to square
-        QPixmap scaled = pix.scaled(sz, sz, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        if (scaled.width() > sz || scaled.height() > sz) {
-            int x = (scaled.width() - sz) / 2;
-            int y = (scaled.height() - sz) / 2;
-            scaled = scaled.copy(x, y, sz, sz);
-        }
-        // Apply rounded corners
-        QPixmap rounded(sz, sz);
-        rounded.fill(Qt::transparent);
-        QPainter painter(&rounded);
-        painter.setRenderHint(QPainter::Antialiasing);
-        QPainterPath clipPath;
-        clipPath.addRoundedRect(0, 0, sz, sz, radius, radius);
-        painter.setClipPath(clipPath);
-        painter.drawPixmap(0, 0, scaled);
-        painter.end();
-
-        m_coverLabel->setPixmap(rounded);
-        m_coverLabel->setStyleSheet(QStringLiteral("background: transparent; border-radius: 12px;"));
-    });
-
-    // Run 4-tier cover lookup on background thread (returns QImage)
-    watcher->setFuture(QtConcurrent::run([coverUrl, firstTrackPath]() -> QImage {
-        QImage img;
-
-        // Tier 1: coverUrl
-        if (!coverUrl.isEmpty()) {
-            QString loadPath = coverUrl;
-            if (loadPath.startsWith(QStringLiteral("qrc:")))
-                loadPath = loadPath.mid(3);
-            if (QFile::exists(loadPath))
-                img.load(loadPath);
-        }
-
-        // Tier 2: folder image files
-        if (img.isNull() && !firstTrackPath.isEmpty()) {
-            QString folder = QFileInfo(firstTrackPath).absolutePath();
-            static const QStringList names = {
-                QStringLiteral("cover.jpg"),  QStringLiteral("cover.png"),
-                QStringLiteral("folder.jpg"), QStringLiteral("folder.png"),
-                QStringLiteral("album.jpg"),  QStringLiteral("album.png"),
-                QStringLiteral("front.jpg"),  QStringLiteral("front.png"),
-                QStringLiteral("Cover.jpg"),  QStringLiteral("Cover.png"),
-                QStringLiteral("Folder.jpg"), QStringLiteral("Front.jpg")
-            };
-            for (const QString& n : names) {
-                QString p = folder + QStringLiteral("/") + n;
-                if (QFile::exists(p)) {
-                    img.load(p);
-                    if (!img.isNull()) break;
-                }
+            // Scale and crop to square
+            QPixmap scaled = pix.scaled(sz, sz, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            if (scaled.width() > sz || scaled.height() > sz) {
+                int x = (scaled.width() - sz) / 2;
+                int y = (scaled.height() - sz) / 2;
+                scaled = scaled.copy(x, y, sz, sz);
             }
-        }
+            // Apply rounded corners
+            QPixmap rounded(sz, sz);
+            rounded.fill(Qt::transparent);
+            QPainter painter(&rounded);
+            painter.setRenderHint(QPainter::Antialiasing);
+            QPainterPath clipPath;
+            clipPath.addRoundedRect(0, 0, sz, sz, radius, radius);
+            painter.setClipPath(clipPath);
+            painter.drawPixmap(0, 0, scaled);
+            painter.end();
 
-        // Tier 3: embedded cover via FFmpeg
-        if (img.isNull() && !firstTrackPath.isEmpty()) {
-            QPixmap pix = MetadataReader::extractCoverArt(firstTrackPath);
-            if (!pix.isNull()) img = pix.toImage();
-        }
-
-        // Tier 4: any image file in the folder
-        if (img.isNull() && !firstTrackPath.isEmpty()) {
-            QString folder = QFileInfo(firstTrackPath).absolutePath();
-            QDir dir(folder);
-            QStringList imageFilters = {
-                QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-                QStringLiteral("*.png"), QStringLiteral("*.bmp")
-            };
-            QStringList images = dir.entryList(imageFilters, QDir::Files, QDir::Name);
-            if (!images.isEmpty())
-                img.load(dir.filePath(images.first()));
-        }
-
-        return img;
-    }));
+            self->m_coverLabel->setPixmap(rounded);
+            self->m_coverLabel->setStyleSheet(QStringLiteral("background: transparent; border-radius: 12px;"));
+        });
 }
 
 // ── eventFilter (for clickable artist label) ───────────────────────

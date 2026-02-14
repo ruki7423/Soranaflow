@@ -11,8 +11,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include "../../core/ThemeManager.h"
-#include "../../core/audio/MetadataReader.h"
 #include "../../core/audio/AudioEngine.h"
+#include "../services/CoverArtService.h"
 
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
@@ -272,75 +272,6 @@ void NowPlayingView::setupUI()
 //  onTrackChanged
 // ═════════════════════════════════════════════════════════════════════
 
-// ── Helper: find cover art for a track ──────────────────────────────
-static QPixmap findCoverArt(const Track& track, int size)
-{
-    QPixmap pix;
-
-    // Try coverUrl — supports both local files and Qt resource paths (qrc:)
-    if (!track.coverUrl.isEmpty()) {
-        QString loadPath = track.coverUrl;
-        if (loadPath.startsWith(QStringLiteral("qrc:")))
-            loadPath = loadPath.mid(3);
-        if (QFile::exists(loadPath)) {
-            pix.load(loadPath);
-            if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        }
-        // Try as Qt resource path directly
-        if (loadPath.startsWith(QStringLiteral(":/"))) {
-            pix.load(loadPath);
-            if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        }
-    }
-
-    // Try folder cover images
-    if (!track.filePath.isEmpty()) {
-        QString folder = QFileInfo(track.filePath).absolutePath();
-        static const QStringList names = {
-            QStringLiteral("cover.jpg"),  QStringLiteral("cover.png"),
-            QStringLiteral("Cover.jpg"),  QStringLiteral("Cover.png"),
-            QStringLiteral("folder.jpg"), QStringLiteral("folder.png"),
-            QStringLiteral("Folder.jpg"), QStringLiteral("Folder.png"),
-            QStringLiteral("front.jpg"),  QStringLiteral("front.png"),
-            QStringLiteral("Front.jpg"),  QStringLiteral("Front.png"),
-            QStringLiteral("album.jpg"),  QStringLiteral("album.png"),
-            QStringLiteral("Album.jpg"),  QStringLiteral("Album.png"),
-            QStringLiteral("artwork.jpg"), QStringLiteral("artwork.png"),
-            QStringLiteral("Artwork.jpg"), QStringLiteral("Artwork.png"),
-        };
-        for (const QString& n : names) {
-            QString path = folder + QStringLiteral("/") + n;
-            if (QFile::exists(path)) {
-                pix.load(path);
-                if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            }
-        }
-    }
-
-    // Try embedded cover via FFmpeg
-    if (!track.filePath.isEmpty()) {
-        pix = MetadataReader::extractCoverArt(track.filePath);
-        if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    }
-
-    // Fallback: scan folder for any image file
-    if (!track.filePath.isEmpty()) {
-        QString folder = QFileInfo(track.filePath).absolutePath();
-        QDir dir(folder);
-        QStringList imageFilters = {
-            QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-            QStringLiteral("*.png"), QStringLiteral("*.webp"), QStringLiteral("*.bmp")
-        };
-        QStringList images = dir.entryList(imageFilters, QDir::Files, QDir::Name);
-        for (const QString& img : images) {
-            pix.load(dir.filePath(img));
-            if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        }
-    }
-
-    return pix; // null
-}
-
 void NowPlayingView::onTrackChanged(const Track& track)
 {
     m_currentTrack = track;
@@ -354,7 +285,7 @@ void NowPlayingView::onTrackChanged(const Track& track)
     // Use fixed size (400) for consistent layout regardless of content
     int artSize = 400;
 
-    QPixmap coverPix = findCoverArt(track, artSize);
+    QPixmap coverPix = CoverArtService::instance()->getCoverArt(track, artSize);
     if (!coverPix.isNull()) {
         // Crop to square center
         int s = qMin(coverPix.width(), coverPix.height());

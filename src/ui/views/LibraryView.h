@@ -14,6 +14,8 @@
 #include "../../core/MusicData.h"
 #include "../../core/PlaybackState.h"
 
+class MetadataFixService;
+
 class LibraryView : public QWidget {
     Q_OBJECT
 public:
@@ -66,6 +68,7 @@ private:
     QPushButton* m_navForwardBtn = nullptr;
     QTimer* m_searchDebounceTimer = nullptr;
     bool m_libraryDirty = false;
+    MetadataFixService* m_metadataFixService;
 
 protected:
     void showEvent(QShowEvent* event) override;

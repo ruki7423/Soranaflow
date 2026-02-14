@@ -10,6 +10,8 @@
 #include "../../core/MusicData.h"
 #include "../../core/PlaybackState.h"
 
+class MetadataFixService;
+
 class PlaylistDetailView : public QWidget {
     Q_OBJECT
 public:
@@ -39,4 +41,6 @@ private:
     TrackTableView* m_trackTable;
 
     StyledScrollArea* m_scrollArea;
+
+    MetadataFixService* m_metadataFixService;
 };

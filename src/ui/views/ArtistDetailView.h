@@ -12,6 +12,7 @@
 #include "../../core/MusicData.h"
 #include "../../core/PlaybackState.h"
 
+class MetadataFixService;
 class QNetworkAccessManager;
 class QNetworkReply;
 
@@ -75,6 +76,8 @@ private:
     QGridLayout* m_albumsGridLayout;
 
     StyledScrollArea* m_scrollArea;
+
+    MetadataFixService* m_metadataFixService;
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;

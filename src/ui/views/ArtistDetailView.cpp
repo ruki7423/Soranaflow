@@ -18,13 +18,14 @@
 #include <QUrlQuery>
 #include <QTimer>
 #include "../../core/ThemeManager.h"
-#include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
+#include "../services/CoverArtService.h"
 #include "../../metadata/MetadataService.h"
 #include "../../metadata/CoverArtProvider.h"
 #include "../../metadata/FanartTvProvider.h"
 #include "../../metadata/MusicBrainzProvider.h"
 #include "../dialogs/MetadataSearchDialog.h"
+#include "../services/MetadataFixService.h"
 
 ArtistDetailView::ArtistDetailView(QWidget* parent)
     : QWidget(parent)
@@ -43,6 +44,7 @@ ArtistDetailView::ArtistDetailView(QWidget* parent)
     , m_albumsContainer(nullptr)
     , m_albumsGridLayout(nullptr)
     , m_scrollArea(nullptr)
+    , m_metadataFixService(new MetadataFixService(this))
 {
     setupUI();
 
@@ -370,53 +372,8 @@ void ArtistDetailView::updateDisplay()
         PlaybackState::instance()->playTrack(track);
     });
 
-    disconnect(m_popularTracksTable, &TrackTableView::fixMetadataRequested, nullptr, nullptr);
-    connect(m_popularTracksTable, &TrackTableView::fixMetadataRequested, this, [this](const Track& t) {
-        auto* dlg = new MetadataSearchDialog(t, this);
-        connect(dlg, &QDialog::accepted, this, [dlg, t]() {
-            MusicBrainzResult result = dlg->selectedResult();
-            Track updated = t;
-            if (!result.title.isEmpty())  updated.title  = result.title;
-            if (!result.artist.isEmpty()) updated.artist = result.artist;
-            if (!result.album.isEmpty())  updated.album  = result.album;
-            if (result.trackNumber > 0)   updated.trackNumber = result.trackNumber;
-            if (result.discNumber > 0)    updated.discNumber  = result.discNumber;
-            if (!result.mbid.isEmpty())             updated.recordingMbid    = result.mbid;
-            if (!result.artistMbid.isEmpty())       updated.artistMbid       = result.artistMbid;
-            if (!result.albumMbid.isEmpty())        updated.albumMbid        = result.albumMbid;
-            if (!result.releaseGroupMbid.isEmpty()) updated.releaseGroupMbid = result.releaseGroupMbid;
-
-            auto* db = LibraryDatabase::instance();
-            db->backupTrackMetadata(t.id);
-            db->updateTrack(updated);
-            db->updateAlbumsAndArtistsForTrack(updated);
-
-            if (!result.releaseGroupMbid.isEmpty())
-                MetadataService::instance()->fetchAlbumArt(result.releaseGroupMbid, true);
-            else if (!result.albumMbid.isEmpty())
-                MetadataService::instance()->fetchAlbumArt(result.albumMbid, false);
-            if (!result.artistMbid.isEmpty())
-                MetadataService::instance()->fetchArtistImages(result.artistMbid);
-
-            MusicDataProvider::instance()->reloadFromDatabase();
-        });
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        dlg->open();
-    });
-
-    disconnect(m_popularTracksTable, &TrackTableView::undoMetadataRequested, nullptr, nullptr);
-    connect(m_popularTracksTable, &TrackTableView::undoMetadataRequested, this, [](const Track& t) {
-        auto* db = LibraryDatabase::instance();
-        auto fresh = db->trackById(t.id);
-        if (fresh.has_value())
-            db->updateAlbumsAndArtistsForTrack(fresh.value());
-        MusicDataProvider::instance()->reloadFromDatabase();
-    });
-
-    disconnect(m_popularTracksTable, &TrackTableView::identifyByAudioRequested, nullptr, nullptr);
-    connect(m_popularTracksTable, &TrackTableView::identifyByAudioRequested, this, [](const Track& t) {
-        MetadataService::instance()->identifyByFingerprint(t);
-    });
+    m_metadataFixService->disconnectFromTable(m_popularTracksTable);
+    m_metadataFixService->connectToTable(m_popularTracksTable, this);
 
     // ── Albums grid ───────────────────────────────────────────────────
     QLayoutItem* albumChild;
@@ -533,88 +490,31 @@ void ArtistDetailView::updateDisplay()
 // ── findAlbumCoverArt ────────────────────────────────────────────────
 QPixmap ArtistDetailView::findAlbumCoverArt(const Album& album)
 {
-    QPixmap pix;
-
-    // Tier 1: coverUrl
-    if (!album.coverUrl.isEmpty()) {
-        QString loadPath = album.coverUrl;
-        if (loadPath.startsWith(QStringLiteral("qrc:")))
-            loadPath = loadPath.mid(3);
-        if (QFile::exists(loadPath)) {
-            pix.load(loadPath);
-            if (!pix.isNull()) return pix;
-        }
-    }
-
-    // Tier 1.5: cached Cover Art Archive image via MBID
+    // Tier 1.5: cached Cover Art Archive image via MBID (unique to this view)
     {
         QString mbid = LibraryDatabase::instance()->releaseGroupMbidForAlbum(album.id);
         if (!mbid.isEmpty()) {
             QString cachedPath = CoverArtProvider::instance()->getCachedArtPath(mbid);
             if (!cachedPath.isEmpty() && QFile::exists(cachedPath)) {
+                QPixmap pix;
                 pix.load(cachedPath);
                 if (!pix.isNull()) return pix;
             }
         }
     }
 
-    // Find first track path from album.tracks
+    // Standard 4-tier discovery via service
     QString firstTrackPath;
     for (const auto& t : album.tracks) {
-        if (!t.filePath.isEmpty()) {
-            firstTrackPath = t.filePath;
-            break;
-        }
+        if (!t.filePath.isEmpty()) { firstTrackPath = t.filePath; break; }
     }
-
-    // Fallback: albums from artistById() have empty tracks vectors.
-    // Query DB for one track file path belonging to this album.
-    if (firstTrackPath.isEmpty() && !album.id.isEmpty()) {
+    if (firstTrackPath.isEmpty() && !album.id.isEmpty())
         firstTrackPath = LibraryDatabase::instance()->firstTrackPathForAlbum(album.id);
-    }
 
-    // Tier 2: folder image files
-    if (!firstTrackPath.isEmpty()) {
-        QString folder = QFileInfo(firstTrackPath).absolutePath();
-        static const QStringList names = {
-            QStringLiteral("cover.jpg"),  QStringLiteral("cover.png"),
-            QStringLiteral("folder.jpg"), QStringLiteral("folder.png"),
-            QStringLiteral("album.jpg"),  QStringLiteral("album.png"),
-            QStringLiteral("front.jpg"),  QStringLiteral("front.png"),
-            QStringLiteral("Cover.jpg"),  QStringLiteral("Cover.png"),
-            QStringLiteral("Folder.jpg"), QStringLiteral("Front.jpg")
-        };
-        for (const QString& n : names) {
-            QString path = folder + QStringLiteral("/") + n;
-            if (QFile::exists(path)) {
-                pix.load(path);
-                if (!pix.isNull()) return pix;
-            }
-        }
-    }
-
-    // Tier 3: embedded cover via FFmpeg
-    if (!firstTrackPath.isEmpty()) {
-        pix = MetadataReader::extractCoverArt(firstTrackPath);
-        if (!pix.isNull()) return pix;
-    }
-
-    // Tier 4: any image file in folder
-    if (!firstTrackPath.isEmpty()) {
-        QString folder = QFileInfo(firstTrackPath).absolutePath();
-        QDir dir(folder);
-        QStringList imageFilters = {
-            QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-            QStringLiteral("*.png"), QStringLiteral("*.bmp")
-        };
-        QStringList images = dir.entryList(imageFilters, QDir::Files, QDir::Name);
-        if (!images.isEmpty()) {
-            pix.load(dir.filePath(images.first()));
-            if (!pix.isNull()) return pix;
-        }
-    }
-
-    return pix;
+    Track lookupTrack;
+    lookupTrack.coverUrl = album.coverUrl;
+    lookupTrack.filePath = firstTrackPath;
+    return CoverArtService::instance()->getCoverArt(lookupTrack, 0);
 }
 
 // ── loadArtistImage ─────────────────────────────────────────────────
@@ -632,64 +532,19 @@ void ArtistDetailView::loadArtistImage()
             pix.load(loadPath);
     }
 
-    // Try cover art from the first album
+    // Try cover art from the first album via service
     if (pix.isNull() && !m_artist.albums.isEmpty()) {
         for (const Album& album : std::as_const(m_artist.albums)) {
-            // Tier 1: album coverUrl
-            if (!album.coverUrl.isEmpty()) {
-                QString loadPath = album.coverUrl;
-                if (loadPath.startsWith(QStringLiteral("qrc:")))
-                    loadPath = loadPath.mid(3);
-                if (QFile::exists(loadPath)) {
-                    pix.load(loadPath);
-                    if (!pix.isNull()) break;
-                }
-            }
-
-            // Find first track path
             QString firstTrackPath;
             for (const auto& t : album.tracks) {
-                if (!t.filePath.isEmpty()) {
-                    firstTrackPath = t.filePath;
-                    break;
-                }
+                if (!t.filePath.isEmpty()) { firstTrackPath = t.filePath; break; }
             }
-            if (firstTrackPath.isEmpty()) continue;
 
-            // Tier 2: folder image files
-            QString folder = QFileInfo(firstTrackPath).absolutePath();
-            static const QStringList names = {
-                QStringLiteral("cover.jpg"),  QStringLiteral("cover.png"),
-                QStringLiteral("folder.jpg"), QStringLiteral("folder.png"),
-                QStringLiteral("album.jpg"),  QStringLiteral("album.png"),
-                QStringLiteral("front.jpg"),  QStringLiteral("front.png"),
-                QStringLiteral("Cover.jpg"),  QStringLiteral("Cover.png"),
-                QStringLiteral("Folder.jpg"), QStringLiteral("Front.jpg")
-            };
-            for (const QString& n : names) {
-                QString path = folder + QStringLiteral("/") + n;
-                if (QFile::exists(path)) {
-                    pix.load(path);
-                    if (!pix.isNull()) break;
-                }
-            }
+            Track lookupTrack;
+            lookupTrack.coverUrl = album.coverUrl;
+            lookupTrack.filePath = firstTrackPath;
+            pix = CoverArtService::instance()->getCoverArt(lookupTrack, 0);
             if (!pix.isNull()) break;
-
-            // Tier 3: embedded cover via FFmpeg
-            pix = MetadataReader::extractCoverArt(firstTrackPath);
-            if (!pix.isNull()) break;
-
-            // Tier 4: any image in folder
-            QDir dir(folder);
-            QStringList imageFilters = {
-                QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-                QStringLiteral("*.png"), QStringLiteral("*.bmp")
-            };
-            QStringList images = dir.entryList(imageFilters, QDir::Files, QDir::Name);
-            if (!images.isEmpty()) {
-                pix.load(dir.filePath(images.first()));
-                if (!pix.isNull()) break;
-            }
         }
     }
 

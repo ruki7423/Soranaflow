@@ -14,7 +14,7 @@
 #include <QMimeData>
 #include <QApplication>
 #include "../../core/ThemeManager.h"
-#include "../../core/audio/MetadataReader.h"
+#include "../services/CoverArtService.h"
 
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
@@ -263,79 +263,7 @@ void QueueView::setupUI()
 
 static QPixmap findTrackCoverArt(const Track& track, int size)
 {
-    QString cacheKey = QStringLiteral("qcover_%1_%2").arg(track.id).arg(size);
-    QPixmap cached;
-    if (QPixmapCache::find(cacheKey, &cached))
-        return cached;
-
-    QPixmap pix;
-
-    if (!track.coverUrl.isEmpty()) {
-        QString loadPath = track.coverUrl;
-        if (loadPath.startsWith(QStringLiteral("qrc:")))
-            loadPath = loadPath.mid(3);
-        if (QFile::exists(loadPath)) {
-            pix.load(loadPath);
-        } else if (loadPath.startsWith(QStringLiteral(":/"))) {
-            pix.load(loadPath);
-        }
-        if (!pix.isNull()) {
-            pix = pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            QPixmapCache::insert(cacheKey, pix);
-            return pix;
-        }
-    }
-
-    if (!track.filePath.isEmpty()) {
-        QString folder = QFileInfo(track.filePath).absolutePath();
-        static const QStringList names = {
-            QStringLiteral("cover.jpg"),  QStringLiteral("cover.png"),
-            QStringLiteral("folder.jpg"), QStringLiteral("folder.png"),
-            QStringLiteral("front.jpg"),  QStringLiteral("front.png"),
-            QStringLiteral("Cover.jpg"),  QStringLiteral("Cover.png"),
-        };
-        for (const QString& n : names) {
-            QString path = folder + QStringLiteral("/") + n;
-            if (QFile::exists(path)) {
-                pix.load(path);
-                if (!pix.isNull()) {
-                    pix = pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-                    QPixmapCache::insert(cacheKey, pix);
-                    return pix;
-                }
-            }
-        }
-    }
-
-    if (!track.filePath.isEmpty()) {
-        pix = MetadataReader::extractCoverArt(track.filePath);
-        if (!pix.isNull()) {
-            pix = pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            QPixmapCache::insert(cacheKey, pix);
-            return pix;
-        }
-    }
-
-    if (!track.filePath.isEmpty()) {
-        QString folder = QFileInfo(track.filePath).absolutePath();
-        QDir dir(folder);
-        QStringList imageFilters = {
-            QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-            QStringLiteral("*.png"), QStringLiteral("*.bmp")
-        };
-        QStringList images = dir.entryList(imageFilters, QDir::Files, QDir::Name);
-        for (const QString& img : images) {
-            pix.load(dir.filePath(img));
-            if (!pix.isNull()) {
-                pix = pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-                QPixmapCache::insert(cacheKey, pix);
-                return pix;
-            }
-        }
-    }
-
-    QPixmapCache::insert(cacheKey, QPixmap());
-    return QPixmap();
+    return CoverArtService::instance()->getCoverArt(track, size);
 }
 
 static void setCoverArt(QLabel* label, const QPixmap& pix, int size, int radius,

@@ -13,6 +13,8 @@
 #include "../../core/MusicData.h"
 #include "../../core/PlaybackState.h"
 
+class MetadataFixService;
+
 class AlbumDetailView : public QWidget {
     Q_OBJECT
 public:
@@ -62,6 +64,8 @@ private:
     // Scroll
     StyledScrollArea* m_scrollArea;
     QVBoxLayout* m_mainLayout;
+
+    MetadataFixService* m_metadataFixService;
 
     // Async cover loading
     int m_coverLoadId = 0;

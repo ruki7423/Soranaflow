@@ -10,8 +10,8 @@
 
 #include "../../core/ThemeManager.h"
 #include "../../core/PlaybackState.h"
-#include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
+#include "../services/CoverArtService.h"
 
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
@@ -326,43 +326,15 @@ void SearchResultsView::buildAlbumCards(const QVector<Album>& albums)
 
 QPixmap SearchResultsView::loadAlbumCover(const Album& album)
 {
-    // Try coverUrl first
-    if (!album.coverUrl.isEmpty() && QFileInfo::exists(album.coverUrl)) {
-        QPixmap pix;
-        if (pix.load(album.coverUrl))
-            return pix;
-    }
-
-    // Get first track for this album via albumById (loads tracks)
     Album full = LibraryDatabase::instance()->albumById(album.id);
-    if (full.tracks.isEmpty())
-        return QPixmap();
+    QString firstTrackPath;
+    if (!full.tracks.isEmpty())
+        firstTrackPath = full.tracks.first().filePath;
 
-    const QString& filePath = full.tracks.first().filePath;
-    if (filePath.isEmpty())
-        return QPixmap();
-
-    // Look for cover in folder
-    QString folder = QFileInfo(filePath).absolutePath();
-    QDir dir(folder);
-    QStringList imageFilters = {
-        QStringLiteral("cover.*"), QStringLiteral("folder.*"),
-        QStringLiteral("front.*"), QStringLiteral("album.*")
-    };
-    dir.setNameFilters(imageFilters);
-    auto entries = dir.entryInfoList(QDir::Files);
-    if (!entries.isEmpty()) {
-        QPixmap pix;
-        if (pix.load(entries.first().absoluteFilePath()))
-            return pix;
-    }
-
-    // Embedded art
-    QPixmap pix = MetadataReader::extractCoverArt(filePath);
-    if (!pix.isNull())
-        return pix;
-
-    return QPixmap();
+    Track lookupTrack;
+    lookupTrack.coverUrl = album.coverUrl;
+    lookupTrack.filePath = firstTrackPath;
+    return CoverArtService::instance()->getCoverArt(lookupTrack, 0);
 }
 
 // ═════════════════════════════════════════════════════════════════════
