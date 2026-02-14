@@ -323,6 +323,9 @@ void LibraryDatabase::createIndexes()
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN file_size INTEGER DEFAULT 0"));
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN file_mtime INTEGER DEFAULT 0"));
 
+    // Migration: add album_artist for compilations / VA sorting
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN album_artist TEXT"));
+
     // Covering index for batch skip-check query (path+size+mtime in one B-tree scan)
     q.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_tracks_path_size_mtime "
@@ -377,6 +380,11 @@ Track LibraryDatabase::trackFromQuery(const QSqlQuery& query) const
     t.artist      = query.value(QStringLiteral("artist")).toString();
     t.album       = query.value(QStringLiteral("album")).toString();
     t.albumId     = query.value(QStringLiteral("album_id")).toString();
+
+    // album_artist (migration column — may not exist in old DBs)
+    int aaIdx = query.record().indexOf(QStringLiteral("album_artist"));
+    if (aaIdx >= 0)
+        t.albumArtist = query.value(aaIdx).toString();
     t.artistId    = query.value(QStringLiteral("artist_id")).toString();
     t.duration    = query.value(QStringLiteral("duration")).toInt();
     t.format      = audioFormatFromString(query.value(QStringLiteral("format")).toString());
@@ -562,8 +570,8 @@ bool LibraryDatabase::insertTrack(const Track& track)
         "(id, title, artist, album, album_id, artist_id, duration, format, "
         "sample_rate, bit_depth, bitrate, cover_url, track_number, disc_number, file_path, "
         "recording_mbid, artist_mbid, album_mbid, release_group_mbid, channel_count, "
-        "file_size, file_mtime) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "file_size, file_mtime, album_artist) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ))) {
         qWarning() << "LibraryDatabase::insertTrack PREPARE failed:" << q.lastError().text();
         return false;
@@ -592,6 +600,7 @@ bool LibraryDatabase::insertTrack(const Track& track)
     q.addBindValue(track.channelCount);
     q.addBindValue(track.fileSize);
     q.addBindValue(track.fileMtime);
+    q.addBindValue(track.albumArtist);
 
     if (!q.exec()) {
         qWarning() << "LibraryDatabase::insertTrack failed:" << q.lastError().text();
@@ -632,7 +641,7 @@ bool LibraryDatabase::updateTrack(const Track& track)
         "duration = ?, format = ?, sample_rate = ?, bit_depth = ?, bitrate = ?, "
         "cover_url = ?, track_number = ?, disc_number = ?, file_path = ?, "
         "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ?, "
-        "channel_count = ?, file_size = ?, file_mtime = ? "
+        "channel_count = ?, file_size = ?, file_mtime = ?, album_artist = ? "
         "WHERE id = ?"
     ));
 
@@ -657,6 +666,7 @@ bool LibraryDatabase::updateTrack(const Track& track)
     q.addBindValue(track.channelCount);
     q.addBindValue(track.fileSize);
     q.addBindValue(track.fileMtime);
+    q.addBindValue(track.albumArtist);
     q.addBindValue(track.id);
 
     if (!q.exec()) {
@@ -815,7 +825,7 @@ QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
     QSqlQuery q(m_readDb);
     q.exec(QStringLiteral(
         "SELECT id, title, artist, album, duration, format, sample_rate, bit_depth, "
-        "track_number, disc_number, file_path, r128_loudness, r128_peak "
+        "track_number, disc_number, file_path, r128_loudness, r128_peak, album_artist "
         "FROM tracks ORDER BY artist, album, disc_number, track_number"));
     result.reserve(100000);
     while (q.next()) {
@@ -834,6 +844,7 @@ QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const
         ti.r128Loudness = q.value(11).toDouble();
         ti.r128Peak     = q.value(12).toDouble();
         ti.hasR128      = (ti.r128Loudness != 0.0);
+        ti.albumArtist  = pool.intern(q.value(13).toString());  // pooled
         result.append(std::move(ti));
     }
     qDebug() << "[TIMING] allTrackIndexes:" << result.size() << "tracks in" << t.elapsed() << "ms";

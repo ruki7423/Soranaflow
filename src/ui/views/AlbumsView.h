@@ -17,6 +17,7 @@
 #include "../../core/MusicData.h"
 #include "../../widgets/StyledButton.h"
 #include "../../widgets/StyledInput.h"
+#include "../../widgets/StyledComboBox.h"
 
 class AlbumsView : public QWidget {
     Q_OBJECT
@@ -24,6 +25,7 @@ public:
     explicit AlbumsView(QWidget* parent = nullptr);
 
     enum ViewMode { LargeIcons, SmallIcons, ListView };
+    enum AlbumSortMode { SortArtist, SortAlbumArtistYear, SortYear, SortTitle };
 
 signals:
     void albumSelected(const QString& albumId);
@@ -62,6 +64,8 @@ private:
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
     StyledInput* m_filterInput = nullptr;
+    StyledComboBox* m_sortCombo = nullptr;
+    AlbumSortMode m_sortMode = SortArtist;
     QString m_filterText;
 
     // Cover art cache + async loading

@@ -1387,7 +1387,18 @@ QWidget* SettingsView::createLibraryTab()
 
     auto* autoOrgSwitch = new StyledSwitch();
     autoOrgSwitch->setChecked(Settings::instance()->autoOrganizeOnImport());
-    connect(autoOrgSwitch, &StyledSwitch::toggled, this, [](bool checked) {
+    connect(autoOrgSwitch, &StyledSwitch::toggled, this, [this, autoOrgSwitch](bool checked) {
+        if (checked) {
+            bool ok = StyledMessageBox::confirm(window(),
+                QStringLiteral("Enable Auto-Organize?"),
+                QStringLiteral("Imported files will be renamed and moved to match their metadata. "
+                               "This cannot be undone. Continue?"));
+            if (!ok) {
+                QSignalBlocker blocker(autoOrgSwitch);
+                autoOrgSwitch->setChecked(false);
+                return;
+            }
+        }
         Settings::instance()->setAutoOrganizeOnImport(checked);
     });
     layout->addWidget(createSettingRow(

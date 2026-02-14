@@ -78,6 +78,12 @@ std::optional<Track> MetadataReader::readTrack(const QString& filePath)
     // ── Extended tags via PropertyMap ────────────────────────────────
     TagLib::PropertyMap props = f.file()->properties();
 
+    if (props.contains("ALBUMARTIST")) {
+        auto vals = props["ALBUMARTIST"];
+        if (!vals.isEmpty())
+            track.albumArtist = QString::fromStdString(vals.front().to8Bit(true));
+    }
+
     if (props.contains("DISCNUMBER")) {
         auto vals = props["DISCNUMBER"];
         if (!vals.isEmpty()) {

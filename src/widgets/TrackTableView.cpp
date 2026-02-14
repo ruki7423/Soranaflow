@@ -111,6 +111,7 @@ void TrackTableDelegate::paint(QPainter* painter,
         break;
     }
     case TrackColumn::Artist:
+    case TrackColumn::AlbumArtist:
     case TrackColumn::Album: {
         font.setPointSize(12);
         if (isHovered) font.setUnderline(true);
@@ -363,6 +364,10 @@ QVariant HybridTrackModel::data(const QModelIndex& index, int role) const
     case TrackColumn::Artist:
         if (role == Qt::DisplayRole) return t.artist;
         break;
+    case TrackColumn::AlbumArtist:
+        if (role == Qt::DisplayRole)
+            return t.albumArtist.isEmpty() ? t.artist : t.albumArtist;
+        break;
     case TrackColumn::Album:
         if (role == Qt::DisplayRole) return t.album;
         break;
@@ -391,12 +396,13 @@ QVariant HybridTrackModel::headerData(int section, Qt::Orientation orientation, 
 
     QString label;
     switch (m_columns[section]) {
-    case TrackColumn::Number:   label = QStringLiteral("#"); break;
-    case TrackColumn::Title:    label = QStringLiteral("TITLE"); break;
-    case TrackColumn::Artist:   label = QStringLiteral("ARTIST"); break;
-    case TrackColumn::Album:    label = QStringLiteral("ALBUM"); break;
-    case TrackColumn::Format:   label = QStringLiteral("FORMAT"); break;
-    case TrackColumn::Duration: label = QStringLiteral("DURATION"); break;
+    case TrackColumn::Number:      label = QStringLiteral("#"); break;
+    case TrackColumn::Title:       label = QStringLiteral("TITLE"); break;
+    case TrackColumn::Artist:      label = QStringLiteral("ARTIST"); break;
+    case TrackColumn::AlbumArtist: label = QStringLiteral("ALBUM ARTIST"); break;
+    case TrackColumn::Album:       label = QStringLiteral("ALBUM"); break;
+    case TrackColumn::Format:      label = QStringLiteral("FORMAT"); break;
+    case TrackColumn::Duration:    label = QStringLiteral("DURATION"); break;
     }
 
     if (section < m_headerSuffixes.size() && !m_headerSuffixes[section].isEmpty())
@@ -460,6 +466,12 @@ void HybridTrackModel::applySortToDisplayList()
             case TrackColumn::Artist:
                 less = ta.artist.compare(tb.artist, Qt::CaseInsensitive) < 0;
                 break;
+            case TrackColumn::AlbumArtist: {
+                const QString& aa = ta.albumArtist.isEmpty() ? ta.artist : ta.albumArtist;
+                const QString& ab = tb.albumArtist.isEmpty() ? tb.artist : tb.albumArtist;
+                less = aa.compare(ab, Qt::CaseInsensitive) < 0;
+                break;
+            }
             case TrackColumn::Album:
                 less = ta.album.compare(tb.album, Qt::CaseInsensitive) < 0;
                 break;
@@ -536,12 +548,13 @@ void TrackTableView::setupHeader()
     // Default column widths
     for (int i = 0; i < m_config.columns.size(); ++i) {
         switch (m_config.columns[i]) {
-        case TrackColumn::Number:   hdr->resizeSection(i, 50); break;
-        case TrackColumn::Title:    hdr->resizeSection(i, 300); break;
-        case TrackColumn::Artist:   hdr->resizeSection(i, 180); break;
-        case TrackColumn::Album:    hdr->resizeSection(i, 180); break;
-        case TrackColumn::Format:   hdr->resizeSection(i, 200); break;
-        case TrackColumn::Duration: hdr->resizeSection(i, 90); break;
+        case TrackColumn::Number:      hdr->resizeSection(i, 50); break;
+        case TrackColumn::Title:       hdr->resizeSection(i, 300); break;
+        case TrackColumn::Artist:      hdr->resizeSection(i, 180); break;
+        case TrackColumn::AlbumArtist: hdr->resizeSection(i, 160); break;
+        case TrackColumn::Album:       hdr->resizeSection(i, 180); break;
+        case TrackColumn::Format:      hdr->resizeSection(i, 200); break;
+        case TrackColumn::Duration:    hdr->resizeSection(i, 90); break;
         }
     }
 

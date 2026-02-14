@@ -20,6 +20,7 @@
 #include "../../core/library/LibraryDatabase.h"
 #include "../../metadata/CoverArtProvider.h"
 #include <QtConcurrent>
+#include <algorithm>
 
 // ═══════════════════════════════════════════════════════════════════
 //  Constructor
@@ -103,6 +104,22 @@ void AlbumsView::setupUI()
     headerRow->addWidget(m_navForwardBtn);
 
     headerRow->addStretch();
+
+    // ── Sort combo ────────────────────────────────────────────────────
+    m_sortCombo = new StyledComboBox(this);
+    m_sortCombo->addItem(QStringLiteral("Artist"), SortArtist);
+    m_sortCombo->addItem(QStringLiteral("Album Artist \u2192 Year"), SortAlbumArtistYear);
+    m_sortCombo->addItem(QStringLiteral("Year"), SortYear);
+    m_sortCombo->addItem(QStringLiteral("Title"), SortTitle);
+    m_sortCombo->setFixedWidth(180);
+    m_sortCombo->setToolTip(QStringLiteral("Sort albums"));
+    connect(m_sortCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+                m_sortMode = static_cast<AlbumSortMode>(m_sortCombo->itemData(idx).toInt());
+                reloadAlbums();
+            });
+    headerRow->addWidget(m_sortCombo);
+    headerRow->addSpacing(8);
 
     // View mode buttons
     const QString viewBtnBase = QStringLiteral(
@@ -326,6 +343,35 @@ void AlbumsView::reloadAlbums()
     }
     qDebug() << "[AlbumsView] reloadAlbums:" << albums.size() << "albums,"
              << m_albumTrackPaths.size() << "trackPaths, cache:" << m_coverCache.size();
+
+    // Sort albums by selected mode
+    switch (m_sortMode) {
+    case SortArtist:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            int cmp = a.artist.compare(b.artist, Qt::CaseInsensitive);
+            return cmp != 0 ? cmp < 0 : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
+    case SortAlbumArtistYear:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            int cmp = a.artist.compare(b.artist, Qt::CaseInsensitive);
+            if (cmp != 0) return cmp < 0;
+            return a.year != b.year ? a.year < b.year
+                : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
+    case SortYear:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            return a.year != b.year ? a.year < b.year
+                : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
+    case SortTitle:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            return a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
+    }
 
     // Cache albums for re-layout on resize
     m_albums = albums;
