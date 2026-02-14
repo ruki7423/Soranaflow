@@ -1,6 +1,6 @@
 # Sorana Flow — Verification Report
 Generated: 2026-02-15 08:13
-Version: 1.7.1
+Version: 1.7.2
 
 ---
 
