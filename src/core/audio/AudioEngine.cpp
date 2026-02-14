@@ -451,8 +451,7 @@ bool AudioEngine::load(const QString& filePath)
     m_dspPipeline->prepare(outputFmt.sampleRate, fmt.channels);
 
     // Open audio output at the (potentially upsampled) rate
-    m_output->close();
-
+    // (stop() already closed the output — open() also calls close() internally)
     m_output->setRenderCallback([this](float* buf, int frames) -> int {
         return renderAudio(buf, frames);
     });
@@ -561,6 +560,13 @@ void AudioEngine::stop()
     m_usingDSDDecoder = false;
     m_framesRendered.store(0, std::memory_order_relaxed);
     m_dspPipeline->reset();
+
+    // Zero pre-allocated buffers to prevent stale data on next track start
+    if (!m_decodeBuf.empty())
+        std::memset(m_decodeBuf.data(), 0, m_decodeBuf.size() * sizeof(float));
+    if (!m_crossfadeBuf.empty())
+        std::memset(m_crossfadeBuf.data(), 0, m_crossfadeBuf.size() * sizeof(float));
+
     { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath.clear(); }
     m_state = Stopped;
 
@@ -1211,6 +1217,13 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     m_decoder.swap(m_nextDecoder);
                     m_dsdDecoder.swap(m_nextDsdDecoder);
                     m_usingDSDDecoder = m_nextUsingDSD;
+
+                    // Transfer DoP marker state (same as direct gapless path)
+                    if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()
+                        && m_nextDsdDecoder->isDoPMode()) {
+                        m_dsdDecoder->setDoPMarkerState(m_nextDsdDecoder->dopMarkerState());
+                    }
+
                     { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
                     m_duration = m_nextFormat.durationSecs;
                     m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
@@ -1285,6 +1298,28 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
         }
     }
 
+    // ── Fade-in ramp for first ~10ms of new track (PCM only) ──────────
+    // Prevents DC offset clicks and DAC settling crackle at track boundaries.
+    // Skip for DoP passthrough — modifying DoP data corrupts markers.
+    {
+        const bool dopPassthroughNow = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+        if (framesRead > 0 && !dopPassthroughNow) {
+            double sr = m_sampleRate.load(std::memory_order_relaxed);
+            int fadeFrames = (int)(sr * 0.010); // 10ms ramp
+            if (fadeFrames < 1) fadeFrames = 1;
+            int64_t rendered = m_framesRendered.load(std::memory_order_relaxed);
+            if (rendered < fadeFrames) {
+                int startFrame = (int)rendered;
+                for (int f = 0; f < framesRead && (startFrame + f) < fadeFrames; ++f) {
+                    float gain = (float)(startFrame + f) / (float)fadeFrames;
+                    for (int c = 0; c < channels; ++c) {
+                        buf[f * channels + c] *= gain;
+                    }
+                }
+            }
+        }
+    }
+
     if (!crossfadeHandledFrames)
         m_framesRendered.fetch_add(framesRead, std::memory_order_relaxed);
 
@@ -1295,6 +1330,15 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             m_decoder.swap(m_nextDecoder);
             m_dsdDecoder.swap(m_nextDsdDecoder);
             m_usingDSDDecoder = m_nextUsingDSD;
+
+            // Transfer DoP marker state for seamless DSD→DSD gapless transition.
+            // The old decoder (now in "next" slot) has the correct marker alternation;
+            // the new decoder (now current) must continue from that state.
+            if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()
+                && m_nextDsdDecoder->isDoPMode()) {
+                m_dsdDecoder->setDoPMarkerState(m_nextDsdDecoder->dopMarkerState());
+            }
+
             { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
             m_duration = m_nextFormat.durationSecs;
             m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
@@ -1496,9 +1540,16 @@ SignalPathInfo AudioEngine::getSignalPath() const
         }
         if (isDSDCodec) {
             AudioStreamFormat fmt = m_decoder->format();
-            decoderNode.detail = QStringLiteral("DSD to PCM Conversion");
-            decoderNode.sublabel = QStringLiteral("Output at %1 kHz")
-                .arg(fmt.sampleRate / 1000.0, 0, 'f', 1);
+            QString dsdMode = Settings::instance()->dsdPlaybackMode();
+            if (dsdMode == QStringLiteral("dop")) {
+                decoderNode.detail = QStringLiteral("DSD to PCM (DoP Fallback)");
+                decoderNode.sublabel = QStringLiteral("Device rate insufficient · Output at %1 kHz")
+                    .arg(fmt.sampleRate / 1000.0, 0, 'f', 1);
+            } else {
+                decoderNode.detail = QStringLiteral("DSD to PCM Conversion");
+                decoderNode.sublabel = QStringLiteral("Output at %1 kHz")
+                    .arg(fmt.sampleRate / 1000.0, 0, 'f', 1);
+            }
             decoderNode.quality = SignalPathNode::Enhanced;
         } else {
             decoderNode.detail = lossless ? QStringLiteral("Lossless Decode")
@@ -1684,4 +1735,18 @@ SignalPathInfo AudioEngine::getSignalPath() const
     info.nodes.append(outputNode);
 
     return info;
+}
+
+AudioFormat AudioEngine::actualDsdFormat() const
+{
+    if (!m_usingDSDDecoder.load(std::memory_order_relaxed))
+        return AudioFormat::FLAC; // sentinel: not using DSD decoder
+
+    if (m_dsdDecoder->isDSD2048()) return AudioFormat::DSD2048;
+    if (m_dsdDecoder->isDSD1024()) return AudioFormat::DSD1024;
+    if (m_dsdDecoder->isDSD512())  return AudioFormat::DSD512;
+    if (m_dsdDecoder->isDSD256())  return AudioFormat::DSD256;
+    if (m_dsdDecoder->isDSD128())  return AudioFormat::DSD128;
+    if (m_dsdDecoder->isDSD64())   return AudioFormat::DSD64;
+    return AudioFormat::DSD64; // fallback
 }

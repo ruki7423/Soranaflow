@@ -81,6 +81,11 @@ public:
     // Signal path visualization
     SignalPathInfo getSignalPath() const;
 
+    // Returns the actual DSD format detected by the decoder at runtime,
+    // or AudioFormat::FLAC if not playing DSD via the DSD decoder.
+    // Used to resolve metadata vs runtime format mismatches.
+    AudioFormat actualDsdFormat() const;
+
     // Pre-destroy DSP resources while Qt is still alive.
     // Must be called from aboutToQuit, before static destructors run.
     void prepareForShutdown();

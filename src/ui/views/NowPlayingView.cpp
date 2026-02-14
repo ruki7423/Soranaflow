@@ -3,6 +3,8 @@
 #include <QSpacerItem>
 #include <QPushButton>
 #include <QMouseEvent>
+#include <QResizeEvent>
+#include <QSizePolicy>
 #include <QPainter>
 #include <QPainterPath>
 #include <QFile>
@@ -100,10 +102,12 @@ void NowPlayingView::setupUI()
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(8);
 
-    // ── Top section: Album Art (fixed size) ─────────────────────────
+    // ── Top section: Album Art (responsive) ─────────────────────────
     m_albumArt = new QLabel(m_leftColumn);
     m_albumArt->setObjectName(QStringLiteral("NowPlayingAlbumArt"));
-    m_albumArt->setFixedSize(400, 400);  // Fixed size for consistent layout
+    m_albumArt->setMinimumSize(200, 200);
+    m_albumArt->setMaximumSize(400, 400);
+    m_albumArt->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     m_albumArt->setScaledContents(true);
     m_albumArt->setAlignment(Qt::AlignCenter);
     {
@@ -231,7 +235,9 @@ void NowPlayingView::setupUI()
     //  RIGHT COLUMN — Queue Preview (fixed 300px)
     // ────────────────────────────────────────────────────────────────
     m_queueContainer = new QWidget(scrollContent);
-    m_queueContainer->setFixedWidth(300);
+    m_queueContainer->setMinimumWidth(200);
+    m_queueContainer->setMaximumWidth(350);
+    m_queueContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     auto* rightColumn = new QVBoxLayout(m_queueContainer);
     rightColumn->setContentsMargins(0, 0, 0, 0);
     rightColumn->setSpacing(8);
@@ -255,7 +261,7 @@ void NowPlayingView::setupUI()
     queueScroll->setWidget(queueScrollContent);
     rightColumn->addWidget(queueScroll, 1);
 
-    mainLayout->addWidget(m_queueContainer);
+    mainLayout->addWidget(m_queueContainer, 0);
 
     // ── Finalize scroll area ───────────────────────────────────────
     scrollArea->setWidget(scrollContent);
@@ -337,6 +343,8 @@ static QPixmap findCoverArt(const Track& track, int size)
 
 void NowPlayingView::onTrackChanged(const Track& track)
 {
+    m_currentTrack = track;
+
     // ── Update labels ──────────────────────────────────────────────
     m_titleLabel->setText(track.title);
     m_artistLabel->setText(track.artist);
@@ -580,6 +588,7 @@ void NowPlayingView::updateQueueList()
         titleLabel->setWordWrap(false);
         titleLabel->setMinimumWidth(0);
         titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        titleLabel->setToolTip(t.title);
         textLayout->addWidget(titleLabel);
 
         auto* artistLabel = new QLabel(t.artist, textWidget);
@@ -589,6 +598,7 @@ void NowPlayingView::updateQueueList()
         artistLabel->setWordWrap(false);
         artistLabel->setMinimumWidth(0);
         artistLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        artistLabel->setToolTip(t.artist);
         textLayout->addWidget(artistLabel);
 
         itemLayout->addWidget(textWidget, 1);
@@ -724,6 +734,53 @@ void NowPlayingView::onSignalPathChanged()
         return;
     }
     m_signalPathWidget->updateSignalPath(info);
+
+    // ── Fix DSD format badge if runtime detection disagrees with tag metadata ──
+    // MetadataReader (TagLib) may report a different DSD rate than the decoder
+    // actually detects from the bitstream. Trust the runtime detection.
+    AudioFormat runtimeFmt = engine->actualDsdFormat();
+    bool trackIsDSD = (m_currentTrack.format == AudioFormat::DSD64
+                    || m_currentTrack.format == AudioFormat::DSD128
+                    || m_currentTrack.format == AudioFormat::DSD256
+                    || m_currentTrack.format == AudioFormat::DSD512
+                    || m_currentTrack.format == AudioFormat::DSD1024
+                    || m_currentTrack.format == AudioFormat::DSD2048);
+    bool runtimeIsDSD = (runtimeFmt == AudioFormat::DSD64
+                      || runtimeFmt == AudioFormat::DSD128
+                      || runtimeFmt == AudioFormat::DSD256
+                      || runtimeFmt == AudioFormat::DSD512
+                      || runtimeFmt == AudioFormat::DSD1024
+                      || runtimeFmt == AudioFormat::DSD2048);
+
+    if (trackIsDSD && runtimeIsDSD && runtimeFmt != m_currentTrack.format) {
+        // Rebuild the badge with the decoder's actual format
+        double nativeRate = 2822400.0;
+        switch (runtimeFmt) {
+        case AudioFormat::DSD128:  nativeRate = 5644800.0;  break;
+        case AudioFormat::DSD256:  nativeRate = 11289600.0; break;
+        case AudioFormat::DSD512:  nativeRate = 22579200.0; break;
+        case AudioFormat::DSD1024: nativeRate = 45158400.0; break;
+        case AudioFormat::DSD2048: nativeRate = 90316800.0; break;
+        default: break;
+        }
+        QString displaySampleRate = QStringLiteral("%1 MHz").arg(nativeRate / 1000000.0, 0, 'f', 1);
+
+        auto* formatLayout = qobject_cast<QHBoxLayout*>(m_formatContainer->layout());
+        if (formatLayout) {
+            QLayoutItem* child;
+            while ((child = formatLayout->takeAt(0)) != nullptr) {
+                if (QWidget* w = child->widget()) w->deleteLater();
+                delete child;
+            }
+            auto* badge = new FormatBadge(runtimeFmt,
+                                           displaySampleRate,
+                                           QStringLiteral("1-bit"),
+                                           m_currentTrack.bitrate,
+                                           m_formatContainer);
+            formatLayout->addWidget(badge);
+            formatLayout->addStretch();
+        }
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -806,4 +863,17 @@ bool NowPlayingView::eventFilter(QObject* obj, QEvent* event)
         }
     }
     return QWidget::eventFilter(obj, event);
+}
+
+void NowPlayingView::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+
+    // Scale album art to be square and fit within the left column's width.
+    // The left column gets ~1/3 of (width - margins - spacing - queue).
+    // Keep the art square: use left column's actual width clamped to [200, 400].
+    if (!m_albumArt || !m_leftColumn) return;
+    int available = m_leftColumn->width();
+    int artSize = qBound(200, available, 400);
+    m_albumArt->setFixedSize(artSize, artSize);
 }

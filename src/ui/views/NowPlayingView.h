@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <QResizeEvent>
 #include "../../widgets/FormatBadge.h"
 #include "../../widgets/StyledButton.h"
 #include "../../widgets/StyledScrollArea.h"
@@ -23,6 +24,7 @@ signals:
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onTrackChanged(const Track& track);
@@ -61,4 +63,5 @@ private:
     QLabel* m_queueTitle;
 
     QVector<Track> m_cachedDisplayQueue;
+    Track m_currentTrack;
 };

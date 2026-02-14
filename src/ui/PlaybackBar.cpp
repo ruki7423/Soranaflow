@@ -1,5 +1,6 @@
 #include "PlaybackBar.h"
 #include <QFont>
+#include <QFontMetrics>
 #include <QStyle>
 #include <QFile>
 #include <QFileInfo>
@@ -48,7 +49,8 @@ void PlaybackBar::setupUI()
     //  LEFT: Roon-style (Album art + Title + Artist·Album + Signal)
     // ═══════════════════════════════════════════════════════════════
     auto* leftWidget = new QWidget();
-    leftWidget->setFixedWidth(280);
+    leftWidget->setMinimumWidth(200);
+    leftWidget->setMaximumWidth(280);
     auto* leftLayout = new QHBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0, 4, 0, 8);
     leftLayout->setSpacing(12);
@@ -77,14 +79,16 @@ void PlaybackBar::setupUI()
     m_trackTitleLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 13px; font-weight: 500;")
             .arg(c.foreground));
-    m_trackTitleLabel->setMaximumWidth(170);
+    m_trackTitleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_trackTitleLabel->setMinimumWidth(60);
     trackInfoLayout->addWidget(m_trackTitleLabel);
 
     m_subtitleLabel = new QLabel();
     m_subtitleLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 11px;")
             .arg(c.foregroundMuted));
-    m_subtitleLabel->setMaximumWidth(170);
+    m_subtitleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_subtitleLabel->setMinimumWidth(60);
     m_subtitleLabel->setCursor(Qt::PointingHandCursor);
     m_subtitleLabel->installEventFilter(this);
     trackInfoLayout->addWidget(m_subtitleLabel);
@@ -285,7 +289,8 @@ void PlaybackBar::setupUI()
     //  RIGHT: Volume + Device + Queue
     // ═══════════════════════════════════════════════════════════════
     auto* rightWidget = new QWidget();
-    rightWidget->setFixedWidth(260);
+    rightWidget->setMinimumWidth(180);
+    rightWidget->setMaximumWidth(260);
     auto* rightLayout = new QHBoxLayout(rightWidget);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(0);
@@ -861,7 +866,15 @@ void PlaybackBar::updateTrackInfo()
                     " color: %2; font-size: 22px;")
                     .arg(c.backgroundTertiary, c.foregroundMuted));
     } else {
-        m_trackTitleLabel->setText(track.title);
+        // Elide text to fit available width, set tooltip for full text
+        {
+            QFontMetrics fm(m_trackTitleLabel->font());
+            int availW = m_trackTitleLabel->width();
+            if (availW < 40) availW = 140; // first layout pass fallback
+            QString elided = fm.elidedText(track.title, Qt::ElideRight, availW);
+            m_trackTitleLabel->setText(elided);
+            m_trackTitleLabel->setToolTip(track.title);
+        }
 
         // "Artist · Album"
         QString subtitle;
@@ -872,7 +885,14 @@ void PlaybackBar::updateTrackInfo()
         } else if (!track.album.isEmpty()) {
             subtitle = track.album;
         }
-        m_subtitleLabel->setText(subtitle);
+        {
+            QFontMetrics fm(m_subtitleLabel->font());
+            int availW = m_subtitleLabel->width();
+            if (availW < 40) availW = 140;
+            QString elided = fm.elidedText(subtitle, Qt::ElideRight, availW);
+            m_subtitleLabel->setText(elided);
+            m_subtitleLabel->setToolTip(subtitle);
+        }
 
         // Cover art — show placeholder immediately, load async
         m_currentTrackPath = track.filePath;

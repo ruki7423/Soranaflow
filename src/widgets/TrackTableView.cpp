@@ -558,9 +558,9 @@ void TrackTableView::setupHeader()
         }
     }
 
-    // Title column — Interactive so users can resize it
+    // Title column — Stretch to fill remaining space (prevents overflow)
     if (titleCol >= 0) {
-        hdr->setSectionResizeMode(titleCol, QHeaderView::Interactive);
+        hdr->setSectionResizeMode(titleCol, QHeaderView::Stretch);
     }
 
     // Restore saved widths

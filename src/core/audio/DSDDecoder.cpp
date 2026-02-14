@@ -668,3 +668,13 @@ bool DSDDecoder::isDoPMode() const
 {
     return m_impl->dopMode;
 }
+
+bool DSDDecoder::dopMarkerState() const
+{
+    return m_impl->dopMarker;
+}
+
+void DSDDecoder::setDoPMarkerState(bool marker)
+{
+    m_impl->dopMarker = marker;
+}

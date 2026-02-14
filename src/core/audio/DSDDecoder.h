@@ -50,6 +50,13 @@ public:
     double dsdSampleRate() const;
     bool isDoPMode() const;
 
+    // DoP marker state — used for gapless transition marker continuity.
+    // The marker alternates 0x05/0xFA each frame. To avoid crackling on
+    // gapless DSD→DSD transitions, transfer the marker state from the
+    // old decoder to the new one before reading.
+    bool dopMarkerState() const;
+    void setDoPMarkerState(bool marker);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
