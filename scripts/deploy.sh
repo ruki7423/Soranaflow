@@ -21,7 +21,7 @@ set -euo pipefail
 # ── Configuration ────────────────────────────────────────────────────
 APP_NAME="Sorana Flow"
 BUNDLE_NAME="SoranaFlow"
-VERSION="1.7.1"
+VERSION="1.7.2"
 TEAM_ID="W5JMPJXB5H"
 SIGNING_IDENTITY="Developer ID Application: HAESEONG CHOI (W5JMPJXB5H)"
 BUNDLE_ID="com.soranaflow.app"
