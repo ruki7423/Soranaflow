@@ -383,6 +383,21 @@ bool VST3Plugin::activateBusses()
 {
     if (!m_component) return false;
 
+    // Set stereo speaker arrangement BEFORE activating busses.
+    // Without this, some plugins default to mono and only process the left channel.
+    if (m_processor) {
+        SpeakerArrangement stereo = SpeakerArr::kStereo;
+        tresult arrResult = m_processor->setBusArrangements(&stereo, 1, &stereo, 1);
+        qDebug() << "VST3: setBusArrangements(stereo) result:" << arrResult;
+        if (arrResult != kResultOk && arrResult != kNotImplemented) {
+            qDebug() << "VST3: Plugin did not accept stereo arrangement, querying current";
+            SpeakerArrangement currentIn = 0, currentOut = 0;
+            m_processor->getBusArrangement(kOutput, 0, currentOut);
+            m_processor->getBusArrangement(kInput, 0, currentIn);
+            qDebug() << "VST3: Current arrangement — in:" << currentIn << "out:" << currentOut;
+        }
+    }
+
     int32 numInputBusses = m_component->getBusCount(kAudio, kInput);
     if (numInputBusses > 0) {
         m_component->activateBus(kAudio, kInput, 0, true);
@@ -499,6 +514,10 @@ void VST3Plugin::prepare(double sampleRate, int channels)
         }
 
         setupProcessing(sampleRate, m_maxBlockSize);
+
+        // Re-apply stereo arrangement after re-setup
+        SpeakerArrangement stereo = SpeakerArr::kStereo;
+        m_processor->setBusArrangements(&stereo, 1, &stereo, 1);
 
         if (m_component) {
             m_component->setActive(true);
