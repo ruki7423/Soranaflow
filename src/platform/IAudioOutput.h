@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "AudioDevice.h"
 #include "../core/audio/AudioFormat.h"
 
 class IAudioOutput {
@@ -58,8 +57,7 @@ public:
     // Prevents stale DoP data from reaching DAC during DSD teardown
     virtual void setTransitioning(bool) {}
 
-    // Device queries (were static on CoreAudioOutput — const since they are pure queries)
-    virtual std::vector<AudioDevice> enumerateDevices() const = 0;
+    // Device queries
     virtual double getMaxSampleRate(uint32_t deviceId = 0) const = 0;
     virtual double findNearestSupportedRate(double targetRate, uint32_t deviceId = 0) const = 0;
     virtual bool isBuiltInDevice(uint32_t deviceId) const = 0;

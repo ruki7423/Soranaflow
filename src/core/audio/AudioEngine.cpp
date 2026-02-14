@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "AudioDecoder.h"
+#include "AudioDeviceManager.h"
 #include "DSDDecoder.h"
 #include "SignalPathBuilder.h"
 #include "VolumeLevelingManager.h"
@@ -644,9 +645,9 @@ double AudioEngine::position() const
 }
 
 // ── availableDevices ────────────────────────────────────────────────
-std::vector<AudioDevice> AudioEngine::availableDevices() const
+std::vector<AudioDeviceInfo> AudioEngine::availableDevices() const
 {
-    return m_output->enumerateDevices();
+    return AudioDeviceManager::instance()->outputDevices();
 }
 
 // ── setOutputDevice ─────────────────────────────────────────────────
@@ -656,15 +657,8 @@ bool AudioEngine::setOutputDevice(uint32_t deviceId)
 
     // Validate the device exists before storing it
     if (deviceId != 0) {
-        auto devices = m_output->enumerateDevices();
-        bool found = false;
-        for (const auto& dev : devices) {
-            if (dev.deviceId == deviceId) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        auto info = AudioDeviceManager::instance()->deviceById(deviceId);
+        if (info.deviceId == 0) {
             qWarning() << "AudioEngine::setOutputDevice - device" << deviceId
                        << "not found, using default";
             deviceId = 0;

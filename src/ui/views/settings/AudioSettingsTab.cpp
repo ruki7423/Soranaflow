@@ -185,12 +185,12 @@ AudioSettingsTab::AudioSettingsTab(QWidget* parent)
     layout->addWidget(SettingsUtils::createSectionHeader(QStringLiteral("Output")));
 
     auto* outputDeviceCombo = new StyledComboBox();
-    // Populate with real devices from AudioEngine
-    auto devices = AudioEngine::instance()->availableDevices();
+    // Populate with real devices from AudioDeviceManager (single source of truth)
+    auto devices = AudioDeviceManager::instance()->outputDevices();
     int savedDeviceIdx = 0;
     uint32_t savedDeviceId = Settings::instance()->outputDeviceId();
     for (size_t i = 0; i < devices.size(); ++i) {
-        outputDeviceCombo->addItem(QString::fromStdString(devices[i].name),
+        outputDeviceCombo->addItem(devices[i].name,
                                     QVariant(devices[i].deviceId));
         if (devices[i].deviceId == savedDeviceId)
             savedDeviceIdx = static_cast<int>(i);

@@ -21,7 +21,6 @@ public:
     bool setSampleRate(double rate) override;
 
     // Device queries (virtual overrides — delegate to static helpers)
-    std::vector<AudioDevice> enumerateDevices() const override;
     double getMaxSampleRate(uint32_t deviceId = 0) const override;
     double findNearestSupportedRate(double targetRate, uint32_t deviceId = 0) const override;
     bool isBuiltInDevice(uint32_t deviceId) const override;
@@ -48,8 +47,7 @@ public:
     // Transition mute — silences render callback during format changes
     void setTransitioning(bool enabled) override;
 
-    // Static helpers (used by virtual wrappers and internally)
-    static std::vector<AudioDevice> enumerateDevicesStatic();
+    // Static helpers
     static double getMaxSampleRateStatic(uint32_t deviceId = 0);
     static double findNearestSupportedRateStatic(double targetRate, uint32_t deviceId = 0);
     static bool isBuiltInDeviceStatic(uint32_t deviceId);

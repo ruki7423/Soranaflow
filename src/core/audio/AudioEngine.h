@@ -17,6 +17,7 @@
 #include "../dsp/HRTFProcessor.h"
 #include "../../platform/IAudioOutput.h"
 
+struct AudioDeviceInfo;
 class AudioDecoder;
 class DSDDecoder;
 class DSPPipeline;
@@ -40,7 +41,7 @@ public:
     double duration() const { return m_duration; }
     double position() const;
 
-    std::vector<AudioDevice> availableDevices() const;
+    std::vector<AudioDeviceInfo> availableDevices() const;
     bool setOutputDevice(uint32_t deviceId);
     bool setBufferSize(uint32_t frames);
     void setSampleRate(double newRate);
