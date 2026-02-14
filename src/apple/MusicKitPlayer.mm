@@ -575,6 +575,8 @@ void MusicKitPlayer::setAMState(AMState newState)
     qDebug() << "[MusicKit] State:" << stateNames[static_cast<int>(oldState)]
              << "→" << stateNames[static_cast<int>(newState)];
 
+    emit amStateChanged(static_cast<int>(newState));
+
     switch (newState) {
     case AMState::Playing:
         emit playbackStateChanged(true);

@@ -32,54 +32,59 @@ static std::unique_ptr<IAudioOutput> createPlatformAudioOutput() {
 #endif
 }
 
-AudioEngine::~AudioEngine()
+void AudioEngine::prepareForShutdown()
 {
-    qDebug() << "=== AudioEngine destructor START ===";
+    // Called from aboutToQuit while Qt is still alive.
+    // Destroys DSP pipeline (and its VST plugins) NOW, so the static
+    // destructor doesn't try to destroy them after Qt is torn down
+    // (which causes recursive_mutex crash from plugin cleanup).
+    qDebug() << "[SHUTDOWN] AudioEngine::prepareForShutdown START";
 
-    // Set flags immediately — render callback checks these
     m_shuttingDown.store(true, std::memory_order_release);
     m_destroyed.store(true, std::memory_order_release);
 
-    // Stop position timer
+    if (m_output) {
+        m_output->setRenderCallback(nullptr);
+        m_output->stop();
+        for (int i = 0; i < 50 && m_renderingInProgress.load(std::memory_order_acquire); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        m_output.reset();
+    }
+
     if (m_positionTimer) {
         m_positionTimer->stop();
         m_positionTimer->deleteLater();
         m_positionTimer = nullptr;
     }
 
-    // IMPORTANT: Stop and destroy output FIRST before decoders
-    // The output holds the render callback that references the decoders
-    if (m_output) {
-        qDebug() << "Stopping audio output...";
-        m_output->setRenderCallback(nullptr);
-        m_output->stop();
-
-        // Wait for any in-flight render callback to finish (up to 500ms)
-        for (int i = 0; i < 50 && m_renderingInProgress.load(std::memory_order_acquire); ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-
-        qDebug() << "Destroying audio output...";
-        m_output.reset();
-    }
-
-    // Now safe to destroy decoders — no callback can reference them
-    qDebug() << "Destroying decoders...";
     {
         std::lock_guard<std::mutex> lock(m_decoderMutex);
         m_decoder.reset();
         m_dsdDecoder.reset();
         m_nextDecoder.reset();
         m_nextDsdDecoder.reset();
-        m_nextTrackReady.store(false, std::memory_order_relaxed);
     }
 
-    // Destroy upsampler and DSP pipeline
-    qDebug() << "Destroying upsampler and DSP pipeline...";
     m_upsampler.reset();
     m_dspPipeline.reset();
 
-    qDebug() << "=== AudioEngine destructor DONE ===";
+    qDebug() << "[SHUTDOWN] AudioEngine::prepareForShutdown DONE";
+}
+
+AudioEngine::~AudioEngine()
+{
+    // If prepareForShutdown() was called, members are already null.
+    // If not (abnormal exit), do best-effort cleanup.
+    m_shuttingDown.store(true, std::memory_order_release);
+    m_destroyed.store(true, std::memory_order_release);
+
+    if (m_output) {
+        m_output->setRenderCallback(nullptr);
+        m_output->stop();
+        m_output.reset();
+    }
+    // Don't lock mutexes in static destructor — they may be destroyed.
+    // unique_ptrs will self-destruct if still non-null.
 }
 
 // ── Singleton ───────────────────────────────────────────────────────

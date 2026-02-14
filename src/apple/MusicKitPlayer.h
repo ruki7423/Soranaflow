@@ -67,6 +67,7 @@ signals:
     void tokenExpired();
     void playbackEnded();
     void authorizationPending();   // system "Allow Access" dialog is about to appear
+    void amStateChanged(int state);  // 0=Idle,1=Loading,2=Playing,3=Stalled,4=Stopping
 
 private:
     explicit MusicKitPlayer(QObject* parent = nullptr);

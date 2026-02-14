@@ -1003,9 +1003,8 @@ void MainWindow::performQuit()
 
     auto* engine = AudioEngine::instance();
     engine->blockSignals(true);
-    engine->stop();
+    engine->prepareForShutdown();
     engine->blockSignals(false);
-    qDebug() << "[SHUTDOWN] AudioEngine stopped";
 
     QThread::msleep(100);
     VST3Host::instance()->unloadAll();

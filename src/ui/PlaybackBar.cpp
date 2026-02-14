@@ -386,6 +386,15 @@ void PlaybackBar::setupUI()
         m_autoplayLabel->setVisible(false);
     });
 
+    // Show "Loading..." when Apple Music is buffering/DRM handshaking
+    connect(MusicKitPlayer::instance(), &MusicKitPlayer::amStateChanged,
+            this, [this](int state) {
+        if (state == 1 || state == 3) {  // Loading or Stalled
+            m_trackTitleLabel->setText(QStringLiteral("Loading\u2026"));
+        }
+        // Playing/Idle: normal trackChanged signal will overwrite with real title
+    });
+
     connect(m_playPauseBtn, &QPushButton::clicked,
             ps, &PlaybackState::playPause);
     connect(m_nextBtn, &QPushButton::clicked,

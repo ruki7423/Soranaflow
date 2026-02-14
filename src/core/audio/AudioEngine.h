@@ -81,6 +81,10 @@ public:
     // Signal path visualization
     SignalPathInfo getSignalPath() const;
 
+    // Pre-destroy DSP resources while Qt is still alive.
+    // Must be called from aboutToQuit, before static destructors run.
+    void prepareForShutdown();
+
 public slots:
     bool load(const QString& filePath);
     void play();
