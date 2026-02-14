@@ -25,7 +25,7 @@
 
 ---
 
-## What's New (v1.7.1)
+## What's New (v1.7.2)
 
 ### Bug Fixes
 - Fixed VST3/VST2 plugins failing to load — missing codesign entitlements blocked macOS from loading unsigned third-party plugin libraries
@@ -117,7 +117,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.1](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.1/SoranaFlow-1.7.1.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.2](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.2/SoranaFlow-1.7.2.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -152,7 +152,7 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 23 (v1.0.0 → v1.7.1) |
+| GitHub Releases | 23 (v1.0.0 → v1.7.2) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
@@ -160,7 +160,7 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## Changelog
 
-### v1.7.1 — VST Plugin Fix
+### v1.7.2 — VST Plugin Fix
 
 - Fixed VST3/VST2 loading: missing codesign entitlements
 
