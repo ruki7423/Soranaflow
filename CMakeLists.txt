@@ -134,6 +134,10 @@ set(AUDIO_SOURCES
     src/core/audio/DSDDecoder.cpp
     src/core/audio/AudioEngine.h
     src/core/audio/AudioEngine.cpp
+    src/core/audio/AudioRenderChain.h
+    src/core/audio/AudioRenderChain.cpp
+    src/core/audio/GaplessManager.h
+    src/core/audio/GaplessManager.cpp
     src/core/audio/MetadataReader.h
     src/core/audio/MetadataReader.cpp
     src/core/audio/TagWriter.h

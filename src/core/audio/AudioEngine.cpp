@@ -66,8 +66,7 @@ void AudioEngine::prepareForShutdown()
         std::lock_guard<std::mutex> lock(m_decoderMutex);
         m_decoder.reset();
         m_dsdDecoder.reset();
-        m_nextDecoder.reset();
-        m_nextDsdDecoder.reset();
+        m_gapless.destroyDecodersLocked();
     }
 
     m_upsampler.reset();
@@ -107,8 +106,6 @@ AudioEngine::AudioEngine(QObject* parent)
     , m_output(createPlatformAudioOutput())
     , m_dspPipeline(std::make_unique<DSPPipeline>())
     , m_upsampler(std::make_unique<UpsamplerProcessor>(this))
-    , m_nextDecoder(std::make_unique<AudioDecoder>())
-    , m_nextDsdDecoder(std::make_unique<DSDDecoder>())
 {
     m_positionTimer = new QTimer(this);
     m_positionTimer->setInterval(50);
@@ -131,7 +128,7 @@ AudioEngine::AudioEngine(QObject* parent)
     connect(Settings::instance(), &Settings::headroomChanged,
             this, [this]() {
         qDebug() << "[Headroom] Settings changed";
-        updateHeadroomGain();
+        m_renderChain.updateHeadroomGain();
         emit signalPathChanged();
     });
 
@@ -140,7 +137,7 @@ AudioEngine::AudioEngine(QObject* parent)
             this, [this](bool enabled) {
         qDebug() << "[Volume Leveling] Toggled:" << enabled;
         updateLevelingGain();
-        updateHeadroomGain();  // Auto headroom depends on active DSP
+        m_renderChain.updateHeadroomGain();  // Auto headroom depends on active DSP
     });
     connect(Settings::instance(), &Settings::levelingModeChanged,
             this, [this](int) {
@@ -157,7 +154,7 @@ AudioEngine::AudioEngine(QObject* parent)
     m_bitPerfect = Settings::instance()->bitPerfectMode();
     m_output->setBitPerfectMode(m_bitPerfect.load(std::memory_order_relaxed));
     m_autoSampleRate = Settings::instance()->autoSampleRate();
-    m_crossfadeDurationMs.store(Settings::instance()->crossfadeDurationMs(), std::memory_order_relaxed);
+    m_gapless.setCrossfadeDuration(Settings::instance()->crossfadeDurationMs());
 
     // Apply exclusive mode if saved
     if (Settings::instance()->exclusiveMode()) {
@@ -176,19 +173,19 @@ AudioEngine::AudioEngine(QObject* parent)
     }
 
     // Load crossfeed settings
-    m_crossfeed.setLevel(
+    m_renderChain.crossfeed().setLevel(
         static_cast<CrossfeedProcessor::Level>(Settings::instance()->crossfeedLevel()));
-    m_crossfeed.setEnabled(Settings::instance()->crossfeedEnabled());
+    m_renderChain.crossfeed().setEnabled(Settings::instance()->crossfeedEnabled());
 
     connect(Settings::instance(), &Settings::crossfeedChanged,
             this, [this]() {
-        m_crossfeed.setEnabled(Settings::instance()->crossfeedEnabled());
-        m_crossfeed.setLevel(
+        m_renderChain.crossfeed().setEnabled(Settings::instance()->crossfeedEnabled());
+        m_renderChain.crossfeed().setLevel(
             static_cast<CrossfeedProcessor::Level>(Settings::instance()->crossfeedLevel()));
-        updateHeadroomGain();  // Auto headroom may change
+        m_renderChain.updateHeadroomGain();  // Auto headroom may change
         emit signalPathChanged();
-        qDebug() << "[Crossfeed]" << (m_crossfeed.isEnabled() ? "ON" : "OFF")
-                 << "level:" << m_crossfeed.level();
+        qDebug() << "[Crossfeed]" << (m_renderChain.crossfeed().isEnabled() ? "ON" : "OFF")
+                 << "level:" << m_renderChain.crossfeed().level();
     });
 
     // Verify convolution math on startup
@@ -197,15 +194,15 @@ AudioEngine::AudioEngine(QObject* parent)
     // Load convolution settings
     {
         auto* s = Settings::instance();
-        m_convolution.setEnabled(s->convolutionEnabled());
+        m_renderChain.convolution().setEnabled(s->convolutionEnabled());
         QString irPath = s->convolutionIRPath();
         if (!irPath.isEmpty()) {
             (void)QtConcurrent::run([this, irPath]() {
-                bool ok = m_convolution.loadIR(irPath.toStdString());
+                bool ok = m_renderChain.convolution().loadIR(irPath.toStdString());
                 qDebug() << "[Convolution] IR load:" << irPath << (ok ? "OK" : "FAILED");
                 if (ok) {
                     QMetaObject::invokeMethod(this, [this]() {
-                        updateHeadroomGain();
+                        m_renderChain.updateHeadroomGain();
                         emit signalPathChanged();
                     }, Qt::QueuedConnection);
                 }
@@ -216,39 +213,39 @@ AudioEngine::AudioEngine(QObject* parent)
     connect(Settings::instance(), &Settings::convolutionChanged,
             this, [this]() {
         auto* s = Settings::instance();
-        m_convolution.setEnabled(s->convolutionEnabled());
+        m_renderChain.convolution().setEnabled(s->convolutionEnabled());
         QString irPath = s->convolutionIRPath();
-        if (!irPath.isEmpty() && irPath.toStdString() != m_convolution.irFilePath()) {
+        if (!irPath.isEmpty() && irPath.toStdString() != m_renderChain.convolution().irFilePath()) {
             (void)QtConcurrent::run([this, irPath]() {
-                bool ok = m_convolution.loadIR(irPath.toStdString());
+                bool ok = m_renderChain.convolution().loadIR(irPath.toStdString());
                 qDebug() << "[Convolution] IR reload:" << irPath << (ok ? "OK" : "FAILED");
                 if (ok) {
                     QMetaObject::invokeMethod(this, [this]() {
-                        updateHeadroomGain();
+                        m_renderChain.updateHeadroomGain();
                         emit signalPathChanged();
                     }, Qt::QueuedConnection);
                 }
             });
         } else {
-            updateHeadroomGain();
+            m_renderChain.updateHeadroomGain();
             emit signalPathChanged();
         }
-        qDebug() << "[Convolution]" << (m_convolution.isEnabled() ? "ON" : "OFF");
+        qDebug() << "[Convolution]" << (m_renderChain.convolution().isEnabled() ? "ON" : "OFF");
     });
 
     // Load HRTF settings
     {
         auto* s = Settings::instance();
-        m_hrtf.setEnabled(s->hrtfEnabled());
-        m_hrtf.setSpeakerAngle(s->hrtfSpeakerAngle());
+        m_renderChain.hrtf().setEnabled(s->hrtfEnabled());
+        m_renderChain.hrtf().setSpeakerAngle(s->hrtfSpeakerAngle());
         QString sofaPath = s->hrtfSofaPath();
         if (!sofaPath.isEmpty()) {
             (void)QtConcurrent::run([this, sofaPath]() {
-                bool ok = m_hrtf.loadSOFA(sofaPath);
+                bool ok = m_renderChain.hrtf().loadSOFA(sofaPath);
                 qDebug() << "[HRTF] SOFA load:" << sofaPath << (ok ? "OK" : "FAILED");
                 if (ok) {
                     QMetaObject::invokeMethod(this, [this]() {
-                        updateHeadroomGain();
+                        m_renderChain.updateHeadroomGain();
                         emit signalPathChanged();
                     }, Qt::QueuedConnection);
                 }
@@ -259,30 +256,30 @@ AudioEngine::AudioEngine(QObject* parent)
     connect(Settings::instance(), &Settings::hrtfChanged,
             this, [this]() {
         auto* s = Settings::instance();
-        m_hrtf.setEnabled(s->hrtfEnabled());
-        m_hrtf.setSpeakerAngle(s->hrtfSpeakerAngle());
+        m_renderChain.hrtf().setEnabled(s->hrtfEnabled());
+        m_renderChain.hrtf().setSpeakerAngle(s->hrtfSpeakerAngle());
         QString sofaPath = s->hrtfSofaPath();
-        if (!sofaPath.isEmpty() && sofaPath != m_hrtf.sofaPath()) {
+        if (!sofaPath.isEmpty() && sofaPath != m_renderChain.hrtf().sofaPath()) {
             (void)QtConcurrent::run([this, sofaPath]() {
-                bool ok = m_hrtf.loadSOFA(sofaPath);
+                bool ok = m_renderChain.hrtf().loadSOFA(sofaPath);
                 qDebug() << "[HRTF] SOFA reload:" << sofaPath << (ok ? "OK" : "FAILED");
                 if (ok) {
                     QMetaObject::invokeMethod(this, [this]() {
-                        updateHeadroomGain();
+                        m_renderChain.updateHeadroomGain();
                         emit signalPathChanged();
                     }, Qt::QueuedConnection);
                 }
             });
         } else {
-            updateHeadroomGain();
+            m_renderChain.updateHeadroomGain();
             emit signalPathChanged();
         }
-        qDebug() << "[HRTF]" << (m_hrtf.isEnabled() ? "ON" : "OFF")
-                 << "angle:" << m_hrtf.speakerAngle();
+        qDebug() << "[HRTF]" << (m_renderChain.hrtf().isEnabled() ? "ON" : "OFF")
+                 << "angle:" << m_renderChain.hrtf().speakerAngle();
     });
 
     // Initialize headroom gain from persisted settings
-    updateHeadroomGain();
+    m_renderChain.updateHeadroomGain();
 }
 
 // ── load ────────────────────────────────────────────────────────────
@@ -403,9 +400,7 @@ bool AudioEngine::load(const QString& filePath)
 
     m_sampleRate.store(fmt.sampleRate, std::memory_order_relaxed);
     m_channels.store(fmt.channels, std::memory_order_relaxed);
-    m_crossfeed.setSampleRate(static_cast<int>(fmt.sampleRate));
-    m_convolution.setSampleRate(static_cast<int>(fmt.sampleRate));
-    m_hrtf.setSampleRate(static_cast<int>(fmt.sampleRate));
+    m_renderChain.setSampleRate(static_cast<int>(fmt.sampleRate));
     m_duration = fmt.durationSecs;
     m_framesRendered.store(0, std::memory_order_relaxed);
 
@@ -471,9 +466,7 @@ bool AudioEngine::load(const QString& filePath)
     }
 
     // Pre-allocate crossfade buffer (generous — covers any CoreAudio buffer size)
-    m_crossfadeBuf.resize(16384 * fmt.channels);
-    m_crossfading = false;
-    m_crossfadeProgress = 0;
+    m_gapless.preallocateCrossfadeBuffer(fmt.channels);
 
     // Prepare DSP pipeline at the output rate (post-upsampling)
     m_dspPipeline->prepare(outputFmt.sampleRate, fmt.channels);
@@ -513,7 +506,7 @@ bool AudioEngine::load(const QString& filePath)
 
     { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = filePath; }
 
-    updateHeadroomGain();
+    m_renderChain.updateHeadroomGain();
 
     // Log DSD-involved transitions
     bool nextIsDoP = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
@@ -588,21 +581,15 @@ void AudioEngine::stop()
         std::lock_guard<std::mutex> lock(m_decoderMutex);
         m_decoder->close();
         m_dsdDecoder->close();
-        m_nextDecoder->close();
-        m_nextDsdDecoder->close();
-        m_nextTrackReady.store(false, std::memory_order_relaxed);
-        m_nextUsingDSD = false;
-        m_nextFilePath.clear();
+        m_gapless.resetLocked();
     }
     m_usingDSDDecoder = false;
     m_framesRendered.store(0, std::memory_order_relaxed);
     m_dspPipeline->reset();
 
-    // Zero pre-allocated buffers to prevent stale data on next track start
+    // Zero pre-allocated buffer to prevent stale data on next track start
     if (!m_decodeBuf.empty())
         std::memset(m_decodeBuf.data(), 0, m_decodeBuf.size() * sizeof(float));
-    if (!m_crossfadeBuf.empty())
-        std::memset(m_crossfadeBuf.data(), 0, m_crossfadeBuf.size() * sizeof(float));
 
     { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath.clear(); }
     m_state = Stopped;
@@ -843,31 +830,7 @@ void AudioEngine::setCurrentTrack(const Track& track)
 // ── updateHeadroomGain ──────────────────────────────────────────────
 void AudioEngine::updateHeadroomGain()
 {
-    auto mode = Settings::instance()->headroomMode();
-    double dB = 0.0;
-
-    switch (mode) {
-    case Settings::HeadroomMode::Off:
-        dB = 0.0;
-        break;
-    case Settings::HeadroomMode::Auto: {
-        bool anyDspActive = Settings::instance()->volumeLeveling()
-                         || Settings::instance()->crossfeedEnabled()
-                         || (Settings::instance()->convolutionEnabled() && m_convolution.hasIR());
-        dB = anyDspActive ? -3.0 : 0.0;
-        break;
-    }
-    case Settings::HeadroomMode::Manual:
-        dB = Settings::instance()->manualHeadroom();
-        break;
-    }
-
-    dB = qBound(-12.0, dB, 0.0);
-    float linear = static_cast<float>(std::pow(10.0, dB / 20.0));
-    m_headroomGain.store(linear, std::memory_order_relaxed);
-
-    qDebug() << "[Headroom] Mode:" << static_cast<int>(mode)
-             << "gain:" << dB << "dB linear:" << linear;
+    m_renderChain.updateHeadroomGain();
 }
 
 // ── updateLevelingGain ──────────────────────────────────────────────
@@ -882,105 +845,18 @@ float AudioEngine::levelingGainDb() const
     return m_levelingManager->gainDb();
 }
 
-// ── prepareNextTrack (gapless pre-decode) ────────────────────────────
+// ── prepareNextTrack (delegated to GaplessManager) ───────────────────
 void AudioEngine::prepareNextTrack(const QString& filePath)
 {
-    if (filePath.isEmpty()) return;
-
-    // Don't prepare if both gapless and crossfade are disabled
-    if (!Settings::instance()->gaplessPlayback()
-        && m_crossfadeDurationMs.load(std::memory_order_relaxed) <= 0) return;
-
-    qDebug() << "[Gapless] Preparing next track:" << filePath;
-
-    std::lock_guard<std::mutex> lock(m_decoderMutex);
-
-    // Close any previously prepared next track
-    m_nextDecoder->close();
-    m_nextDsdDecoder->close();
-    m_nextTrackReady.store(false, std::memory_order_relaxed);
-    m_nextUsingDSD = false;
-    m_nextFilePath.clear();
-
-    QFileInfo fi(filePath);
-    if (!fi.exists() || !fi.isReadable() || fi.size() == 0) {
-        qDebug() << "[Gapless] Next track file invalid:" << filePath;
-        return;
-    }
-
-    QString ext = fi.suffix().toLower();
-    bool isDSD = (ext == QStringLiteral("dsf") || ext == QStringLiteral("dff"));
-
-    if (isDSD) {
-        QString dsdMode = Settings::instance()->dsdPlaybackMode();
-        if (dsdMode == QStringLiteral("dop")) {
-            if (m_nextDsdDecoder->openDSD(filePath.toStdString(), true)) {
-                AudioStreamFormat fmt = m_nextDsdDecoder->format();
-                double maxRate = m_output->getMaxSampleRate(m_currentDeviceId);
-                if (maxRate > 0 && fmt.sampleRate > maxRate) {
-                    m_nextDsdDecoder->close();
-                } else {
-                    m_nextUsingDSD = true;
-                    m_nextFormat = fmt;
-                }
-            }
-        }
-
-        if (!m_nextUsingDSD) {
-            if (m_nextDecoder->open(filePath.toStdString())) {
-                m_nextFormat = m_nextDecoder->format();
-            } else {
-                qDebug() << "[Gapless] Failed to open next track:" << filePath;
-                return;
-            }
-        }
-    } else {
-        if (!m_nextDecoder->open(filePath.toStdString())) {
-            qDebug() << "[Gapless] Failed to open next track:" << filePath;
-            return;
-        }
-        m_nextFormat = m_nextDecoder->format();
-    }
-
-    m_nextFilePath = filePath;
-
-    // Check format compatibility: sample rate and channels must match for seamless transition
-    double currentRate = m_sampleRate.load(std::memory_order_relaxed);
-    int currentCh = m_channels.load(std::memory_order_relaxed);
-    bool formatMatch = (std::abs(m_nextFormat.sampleRate - currentRate) < 1.0)
-                       && (m_nextFormat.channels == currentCh)
-                       && (m_nextUsingDSD == m_usingDSDDecoder);
-
-    if (!formatMatch) {
-        qDebug() << "[Gapless] Format mismatch — will use normal transition"
-                 << "current:" << currentRate << "Hz" << currentCh << "ch DSD:" << m_usingDSDDecoder
-                 << "next:" << m_nextFormat.sampleRate << "Hz" << m_nextFormat.channels << "ch DSD:" << m_nextUsingDSD;
-        // Keep the decoder open — we'll reuse it in load() to avoid double-open
-        m_nextTrackReady.store(false, std::memory_order_relaxed);
-        return;
-    }
-
-    m_nextTrackReady.store(true, std::memory_order_release);
-    qDebug() << "[Gapless] Next track ready:" << filePath;
+    m_gapless.prepareNextTrack(filePath,
+        m_output->getMaxSampleRate(m_currentDeviceId),
+        m_sampleRate.load(std::memory_order_relaxed),
+        m_channels.load(std::memory_order_relaxed),
+        m_usingDSDDecoder.load(std::memory_order_relaxed));
 }
 
-// ── cancelNextTrack ──────────────────────────────────────────────────
-void AudioEngine::cancelNextTrack()
-{
-    std::lock_guard<std::mutex> lock(m_decoderMutex);
-    m_nextTrackReady.store(false, std::memory_order_relaxed);
-    m_nextDecoder->close();
-    m_nextDsdDecoder->close();
-    m_nextUsingDSD = false;
-    m_nextFilePath.clear();
-    qDebug() << "[Gapless] Next track cancelled";
-}
-
-void AudioEngine::setCrossfadeDuration(int ms)
-{
-    m_crossfadeDurationMs.store(ms, std::memory_order_relaxed);
-    qDebug() << "[Crossfade] Duration set to" << ms << "ms";
-}
+void AudioEngine::cancelNextTrack() { m_gapless.cancelNextTrack(); }
+void AudioEngine::setCrossfadeDuration(int ms) { m_gapless.setCrossfadeDuration(ms); }
 
 // ── renderAudio (called from audio thread) ──────────────────────────
 int AudioEngine::renderAudio(float* buf, int maxFrames)
@@ -1051,50 +927,10 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                             (maxFrames - outputFrames) * channels * sizeof(float));
             }
 
-            // 3b. Apply headroom (before DSP)
-            {
-                float hr = m_headroomGain.load(std::memory_order_relaxed);
-                if (hr != 1.0f) {
-                    int n = outputFrames * channels;
-                    for (int i = 0; i < n; ++i) buf[i] *= hr;
-                }
-            }
-
-            // 3c. Apply crossfeed (stereo only, after headroom)
-            //     Mutually exclusive with HRTF — if both enabled, skip crossfeed (HRTF wins)
-            if (channels == 2 && !(m_hrtf.isEnabled() && m_crossfeed.isEnabled())) {
-                m_crossfeed.process(buf, outputFrames);
-            }
-
-            // 3d. Apply convolution (room correction / IR)
-            m_convolution.process(buf, outputFrames, channels);
-
-            // 3e. Apply HRTF (binaural spatial audio)
-            if (channels == 2) {
-                m_hrtf.process(buf, outputFrames);
-            }
-
-            // 4. Apply DSP pipeline at upsampled rate
-            m_dspPipeline->process(buf, outputFrames, channels);
-
-            // 4b. Apply volume leveling gain
-            {
-                float lg = m_levelingManager->gainLinear();
-                if (lg != 1.0f) {
-                    int n = outputFrames * channels;
-                    for (int i = 0; i < n; ++i) buf[i] *= lg;
-                }
-            }
-
-            // 4c. Peak limiter (safety net after all DSP)
-            {
-                int n = outputFrames * channels;
-                for (int i = 0; i < n; ++i) {
-                    float s = buf[i];
-                    if (s > 0.95f) buf[i] = 0.95f + 0.05f * std::tanh((s - 0.95f) / 0.05f);
-                    else if (s < -0.95f) buf[i] = -0.95f - 0.05f * std::tanh((-s - 0.95f) / 0.05f);
-                }
-            }
+            // 3. Apply full DSP chain (headroom → crossfeed → convolution → HRTF → DSP → leveling → limiter)
+            m_renderChain.process(buf, outputFrames, channels,
+                                  m_dspPipeline.get(), m_levelingManager,
+                                  false /*dopPassthrough*/, false /*bitPerfect*/);
 
             // 5. Track position in SOURCE frames (not output frames)
             m_framesRendered.fetch_add(framesRead, std::memory_order_relaxed);
@@ -1115,35 +951,38 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
         // ── Crossfade mixing (before DSP chain) ─────────────────────────
         // Only for PCM tracks with matching sample rate/channels
         if (!m_usingDSDDecoder) {
-            int cfMs = m_crossfadeDurationMs.load(std::memory_order_relaxed);
             double sr = m_sampleRate.load(std::memory_order_relaxed);
 
             // Start crossfade if approaching end of track
-            if (!m_crossfading && cfMs > 0 && framesRead > 0
-                && m_nextTrackReady.load(std::memory_order_acquire)
-                && !m_nextUsingDSD
-                && m_nextFormat.sampleRate == sr
-                && m_nextFormat.channels == channels) {
-                int64_t totalFrames = (int64_t)(m_duration * sr);
-                int64_t cfFrames = (int64_t)(cfMs * sr / 1000.0);
-                int64_t pos = m_framesRendered.load(std::memory_order_relaxed);
-                if (totalFrames > cfFrames && pos >= totalFrames - cfFrames) {
-                    m_crossfading = true;
-                    m_crossfadeProgress = (int)(pos - (totalFrames - cfFrames));
-                    m_crossfadeTotalFrames = (int)cfFrames;
+            if (framesRead > 0) {
+                int cfMs = m_gapless.crossfadeDurationMs();
+                if (!m_gapless.isCrossfading() && cfMs > 0
+                    && m_gapless.isNextTrackReady()
+                    && !m_gapless.nextUsingDSD()
+                    && std::abs(m_gapless.nextFormat().sampleRate - sr) < 1.0
+                    && m_gapless.nextFormat().channels == channels) {
+                    int64_t totalFrames = (int64_t)(m_duration * sr);
+                    int64_t cfFrames = (int64_t)(cfMs * sr / 1000.0);
+                    int64_t pos = m_framesRendered.load(std::memory_order_relaxed);
+                    if (totalFrames > cfFrames && pos >= totalFrames - cfFrames) {
+                        m_gapless.startCrossfade(pos, totalFrames, cfFrames);
+                    }
                 }
             }
 
             // Mix incoming track during crossfade
-            if (m_crossfading) {
+            if (m_gapless.isCrossfading()) {
                 crossfadeHandledFrames = true;
+                int cfProgress = m_gapless.crossfadeProgress();
+                int cfTotal = m_gapless.crossfadeTotalFrames();
+
                 if (framesRead == 0) {
                     // Outgoing track ended mid-crossfade — read only incoming
-                    framesRead = m_nextDecoder->isOpen()
-                        ? m_nextDecoder->read(buf, maxFrames) : 0;
+                    framesRead = m_gapless.nextDecoder()->isOpen()
+                        ? m_gapless.nextDecoder()->read(buf, maxFrames) : 0;
                     // Apply fade-in gain to incoming-only frames
                     for (int f = 0; f < framesRead; f++) {
-                        float t = (float)(m_crossfadeProgress + f) / (float)m_crossfadeTotalFrames;
+                        float t = (float)(cfProgress + f) / (float)cfTotal;
                         t = std::min(t, 1.0f);
                         float gainIn = std::sin(t * (float)M_PI_2);
                         for (int ch = 0; ch < channels; ch++)
@@ -1152,51 +991,35 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                 } else {
                     // Both tracks active — read incoming and mix
                     // Cap to available buffer capacity (avoid RT allocation)
-                    int maxNextFrames = std::min(framesRead,
-                        (int)m_crossfadeBuf.size() / std::max(channels, 1));
-                    int nextRead = (m_nextDecoder->isOpen() && maxNextFrames > 0)
-                        ? m_nextDecoder->read(m_crossfadeBuf.data(), maxNextFrames) : 0;
+                    int maxNextFrames = std::min(framesRead, m_gapless.crossfadeBufCapacity(channels));
+                    int nextRead = (m_gapless.nextDecoder()->isOpen() && maxNextFrames > 0)
+                        ? m_gapless.nextDecoder()->read(m_gapless.crossfadeBufData(), maxNextFrames) : 0;
                     for (int f = 0; f < framesRead; f++) {
-                        float t = (float)(m_crossfadeProgress + f) / (float)m_crossfadeTotalFrames;
+                        float t = (float)(cfProgress + f) / (float)cfTotal;
                         t = std::min(t, 1.0f);
                         float gainOut = std::cos(t * (float)M_PI_2);
                         float gainIn  = std::sin(t * (float)M_PI_2);
                         for (int ch = 0; ch < channels; ch++) {
                             int idx = f * channels + ch;
-                            float incoming = (f < nextRead) ? m_crossfadeBuf[idx] : 0.0f;
+                            float incoming = (f < nextRead) ? m_gapless.crossfadeBufData()[idx] : 0.0f;
                             buf[idx] = buf[idx] * gainOut + incoming * gainIn;
                         }
                     }
                     // Track outgoing position (these frames were from the outgoing track)
                     m_framesRendered.fetch_add(framesRead, std::memory_order_relaxed);
                 }
-                m_crossfadeProgress += framesRead;
+                m_gapless.advanceCrossfade(framesRead);
 
                 // Crossfade complete — swap to incoming track
-                if (m_crossfadeProgress >= m_crossfadeTotalFrames) {
-                    m_decoder.swap(m_nextDecoder);
-                    m_dsdDecoder.swap(m_nextDsdDecoder);
-                    m_usingDSDDecoder = m_nextUsingDSD;
-
-                    // Transfer DoP marker state (same as direct gapless path)
-                    if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()
-                        && m_nextDsdDecoder->isDoPMode()) {
-                        m_dsdDecoder->setDoPMarkerState(m_nextDsdDecoder->dopMarkerState());
-                    }
-
-                    { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
-                    m_duration = m_nextFormat.durationSecs;
-                    m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
-                    m_channels.store(m_nextFormat.channels, std::memory_order_relaxed);
-                    m_framesRendered.store(m_crossfadeProgress, std::memory_order_relaxed);
-
-                    m_nextDecoder->close();
-                    m_nextDsdDecoder->close();
-                    m_nextTrackReady.store(false, std::memory_order_relaxed);
-                    m_nextUsingDSD = false;
-                    m_nextFilePath.clear();
-                    m_crossfading = false;
-                    m_crossfadeProgress = 0;
+                if (m_gapless.crossfadeProgress() >= m_gapless.crossfadeTotalFrames()) {
+                    int cfProg = m_gapless.crossfadeProgress();
+                    auto tr = m_gapless.swapToCurrent(m_decoder, m_dsdDecoder,
+                                                       m_usingDSDDecoder,
+                                                       m_filePathMutex, m_currentFilePath);
+                    m_duration = tr.newDuration;
+                    m_sampleRate.store(tr.newSampleRate, std::memory_order_relaxed);
+                    m_channels.store(tr.newChannels, std::memory_order_relaxed);
+                    m_framesRendered.store(cfProg, std::memory_order_relaxed);
 
                     // Signal main thread via atomic flag (RT-safe)
                     m_rtGaplessFlag.store(true, std::memory_order_release);
@@ -1204,57 +1027,12 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             }
         }
 
-        // DoP passthrough — DSD data must be bit-perfect, skip ALL DSP
-        const bool dopPassthrough = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
-
-        // Apply headroom (before DSP)
-        if (framesRead > 0 && !dopPassthrough) {
-            float hr = m_headroomGain.load(std::memory_order_relaxed);
-            if (hr != 1.0f) {
-                int n = framesRead * channels;
-                for (int i = 0; i < n; ++i) buf[i] *= hr;
-            }
-        }
-
-        // Apply crossfeed (stereo only, after headroom)
-        //   Mutually exclusive with HRTF — if both enabled, skip crossfeed (HRTF wins)
-        if (framesRead > 0 && !dopPassthrough && channels == 2
-            && !(m_hrtf.isEnabled() && m_crossfeed.isEnabled())) {
-            m_crossfeed.process(buf, framesRead);
-        }
-
-        // Apply convolution (room correction / IR)
-        if (framesRead > 0 && !dopPassthrough) {
-            m_convolution.process(buf, framesRead, channels);
-        }
-
-        // Apply HRTF (binaural spatial audio)
-        if (framesRead > 0 && !dopPassthrough && channels == 2) {
-            m_hrtf.process(buf, framesRead);
-        }
-
-        // Apply DSP pipeline (gain, EQ, plugins) — skip in bit-perfect mode or DoP
-        if (framesRead > 0 && !dopPassthrough && !m_bitPerfect.load(std::memory_order_relaxed)) {
-            m_dspPipeline->process(buf, framesRead, channels);
-        }
-
-        // Apply volume leveling gain
-        if (framesRead > 0 && !dopPassthrough) {
-            float lg = m_levelingManager->gainLinear();
-            if (lg != 1.0f) {
-                int n = framesRead * channels;
-                for (int i = 0; i < n; ++i) buf[i] *= lg;
-            }
-        }
-
-        // Peak limiter (safety net after all DSP)
-        if (framesRead > 0 && !dopPassthrough) {
-            int n = framesRead * channels;
-            for (int i = 0; i < n; ++i) {
-                float s = buf[i];
-                if (s > 0.95f) buf[i] = 0.95f + 0.05f * std::tanh((s - 0.95f) / 0.05f);
-                else if (s < -0.95f) buf[i] = -0.95f - 0.05f * std::tanh((-s - 0.95f) / 0.05f);
-            }
+        // Apply full DSP chain (handles DoP passthrough and bit-perfect internally)
+        {
+            const bool dopPassthrough = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+            m_renderChain.process(buf, framesRead, channels,
+                                  m_dspPipeline.get(), m_levelingManager,
+                                  dopPassthrough, m_bitPerfect.load(std::memory_order_relaxed));
         }
     }
 
@@ -1283,34 +1061,16 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
     if (!crossfadeHandledFrames)
         m_framesRendered.fetch_add(framesRead, std::memory_order_relaxed);
 
-    if (framesRead == 0 && !m_crossfading) {
+    if (framesRead == 0 && !m_gapless.isCrossfading()) {
         // Current track ended — check if we can do a gapless transition
-        if (m_nextTrackReady.load(std::memory_order_acquire)) {
-            // Swap next decoder into current
-            m_decoder.swap(m_nextDecoder);
-            m_dsdDecoder.swap(m_nextDsdDecoder);
-            m_usingDSDDecoder = m_nextUsingDSD;
-
-            // Transfer DoP marker state for seamless DSD→DSD gapless transition.
-            // The old decoder (now in "next" slot) has the correct marker alternation;
-            // the new decoder (now current) must continue from that state.
-            if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()
-                && m_nextDsdDecoder->isDoPMode()) {
-                m_dsdDecoder->setDoPMarkerState(m_nextDsdDecoder->dopMarkerState());
-            }
-
-            { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = m_nextFilePath; }
-            m_duration = m_nextFormat.durationSecs;
-            m_sampleRate.store(m_nextFormat.sampleRate, std::memory_order_relaxed);
-            m_channels.store(m_nextFormat.channels, std::memory_order_relaxed);
+        if (m_gapless.isNextTrackReady()) {
+            auto tr = m_gapless.swapToCurrent(m_decoder, m_dsdDecoder,
+                                               m_usingDSDDecoder,
+                                               m_filePathMutex, m_currentFilePath);
+            m_duration = tr.newDuration;
+            m_sampleRate.store(tr.newSampleRate, std::memory_order_relaxed);
+            m_channels.store(tr.newChannels, std::memory_order_relaxed);
             m_framesRendered.store(0, std::memory_order_relaxed);
-
-            // Clean up the old decoder (now in the "next" slot)
-            m_nextDecoder->close();
-            m_nextDsdDecoder->close();
-            m_nextTrackReady.store(false, std::memory_order_relaxed);
-            m_nextUsingDSD = false;
-            m_nextFilePath.clear();
 
             // Read from the new decoder to fill the buffer for this callback
             int newFrames = 0;
@@ -1445,7 +1205,7 @@ SignalPathInfo AudioEngine::getSignalPath() const
     }
 
     // Headroom
-    state.headroomGain = m_headroomGain.load(std::memory_order_relaxed);
+    state.headroomGain = m_renderChain.headroomGainLinear();
     auto hrMode = Settings::instance()->headroomMode();
     if (hrMode == Settings::HeadroomMode::Auto)
         state.headroomMode = AudioState::HRAuto;
@@ -1455,21 +1215,21 @@ SignalPathInfo AudioEngine::getSignalPath() const
         state.headroomMode = AudioState::HROff;
 
     // Crossfeed
-    state.crossfeedEnabled = m_crossfeed.isEnabled();
-    state.crossfeedLevel = static_cast<int>(m_crossfeed.level());
+    state.crossfeedEnabled = m_renderChain.crossfeed().isEnabled();
+    state.crossfeedLevel = static_cast<int>(m_renderChain.crossfeed().level());
 
     // Convolution
-    state.convolutionEnabled = m_convolution.isEnabled();
-    state.convolutionHasIR = m_convolution.hasIR();
+    state.convolutionEnabled = m_renderChain.convolution().isEnabled();
+    state.convolutionHasIR = m_renderChain.convolution().hasIR();
     if (state.convolutionHasIR) {
-        state.convolutionIRPath = QString::fromStdString(m_convolution.irFilePath());
+        state.convolutionIRPath = QString::fromStdString(m_renderChain.convolution().irFilePath());
     }
 
     // HRTF
-    state.hrtfEnabled = m_hrtf.isEnabled();
-    state.hrtfLoaded = m_hrtf.isLoaded();
-    state.hrtfSofaPath = m_hrtf.sofaPath();
-    state.hrtfSpeakerAngle = m_hrtf.speakerAngle();
+    state.hrtfEnabled = m_renderChain.hrtf().isEnabled();
+    state.hrtfLoaded = m_renderChain.hrtf().isLoaded();
+    state.hrtfSofaPath = m_renderChain.hrtf().sofaPath();
+    state.hrtfSpeakerAngle = m_renderChain.hrtf().speakerAngle();
 
     // DSP pipeline
     if (m_dspPipeline) {

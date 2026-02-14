@@ -11,10 +11,9 @@
 
 #include "AudioFormat.h"
 #include "SignalPathInfo.h"
+#include "AudioRenderChain.h"
+#include "GaplessManager.h"
 #include "../MusicData.h"
-#include "../dsp/CrossfeedProcessor.h"
-#include "../dsp/ConvolutionProcessor.h"
-#include "../dsp/HRTFProcessor.h"
 #include "../../platform/IAudioOutput.h"
 
 struct AudioDeviceInfo;
@@ -68,9 +67,9 @@ public:
     // Gapless playback / crossfade
     void prepareNextTrack(const QString& filePath);
     void cancelNextTrack();
-    bool isNextTrackReady() const { return m_nextTrackReady.load(std::memory_order_relaxed); }
+    bool isNextTrackReady() const { return m_gapless.isNextTrackReady(); }
     void setCrossfadeDuration(int ms);
-    int crossfadeDurationMs() const { return m_crossfadeDurationMs.load(std::memory_order_relaxed); }
+    int crossfadeDurationMs() const { return m_gapless.crossfadeDurationMs(); }
 
     // Volume leveling
     void setCurrentTrack(const Track& track);
@@ -129,14 +128,6 @@ private:
     std::atomic<int>                 m_channels{2};
     std::atomic<bool>                m_usingDSDDecoder{false};
 
-    // Gapless playback: pre-decoded next track
-    std::unique_ptr<AudioDecoder>    m_nextDecoder;
-    std::unique_ptr<DSDDecoder>      m_nextDsdDecoder;
-    std::atomic<bool>                m_nextTrackReady{false};
-    bool                             m_nextUsingDSD = false;
-    AudioStreamFormat                m_nextFormat{};
-    QString                          m_nextFilePath;
-
     QTimer* m_positionTimer = nullptr;
     float   m_volume = 1.0f;
     uint32_t m_currentDeviceId = 0;
@@ -152,24 +143,11 @@ private:
     // Volume leveling
     VolumeLevelingManager* m_levelingManager;
 
-    // Headroom management
-    std::atomic<float> m_headroomGain{1.0f};
+    // DSP render chain (crossfeed, convolution, HRTF, headroom, limiter)
+    AudioRenderChain m_renderChain;
 
-    // Crossfade (track transitions)
-    std::atomic<int>  m_crossfadeDurationMs{0};   // 0 = off (gapless only)
-    bool              m_crossfading = false;
-    int               m_crossfadeProgress = 0;    // frames mixed so far
-    int               m_crossfadeTotalFrames = 0; // total frames to crossfade
-    std::vector<float> m_crossfadeBuf;            // buffer for outgoing track
-
-    // Crossfeed
-    CrossfeedProcessor m_crossfeed;
-
-    // Convolution (Room Correction / IR)
-    ConvolutionProcessor m_convolution;
-
-    // HRTF (Binaural Spatial Audio)
-    HRTFProcessor m_hrtf;
+    // Gapless / crossfade management
+    GaplessManager m_gapless{&m_decoderMutex};
 
     // RT-safe signaling flags (set on audio thread, polled on main thread)
     std::atomic<bool> m_rtGaplessFlag{false};
