@@ -332,6 +332,13 @@ void LibraryDatabase::createIndexes()
     // Migration: add album_artist to albums (preferred sort field from ALBUMARTIST tag)
     q.exec(QStringLiteral("ALTER TABLE albums ADD COLUMN album_artist TEXT"));
 
+    // Migration: add ReplayGain columns (Bug B fix — v1.7.2)
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN replay_gain_track REAL DEFAULT 0"));
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN replay_gain_album REAL DEFAULT 0"));
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN replay_gain_track_peak REAL DEFAULT 1.0"));
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN replay_gain_album_peak REAL DEFAULT 1.0"));
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN has_replay_gain INTEGER DEFAULT 0"));
+
     // Covering index for batch skip-check query (path+size+mtime in one B-tree scan)
     q.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_tracks_path_size_mtime "

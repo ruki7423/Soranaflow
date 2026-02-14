@@ -91,6 +91,18 @@ Track DatabaseContext::trackFromQuery(const QSqlQuery& query) const
         if (t.r128Loudness != 0.0) t.hasR128 = true;
     }
 
+    // Load ReplayGain data if available (migration column — may not exist in old DBs)
+    int rgIdx = query.record().indexOf(QStringLiteral("has_replay_gain"));
+    if (rgIdx >= 0) {
+        t.hasReplayGain = query.value(rgIdx).toInt() != 0;
+        if (t.hasReplayGain) {
+            t.replayGainTrack     = query.value(QStringLiteral("replay_gain_track")).toDouble();
+            t.replayGainAlbum     = query.value(QStringLiteral("replay_gain_album")).toDouble();
+            t.replayGainTrackPeak = query.value(QStringLiteral("replay_gain_track_peak")).toDouble();
+            t.replayGainAlbumPeak = query.value(QStringLiteral("replay_gain_album_peak")).toDouble();
+        }
+    }
+
     // File size/mtime for scan skip
     int fsIdx = query.record().indexOf(QStringLiteral("file_size"));
     if (fsIdx >= 0) t.fileSize = query.value(fsIdx).toLongLong();
