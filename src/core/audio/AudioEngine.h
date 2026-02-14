@@ -21,6 +21,7 @@ class AudioDecoder;
 class DSDDecoder;
 class DSPPipeline;
 class UpsamplerProcessor;
+class VolumeLevelingManager;
 
 class AudioEngine : public QObject {
     // Prevent implicit destructor from being generated in the header
@@ -148,8 +149,7 @@ private:
     std::vector<float> m_decodeBuf;  // Pre-allocated buffer for decoded source frames
 
     // Volume leveling
-    Track m_currentTrack;
-    std::atomic<float> m_levelingGain{1.0f};
+    VolumeLevelingManager* m_levelingManager;
 
     // Headroom management
     std::atomic<float> m_headroomGain{1.0f};

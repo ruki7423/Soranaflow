@@ -1,8 +1,12 @@
 #include "AudioEngine.h"
 #include "AudioDecoder.h"
 #include "DSDDecoder.h"
+#include "SignalPathBuilder.h"
+#include "VolumeLevelingManager.h"
 #include "../dsp/DSPPipeline.h"
 #include "../dsp/UpsamplerProcessor.h"
+#include "../dsp/GainProcessor.h"
+#include "../dsp/EqualizerProcessor.h"
 #include "../dsp/LoudnessAnalyzer.h"
 #include "../Settings.h"
 #include "../library/LibraryDatabase.h"
@@ -108,6 +112,11 @@ AudioEngine::AudioEngine(QObject* parent)
     m_positionTimer = new QTimer(this);
     m_positionTimer->setInterval(50);
     connect(m_positionTimer, &QTimer::timeout, this, &AudioEngine::onPositionTimer);
+
+    // Volume leveling manager
+    m_levelingManager = new VolumeLevelingManager(this);
+    connect(m_levelingManager, &VolumeLevelingManager::gainChanged,
+            this, &AudioEngine::signalPathChanged);
 
     // Forward DSP configuration changes to signal path
     connect(m_dspPipeline.get(), &DSPPipeline::configurationChanged,
@@ -803,10 +812,17 @@ void AudioEngine::applyUpsamplingChange()
     {
         std::lock_guard<std::mutex> lock(m_filePathMutex);
         if (m_state == Stopped || m_currentFilePath.isEmpty()) {
-            emit signalPathChanged();
-            return;
+            // Do NOT emit signalPathChanged() inside the lock —
+            // receivers call getSignalPath() which also locks m_filePathMutex,
+            // causing a same-thread deadlock on the non-recursive std::mutex.
+        } else {
+            path = m_currentFilePath;
         }
-        path = m_currentFilePath;
+    }
+
+    if (path.isEmpty()) {
+        emit signalPathChanged();
+        return;
     }
 
     // Re-load the current track to apply the new upsampling config
@@ -827,35 +843,7 @@ void AudioEngine::applyUpsamplingChange()
 // ── setCurrentTrack (volume leveling) ────────────────────────────────
 void AudioEngine::setCurrentTrack(const Track& track)
 {
-    m_currentTrack = track;
-    updateLevelingGain();
-
-    // Background R128 analysis if no gain data and leveling is enabled
-    if (Settings::instance()->volumeLeveling()
-        && !m_currentTrack.hasReplayGain
-        && !m_currentTrack.hasR128
-        && !m_currentTrack.filePath.isEmpty()) {
-
-        QString path = m_currentTrack.filePath;
-        QString title = m_currentTrack.title;
-        (void)QtConcurrent::run([this, path, title]() {
-            LoudnessResult r = LoudnessAnalyzer::analyze(path);
-            if (r.valid) {
-                QMetaObject::invokeMethod(this, [this, r, path]() {
-                    // Only update if still the same track
-                    if (m_currentTrack.filePath == path) {
-                        m_currentTrack.r128Loudness = r.integratedLoudness;
-                        m_currentTrack.r128Peak = r.truePeak;
-                        m_currentTrack.hasR128 = true;
-                        updateLevelingGain();
-                    }
-                    // Cache in DB
-                    LibraryDatabase::instance()->updateR128Loudness(
-                        path, r.integratedLoudness, r.truePeak);
-                }, Qt::QueuedConnection);
-            }
-        });
-    }
+    m_levelingManager->setCurrentTrack(track);
 }
 
 // ── updateHeadroomGain ──────────────────────────────────────────────
@@ -891,62 +879,13 @@ void AudioEngine::updateHeadroomGain()
 // ── updateLevelingGain ──────────────────────────────────────────────
 void AudioEngine::updateLevelingGain()
 {
-    if (!Settings::instance()->volumeLeveling() || m_currentTrack.filePath.isEmpty()) {
-        m_levelingGain.store(1.0f, std::memory_order_relaxed);
-        emit signalPathChanged();
-        return;
-    }
-
-    double targetLUFS = Settings::instance()->targetLoudness();
-    int mode = Settings::instance()->levelingMode();
-    double gainDB = 0.0;
-
-    if (m_currentTrack.hasReplayGain) {
-        // ReplayGain: value is already a gain adjustment
-        // RG reference = -18 LUFS, adjust to our target
-        double rgGain = (mode == 1 && m_currentTrack.replayGainAlbum != 0.0)
-            ? m_currentTrack.replayGainAlbum
-            : m_currentTrack.replayGainTrack;
-        double rgRef = -18.0;
-        gainDB = rgGain + (targetLUFS - rgRef);
-
-        // Peak limiting
-        double peak = (mode == 1 && m_currentTrack.replayGainAlbumPeak != 1.0)
-            ? m_currentTrack.replayGainAlbumPeak
-            : m_currentTrack.replayGainTrackPeak;
-        double linearGain = std::pow(10.0, gainDB / 20.0);
-        if (peak > 0.0 && peak * linearGain > 1.0) {
-            linearGain = 1.0 / peak;
-            gainDB = 20.0 * std::log10(linearGain);
-        }
-    } else if (m_currentTrack.hasR128 && m_currentTrack.r128Loudness != 0.0) {
-        gainDB = targetLUFS - m_currentTrack.r128Loudness;
-    } else {
-        // No gain data available
-        m_levelingGain.store(1.0f, std::memory_order_relaxed);
-        emit signalPathChanged();
-        return;
-    }
-
-    // Clamp to safe range
-    gainDB = std::max(-12.0, std::min(12.0, gainDB));
-    float linear = static_cast<float>(std::pow(10.0, gainDB / 20.0));
-    m_levelingGain.store(linear, std::memory_order_relaxed);
-
-    qDebug() << "[Volume Leveling]" << m_currentTrack.title
-             << "gain:" << gainDB << "dB linear:" << linear
-             << (m_currentTrack.hasReplayGain ? "ReplayGain" :
-                 m_currentTrack.hasR128 ? "R128" : "None");
-
-    emit signalPathChanged();
+    m_levelingManager->updateGain();
 }
 
 // ── levelingGainDb ──────────────────────────────────────────────────
 float AudioEngine::levelingGainDb() const
 {
-    float linear = m_levelingGain.load(std::memory_order_relaxed);
-    if (linear <= 0.0f || linear == 1.0f) return 0.0f;
-    return 20.0f * std::log10(linear);
+    return m_levelingManager->gainDb();
 }
 
 // ── prepareNextTrack (gapless pre-decode) ────────────────────────────
@@ -1146,7 +1085,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 
             // 4b. Apply volume leveling gain
             {
-                float lg = m_levelingGain.load(std::memory_order_relaxed);
+                float lg = m_levelingManager->gainLinear();
                 if (lg != 1.0f) {
                     int n = outputFrames * channels;
                     for (int i = 0; i < n; ++i) buf[i] *= lg;
@@ -1307,7 +1246,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 
         // Apply volume leveling gain
         if (framesRead > 0 && !dopPassthrough) {
-            float lg = m_levelingGain.load(std::memory_order_relaxed);
+            float lg = m_levelingManager->gainLinear();
             if (lg != 1.0f) {
                 int n = framesRead * channels;
                 for (int i = 0; i < n; ++i) buf[i] *= lg;
@@ -1469,316 +1408,117 @@ void AudioEngine::onPositionTimer()
     emit positionChanged(pos);
 }
 
-// ── getSignalPath ──────────────────────────────────────────────────
-
-static QString channelDescription(int ch) {
-    switch (ch) {
-    case 1:  return QStringLiteral("Mono");
-    case 2:  return QStringLiteral("Stereo");
-    case 3:  return QStringLiteral("3.0");
-    case 4:  return QStringLiteral("4.0");
-    case 6:  return QStringLiteral("5.1");
-    case 8:  return QStringLiteral("7.1");
-    default: return QStringLiteral("%1ch").arg(ch);
-    }
-}
+// ── getSignalPath ────────────────────────────────────────────────────────────
 
 SignalPathInfo AudioEngine::getSignalPath() const
 {
-    SignalPathInfo info;
+    AudioState state;
 
+    // Engine state
     {
         std::lock_guard<std::mutex> lock(m_filePathMutex);
-        if (m_state == Stopped && m_currentFilePath.isEmpty()) {
-            return info;
-        }
+        state.isStopped = (m_state == Stopped);
+        state.hasFilePath = !m_currentFilePath.isEmpty();
     }
 
-    double sr = m_sampleRate.load(std::memory_order_relaxed);
-    int ch = m_channels.load(std::memory_order_relaxed);
+    state.sampleRate = m_sampleRate.load(std::memory_order_relaxed);
+    state.channels = m_channels.load(std::memory_order_relaxed);
+    state.bitPerfect = m_bitPerfect.load(std::memory_order_relaxed);
 
-    // ── 1. Source node ──────────────────────────────────────────────
-    SignalPathNode sourceNode;
-    sourceNode.label = QStringLiteral("Source");
-
-    if (m_usingDSDDecoder) {
-        // DSD source
-        QString dsdRate;
-        if (m_dsdDecoder->isDSD64())       dsdRate = QStringLiteral("DSD64");
-        else if (m_dsdDecoder->isDSD128()) dsdRate = QStringLiteral("DSD128");
-        else if (m_dsdDecoder->isDSD256()) dsdRate = QStringLiteral("DSD256");
-        else if (m_dsdDecoder->isDSD512()) dsdRate = QStringLiteral("DSD512");
-        else dsdRate = QStringLiteral("DSD");
-
-        sourceNode.detail = QStringLiteral("%1 • %2").arg(dsdRate, channelDescription(ch));
-        sourceNode.sublabel = QStringLiteral("%.1f MHz").arg(m_dsdDecoder->dsdSampleRate() / 1000000.0);
-        sourceNode.quality = SignalPathNode::HighRes;
-    } else if (m_decoder->isOpen()) {
-        QString codec = m_decoder->codecName().toUpper();
-        AudioStreamFormat fmt = m_decoder->format();
-
-        // Detect DSD codecs decoded via FFmpeg (PCM conversion mode)
-        bool isDSDCodec = codec.startsWith(QStringLiteral("DSD_"));
-
-        if (isDSDCodec) {
-            // DSD file decoded to PCM via FFmpeg — show native DSD info
-            // Determine DSD type from the PCM output rate (176.4kHz = DSD64)
-            int dsdMultiplier = 64;
-            double dsdNativeRate = 2822400.0;
-            if (fmt.sampleRate >= 352800) {
-                dsdMultiplier = 128; dsdNativeRate = 5644800.0;
-            }
-
-            QString dsdLabel = QStringLiteral("DSD%1").arg(dsdMultiplier);
-            sourceNode.detail = QStringLiteral("%1 • %2").arg(dsdLabel, channelDescription(fmt.channels));
-            sourceNode.sublabel = QStringLiteral("%1 MHz").arg(dsdNativeRate / 1000000.0, 0, 'f', 1);
-            sourceNode.quality = SignalPathNode::HighRes;
-        } else {
-            // Regular PCM codec
-            bool lossless = (codec == QStringLiteral("FLAC") || codec == QStringLiteral("ALAC")
-                          || codec == QStringLiteral("WAV")  || codec == QStringLiteral("PCM_S16LE")
-                          || codec == QStringLiteral("PCM_S24LE") || codec == QStringLiteral("PCM_S32LE")
-                          || codec.startsWith(QStringLiteral("PCM_")));
-
-            if (lossless && (fmt.sampleRate > 44100 || fmt.bitsPerSample > 16)) {
-                sourceNode.quality = SignalPathNode::HighRes;
-            } else if (lossless) {
-                sourceNode.quality = SignalPathNode::Lossless;
-            } else {
-                sourceNode.quality = SignalPathNode::Lossy;
-            }
-
-            // Format codec name for display
-            QString displayCodec = codec;
-            if (codec.startsWith(QStringLiteral("PCM_"))) displayCodec = QStringLiteral("PCM/WAV");
-
-            sourceNode.detail = QStringLiteral("%1 • %2-bit / %3 kHz • %4")
-                .arg(displayCodec)
-                .arg(fmt.bitsPerSample)
-                .arg(fmt.sampleRate / 1000.0, 0, 'g', 4)
-                .arg(channelDescription(fmt.channels));
-        }
-    }
-    info.nodes.append(sourceNode);
-
-    // ── 2. Decoder node ─────────────────────────────────────────────
-    SignalPathNode decoderNode;
-    decoderNode.label = QStringLiteral("Decoder");
-
-    if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()) {
-        decoderNode.detail = QStringLiteral("DoP Passthrough");
-        decoderNode.sublabel = QStringLiteral("DSD over PCM at %1 kHz").arg(sr / 1000.0, 0, 'g', 4);
-        decoderNode.quality = SignalPathNode::HighRes;
-    } else if (m_usingDSDDecoder) {
-        decoderNode.detail = QStringLiteral("DSD to PCM");
-        decoderNode.quality = SignalPathNode::Lossless;
-    } else {
-        bool lossless = false;
-        bool isDSDCodec = false;
-        if (m_decoder->isOpen()) {
-            QString codec = m_decoder->codecName().toUpper();
-            isDSDCodec = codec.startsWith(QStringLiteral("DSD_"));
-            lossless = isDSDCodec
-                    || codec == QStringLiteral("FLAC") || codec == QStringLiteral("ALAC")
-                    || codec == QStringLiteral("WAV") || codec.startsWith(QStringLiteral("PCM_"));
-        }
-        if (isDSDCodec) {
-            AudioStreamFormat fmt = m_decoder->format();
-            QString dsdMode = Settings::instance()->dsdPlaybackMode();
-            if (dsdMode == QStringLiteral("dop")) {
-                decoderNode.detail = QStringLiteral("DSD to PCM (DoP Fallback)");
-                decoderNode.sublabel = QStringLiteral("Device rate insufficient · Output at %1 kHz")
-                    .arg(fmt.sampleRate / 1000.0, 0, 'f', 1);
-            } else {
-                decoderNode.detail = QStringLiteral("DSD to PCM Conversion");
-                decoderNode.sublabel = QStringLiteral("Output at %1 kHz")
-                    .arg(fmt.sampleRate / 1000.0, 0, 'f', 1);
-            }
-            decoderNode.quality = SignalPathNode::Enhanced;
-        } else {
-            decoderNode.detail = lossless ? QStringLiteral("Lossless Decode")
-                                           : QStringLiteral("Lossy Decode");
-            decoderNode.quality = lossless ? SignalPathNode::Lossless : SignalPathNode::Lossy;
-        }
-    }
-    info.nodes.append(decoderNode);
-
-    // ── 3. Upsampler node ───────────────────────────────────────────
-    if (m_upsampler && m_upsampler->isActive()
-        && !m_bitPerfect.load(std::memory_order_relaxed)
-        && !m_usingDSDDecoder) {
-        SignalPathNode upsampleNode;
-        upsampleNode.label = QStringLiteral("Upsampling");
-        upsampleNode.detail = QStringLiteral("SoX Resampler (libsoxr)");
-        upsampleNode.sublabel = m_upsampler->getDescription();
-        upsampleNode.quality = SignalPathNode::Enhanced;
-        info.nodes.append(upsampleNode);
+    // DSD decoder
+    state.usingDSDDecoder = m_usingDSDDecoder.load(std::memory_order_relaxed);
+    if (state.usingDSDDecoder && m_dsdDecoder) {
+        state.isDSD64 = m_dsdDecoder->isDSD64();
+        state.isDSD128 = m_dsdDecoder->isDSD128();
+        state.isDSD256 = m_dsdDecoder->isDSD256();
+        state.isDSD512 = m_dsdDecoder->isDSD512();
+        state.dsdSampleRate = m_dsdDecoder->dsdSampleRate();
+        state.isDoPMode = m_dsdDecoder->isDoPMode();
     }
 
-    // ── 3b. Headroom node ────────────────────────────────────────────
-    {
-        float hr = m_headroomGain.load(std::memory_order_relaxed);
-        auto hrMode = Settings::instance()->headroomMode();
-        if (hrMode != Settings::HeadroomMode::Off && hr != 1.0f) {
-            SignalPathNode hrNode;
-            hrNode.label = QStringLiteral("Headroom");
-            double db = 20.0 * std::log10(static_cast<double>(hr));
-            QString modeStr = (hrMode == Settings::HeadroomMode::Auto)
-                ? QStringLiteral("Auto") : QStringLiteral("Manual");
-            hrNode.sublabel = modeStr + QStringLiteral(" · ")
-                + QString::number(db, 'f', 1) + QStringLiteral(" dB");
-            hrNode.quality = SignalPathNode::Enhanced;
-            info.nodes.append(hrNode);
-        }
+    // PCM decoder
+    if (m_decoder && m_decoder->isOpen()) {
+        state.decoderOpen = true;
+        state.codecName = m_decoder->codecName();
+        state.decoderFormat = m_decoder->format();
     }
 
-    // ── 3c. Crossfeed node ────────────────────────────────────────────
-    if (m_crossfeed.isEnabled() && ch == 2) {
-        SignalPathNode cfNode;
-        cfNode.label = QStringLiteral("Crossfeed");
-        const char* levels[] = {"Light", "Medium", "Strong"};
-        int lvl = static_cast<int>(m_crossfeed.level());
-        cfNode.sublabel = QStringLiteral("Headphone · %1").arg(QLatin1String(levels[lvl]));
-        cfNode.quality = SignalPathNode::Enhanced;
-        info.nodes.append(cfNode);
+    // Upsampler
+    if (m_upsampler && m_upsampler->isActive()) {
+        state.upsamplerActive = true;
+        state.upsamplerDescription = m_upsampler->getDescription();
+        state.upsamplerOutputRate = m_upsampler->outputSampleRate();
     }
 
-    // ── 3d. Convolution node ────────────────────────────────────────────
-    if (m_convolution.isEnabled() && m_convolution.hasIR()) {
-        SignalPathNode convNode;
-        convNode.label = QStringLiteral("Convolution");
-        std::string irPath = m_convolution.irFilePath();
-        QString irName = QString::fromStdString(irPath);
-        int lastSlash = irName.lastIndexOf(QLatin1Char('/'));
-        if (lastSlash >= 0) irName = irName.mid(lastSlash + 1);
-        convNode.sublabel = QStringLiteral("Room Correction · ") + irName;
-        convNode.quality = SignalPathNode::Enhanced;
-        info.nodes.append(convNode);
+    // Headroom
+    state.headroomGain = m_headroomGain.load(std::memory_order_relaxed);
+    auto hrMode = Settings::instance()->headroomMode();
+    if (hrMode == Settings::HeadroomMode::Auto)
+        state.headroomMode = AudioState::HRAuto;
+    else if (hrMode == Settings::HeadroomMode::Manual)
+        state.headroomMode = AudioState::HRManual;
+    else
+        state.headroomMode = AudioState::HROff;
+
+    // Crossfeed
+    state.crossfeedEnabled = m_crossfeed.isEnabled();
+    state.crossfeedLevel = static_cast<int>(m_crossfeed.level());
+
+    // Convolution
+    state.convolutionEnabled = m_convolution.isEnabled();
+    state.convolutionHasIR = m_convolution.hasIR();
+    if (state.convolutionHasIR) {
+        state.convolutionIRPath = QString::fromStdString(m_convolution.irFilePath());
     }
 
-    // ── 3e. HRTF node ────────────────────────────────────────────────
-    if (m_hrtf.isEnabled() && m_hrtf.isLoaded() && ch == 2) {
-        SignalPathNode hrtfNode;
-        hrtfNode.label = QStringLiteral("HRTF");
-        QString sofaName = m_hrtf.sofaPath();
-        int lastSlash = sofaName.lastIndexOf(QLatin1Char('/'));
-        if (lastSlash >= 0) sofaName = sofaName.mid(lastSlash + 1);
-        hrtfNode.sublabel = QStringLiteral("Binaural · %1° · %2")
-            .arg(static_cast<int>(m_hrtf.speakerAngle()))
-            .arg(sofaName);
-        hrtfNode.quality = SignalPathNode::Enhanced;
-        info.nodes.append(hrtfNode);
-    }
+    // HRTF
+    state.hrtfEnabled = m_hrtf.isEnabled();
+    state.hrtfLoaded = m_hrtf.isLoaded();
+    state.hrtfSofaPath = m_hrtf.sofaPath();
+    state.hrtfSpeakerAngle = m_hrtf.speakerAngle();
 
-    // ── 4. DSP nodes (per active processor) ─────────────────────────
-    bool hasDSP = false;
-    if (!m_bitPerfect.load(std::memory_order_relaxed) && m_dspPipeline->isEnabled()) {
-        // Gain
+    // DSP pipeline
+    if (m_dspPipeline) {
+        state.dspEnabled = m_dspPipeline->isEnabled();
         auto* gain = m_dspPipeline->gainProcessor();
-        if (gain && gain->isEnabled() && std::abs(gain->gainDb()) > 0.01f) {
-            SignalPathNode gainNode;
-            gainNode.label = QStringLiteral("DSP");
-            gainNode.detail = QStringLiteral("Preamp/Gain: %1%2 dB")
-                .arg(gain->gainDb() > 0 ? QStringLiteral("+") : QString())
-                .arg(gain->gainDb(), 0, 'f', 1);
-            gainNode.quality = SignalPathNode::Enhanced;
-            info.nodes.append(gainNode);
-            hasDSP = true;
+        if (gain) {
+            state.gainEnabled = gain->isEnabled();
+            state.gainDb = gain->gainDb();
         }
-
-        // EQ
         auto* eq = m_dspPipeline->equalizerProcessor();
-        if (eq && eq->isEnabled()) {
-            SignalPathNode eqNode;
-            eqNode.label = QStringLiteral("DSP");
-            eqNode.detail = QStringLiteral("Parametric Equalizer");
-            eqNode.quality = SignalPathNode::Enhanced;
-            info.nodes.append(eqNode);
-            hasDSP = true;
+        if (eq) {
+            state.eqEnabled = eq->isEnabled();
         }
-
-        // Plugin processors
         for (int i = 0; i < m_dspPipeline->processorCount(); ++i) {
             auto* proc = m_dspPipeline->processor(i);
-            if (proc && proc->isEnabled()) {
-                SignalPathNode pluginNode;
-                pluginNode.label = QStringLiteral("DSP");
-                pluginNode.detail = QString::fromStdString(proc->getName());
-                pluginNode.quality = SignalPathNode::Enhanced;
-                info.nodes.append(pluginNode);
-                hasDSP = true;
+            if (proc) {
+                AudioState::PluginInfo pi;
+                pi.name = QString::fromStdString(proc->getName());
+                pi.enabled = proc->isEnabled();
+                state.plugins.append(pi);
             }
         }
     }
 
-    // ── 4b. Volume Leveling node ───────────────────────────────────
-    float lg = m_levelingGain.load(std::memory_order_relaxed);
-    if (Settings::instance()->volumeLeveling() && lg != 1.0f) {
-        SignalPathNode levelNode;
-        levelNode.label = QStringLiteral("Volume Leveling");
-        double db = 20.0 * std::log10(static_cast<double>(lg));
-        QString src = m_currentTrack.hasReplayGain ? QStringLiteral("ReplayGain")
-                    : m_currentTrack.hasR128 ? QStringLiteral("R128")
-                    : QStringLiteral("Analyzing...");
-        QString gainStr = (db >= 0 ? QStringLiteral("+") : QString())
-                        + QString::number(db, 'f', 1) + QStringLiteral(" dB");
-        levelNode.detail = src;
-        levelNode.sublabel = gainStr;
-        levelNode.quality = SignalPathNode::Enhanced;
-        info.nodes.append(levelNode);
-        hasDSP = true;
+    // Volume leveling
+    state.levelingGain = m_levelingManager->gainLinear();
+    state.volumeLevelingEnabled = Settings::instance()->volumeLeveling();
+    state.hasReplayGain = m_levelingManager->currentTrack().hasReplayGain;
+    state.hasR128 = m_levelingManager->currentTrack().hasR128;
+
+    // Output
+    if (m_output) {
+        state.outputDeviceName = QString::fromStdString(m_output->deviceName());
+        state.outputCurrentRate = m_output->currentSampleRate();
+        state.outputNominalRate = m_output->deviceNominalSampleRate();
+        state.outputBuiltIn = m_output->isBuiltInOutput();
+        state.outputExclusive = m_output->isExclusiveMode();
     }
 
-    // ── 5. Output node ──────────────────────────────────────────────
-    SignalPathNode outputNode;
-    outputNode.label = QStringLiteral("Output");
+    // Settings
+    state.dsdPlaybackMode = Settings::instance()->dsdPlaybackMode();
 
-    std::string devName = m_output->deviceName();
-    double asbdRate = m_output->currentSampleRate();
-    double nominalRate = m_output->deviceNominalSampleRate();
-    double displayRate = (nominalRate > 0) ? nominalRate : asbdRate;
-    bool builtIn = m_output->isBuiltInOutput();
-    bool bitPerfect = m_bitPerfect.load(std::memory_order_relaxed);
-
-    outputNode.detail = QStringLiteral("%1 • %2 kHz")
-        .arg(QString::fromStdString(devName))
-        .arg(displayRate > 0 ? displayRate / 1000.0 : sr / 1000.0, 0, 'g', 4);
-
-    // The rate actually fed to CoreAudio — upsampler output if active, else source
-    double rateToOutput = sr;
-    if (m_upsampler && m_upsampler->isActive()
-        && !m_bitPerfect.load(std::memory_order_relaxed)
-        && !m_usingDSDDecoder) {
-        rateToOutput = m_upsampler->outputSampleRate();
-    }
-
-    bool ratesMatch = (nominalRate > 0)
-        ? (std::abs(nominalRate - rateToOutput) < 1.0)
-        : true;
-
-    bool exclusive = m_output->isExclusiveMode();
-
-    if (!hasDSP && ratesMatch && bitPerfect) {
-        outputNode.sublabel = QStringLiteral("Bit-Perfect");
-        outputNode.quality = exclusive ? SignalPathNode::BitPerfect : decoderNode.quality;
-    } else if (builtIn && !bitPerfect && !ratesMatch) {
-        outputNode.sublabel = QStringLiteral("Resampled from %1 kHz")
-            .arg(rateToOutput / 1000.0, 0, 'f', 1);
-        outputNode.quality = SignalPathNode::Enhanced;
-    } else if (hasDSP) {
-        outputNode.quality = SignalPathNode::Enhanced;
-    } else {
-        outputNode.quality = decoderNode.quality;
-    }
-
-    if (exclusive) {
-        outputNode.sublabel += (outputNode.sublabel.isEmpty() ? QString() : QStringLiteral(" \u2022 "));
-        outputNode.sublabel += QStringLiteral("Exclusive Mode");
-    }
-
-    info.nodes.append(outputNode);
-
-    return info;
+    return SignalPathBuilder::build(state);
 }
 
 AudioFormat AudioEngine::actualDsdFormat() const
