@@ -1545,6 +1545,20 @@ QString LibraryDatabase::artistMbidForArtist(const QString& artistId) const
     return {};
 }
 
+QString LibraryDatabase::firstTrackPathForAlbum(const QString& albumId) const
+{
+    QMutexLocker lock(&m_readMutex);
+    QSqlQuery q(m_readDb);
+    q.prepare(QStringLiteral(
+        "SELECT file_path FROM tracks "
+        "WHERE album_id = ? AND file_path IS NOT NULL AND file_path != '' "
+        "LIMIT 1"));
+    q.addBindValue(albumId);
+    if (q.exec() && q.next())
+        return q.value(0).toString();
+    return {};
+}
+
 // ── Metadata Backup / Undo ────────────────────────────────────────────
 
 void LibraryDatabase::backupTrackMetadata(const QString& trackId)

@@ -21,6 +21,7 @@
 #include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
 #include "../../metadata/MetadataService.h"
+#include "../../metadata/CoverArtProvider.h"
 #include "../../metadata/FanartTvProvider.h"
 #include "../../metadata/MusicBrainzProvider.h"
 #include "../dialogs/MetadataSearchDialog.h"
@@ -550,12 +551,31 @@ QPixmap ArtistDetailView::findAlbumCoverArt(const Album& album)
         }
     }
 
+    // Tier 1.5: cached Cover Art Archive image via MBID
+    {
+        QString mbid = LibraryDatabase::instance()->releaseGroupMbidForAlbum(album.id);
+        if (!mbid.isEmpty()) {
+            QString cachedPath = CoverArtProvider::instance()->getCachedArtPath(mbid);
+            if (!cachedPath.isEmpty() && QFile::exists(cachedPath)) {
+                pix.load(cachedPath);
+                if (!pix.isNull()) return pix;
+            }
+        }
+    }
+
+    // Find first track path from album.tracks
     QString firstTrackPath;
     for (const auto& t : album.tracks) {
         if (!t.filePath.isEmpty()) {
             firstTrackPath = t.filePath;
             break;
         }
+    }
+
+    // Fallback: albums from artistById() have empty tracks vectors.
+    // Query DB for one track file path belonging to this album.
+    if (firstTrackPath.isEmpty() && !album.id.isEmpty()) {
+        firstTrackPath = LibraryDatabase::instance()->firstTrackPathForAlbum(album.id);
     }
 
     // Tier 2: folder image files

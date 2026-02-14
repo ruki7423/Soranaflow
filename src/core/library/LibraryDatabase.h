@@ -85,6 +85,9 @@ public:
     QString releaseGroupMbidForAlbum(const QString& albumId) const;
     QString artistMbidForArtist(const QString& artistId) const;
 
+    // ── Cover art helpers ─────────────────────────────────────────────
+    QString firstTrackPathForAlbum(const QString& albumId) const;
+
     // ── Metadata backup / undo ──────────────────────────────────────
     void backupTrackMetadata(const QString& trackId);
     bool undoLastMetadataChange(const QString& trackId);
