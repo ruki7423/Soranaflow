@@ -745,6 +745,17 @@ void Settings::setHrtfSpeakerAngle(float degrees)
 }
 
 // ── Autoplay / Radio ────────────────────────────────────────────────
+// ── Metadata ────────────────────────────────────────────────────────
+bool Settings::internetMetadataEnabled() const
+{
+    return m_settings.value(QStringLiteral("metadata/internet_enabled"), true).toBool();
+}
+
+void Settings::setInternetMetadataEnabled(bool enabled)
+{
+    m_settings.setValue(QStringLiteral("metadata/internet_enabled"), enabled);
+}
+
 bool Settings::autoplayEnabled() const
 {
     return m_settings.value(QStringLiteral("audio/autoplay_enabled"), false).toBool();

@@ -1,4 +1,5 @@
 #include "LyricsProvider.h"
+#include "../Settings.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -83,8 +84,8 @@ void LyricsProvider::fetchLyrics(const QString& filePath,
         }
     }
 
-    // 3. Try LRCLIB online API
-    if (!title.isEmpty()) {
+    // 3. Try LRCLIB online API (if internet metadata is enabled)
+    if (!title.isEmpty() && Settings::instance()->internetMetadataEnabled()) {
         fetchFromLrclib(title, artist, album, durationSec);
     } else {
         emit lyricsNotFound();

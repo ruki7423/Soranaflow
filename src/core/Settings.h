@@ -176,6 +176,13 @@ public:
     float hrtfSpeakerAngle() const;
     void setHrtfSpeakerAngle(float degrees);
 
+    // ── Metadata ─────────────────────────────────────────────────────
+    // Master toggle to disable all automatic internet metadata lookups
+    // (MusicBrainz, Last.fm, Fanart.tv, LRCLIB, Cover Art Archive)
+    // Does NOT affect manual operations (Fix Metadata, Identify by Audio)
+    bool internetMetadataEnabled() const;
+    void setInternetMetadataEnabled(bool enabled);
+
     // ── Autoplay / Radio ──────────────────────────────────────────────
     bool autoplayEnabled() const;
     void setAutoplayEnabled(bool enabled);

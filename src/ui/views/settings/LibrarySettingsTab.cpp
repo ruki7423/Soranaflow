@@ -282,6 +282,21 @@ LibrarySettingsTab::LibrarySettingsTab(QWidget* parent)
     });
     layout->addWidget(cleanupBtn);
 
+    // ── Section: Metadata ──────────────────────────────────────────────
+    layout->addWidget(SettingsUtils::createSectionHeader(QStringLiteral("Metadata")));
+
+    auto* metaSwitch = new StyledSwitch();
+    metaSwitch->setChecked(Settings::instance()->internetMetadataEnabled());
+    connect(metaSwitch, &StyledSwitch::toggled, this, [](bool checked) {
+        Settings::instance()->setInternetMetadataEnabled(checked);
+    });
+    layout->addWidget(SettingsUtils::createSettingRow(
+        QStringLiteral("Internet Metadata Lookup"),
+        QStringLiteral("Automatically fetch artist images, album art, lyrics, and biographies "
+                       "from online services. Disabling this prevents all automatic network requests. "
+                       "Manual operations (Fix Metadata, Identify by Audio) are not affected."),
+        metaSwitch));
+
     // ── Section: Library Rollback ────────────────────────────────────
     layout->addWidget(SettingsUtils::createSectionHeader(QStringLiteral("Library Rollback")));
 

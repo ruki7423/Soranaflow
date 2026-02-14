@@ -17,6 +17,7 @@
 #include <QJsonObject>
 #include <QUrlQuery>
 #include <QTimer>
+#include "../../core/Settings.h"
 #include "../../core/ThemeManager.h"
 #include "../../core/library/LibraryDatabase.h"
 #include "../services/CoverArtService.h"
@@ -291,22 +292,24 @@ void ArtistDetailView::updateDisplay()
     // ── Artist image ────────────────────────────────────────────────────
     loadArtistImage();
 
-    // ── Fanart.tv + biography fetch ─────────────────────────────────────
-    m_artistMbid = LibraryDatabase::instance()->artistMbidForArtist(m_artist.id);
-    if (!m_artistMbid.isEmpty()) {
-        fetchFanartImages();
-        fetchBiography();
-    } else {
-        // Search MusicBrainz for MBID
-        connect(MusicBrainzProvider::instance(), &MusicBrainzProvider::artistFound,
-                this, [this](const QString& mbid, const QJsonObject&) {
-            if (!mbid.isEmpty()) {
-                m_artistMbid = mbid;
-                fetchFanartImages();
-                fetchBiography();
-            }
-        }, Qt::SingleShotConnection);
-        MusicBrainzProvider::instance()->searchArtist(m_artist.name);
+    // ── Fanart.tv + biography fetch (requires internet metadata) ───────
+    if (Settings::instance()->internetMetadataEnabled()) {
+        m_artistMbid = LibraryDatabase::instance()->artistMbidForArtist(m_artist.id);
+        if (!m_artistMbid.isEmpty()) {
+            fetchFanartImages();
+            fetchBiography();
+        } else {
+            // Search MusicBrainz for MBID
+            connect(MusicBrainzProvider::instance(), &MusicBrainzProvider::artistFound,
+                    this, [this](const QString& mbid, const QJsonObject&) {
+                if (!mbid.isEmpty()) {
+                    m_artistMbid = mbid;
+                    fetchFanartImages();
+                    fetchBiography();
+                }
+            }, Qt::SingleShotConnection);
+            MusicBrainzProvider::instance()->searchArtist(m_artist.name);
+        }
     }
 
     // ── Name ──────────────────────────────────────────────────────────
