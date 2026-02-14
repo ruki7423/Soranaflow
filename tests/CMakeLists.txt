@@ -56,5 +56,10 @@ add_sorana_test(
     NAME SignalPathInfo
     SOURCES
         tst_SignalPathInfo.cpp
-        # SignalPathInfo is header-only, but MusicData needed for Track
+)
+
+add_sorana_test(
+    NAME ServiceLocator
+    SOURCES
+        tst_ServiceLocator.cpp
 )

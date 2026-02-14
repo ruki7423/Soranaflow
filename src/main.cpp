@@ -35,6 +35,7 @@ static void shutdownCrashHandler(int sig)
 #include "core/ThemeManager.h"
 #include "core/PlaybackState.h"
 #include "core/Settings.h"
+#include "core/ServiceLocator.h"
 #include "core/audio/AudioEngine.h"
 #include "core/audio/AudioDeviceManager.h"
 #include "core/dsp/DSPPipeline.h"
@@ -249,6 +250,17 @@ int main(int argc, char* argv[]) {
     PlaybackState::instance();
     PlaylistManager::instance();
 
+    // Register services for dependency injection
+    ServiceLocator::provide<Settings>(Settings::instance());
+    ServiceLocator::provide<ThemeManager>(ThemeManager::instance());
+    ServiceLocator::provide<LibraryDatabase>(LibraryDatabase::instance());
+    ServiceLocator::provide<MusicDataProvider>(MusicDataProvider::instance());
+    ServiceLocator::provide<PlaybackState>(PlaybackState::instance());
+    ServiceLocator::provide<PlaylistManager>(PlaylistManager::instance());
+#ifdef Q_OS_MACOS
+    ServiceLocator::provide<AppleMusicManager>(AppleMusicManager::instance());
+#endif
+
     // Hide-on-close: don't quit when last window closes (background playback)
     QApplication::setQuitOnLastWindowClosed(false);
 
@@ -267,6 +279,8 @@ int main(int argc, char* argv[]) {
     QTimer::singleShot(0, [&window]() {
         AudioEngine::instance();
         AudioDeviceManager::instance()->startMonitoring();
+        ServiceLocator::provide<AudioEngine>(AudioEngine::instance());
+        ServiceLocator::provide<AudioDeviceManager>(AudioDeviceManager::instance());
 
         // Restore playback settings
         auto* settings = Settings::instance();
