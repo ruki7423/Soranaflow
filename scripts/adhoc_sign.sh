@@ -9,6 +9,8 @@ if [ -z "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENTITLEMENTS="$SCRIPT_DIR/../packaging/macos/SoranaFlow.entitlements"
 FW="$APP_BUNDLE/Contents/Frameworks"
 
 # ── Phase 1: Sign dylibs inside frameworks ──────────────────────────
@@ -63,4 +65,9 @@ find "$APP_BUNDLE/Contents/PlugIns" -name '*.dylib' -type f 2>/dev/null | while 
 done
 
 # ── Phase 7: Sign main app bundle last ───────────────────────────────
-codesign --force --sign - "$APP_BUNDLE"
+# Include entitlements to allow loading unsigned VST plugins (disable-library-validation)
+if [ -f "$ENTITLEMENTS" ]; then
+    codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
+else
+    codesign --force --sign - "$APP_BUNDLE"
+fi
