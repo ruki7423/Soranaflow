@@ -6,6 +6,8 @@
 
 class AudioEngine;
 class AutoplayManager;
+class QueueManager;
+class QueuePersistence;
 
 class PlaybackState : public QObject {
     Q_OBJECT
@@ -26,13 +28,15 @@ public:
     bool isPlaying() const { return m_playing; }
     int currentTime() const { return m_currentTime; }
     int volume() const { return m_volume; }
-    bool shuffleEnabled() const { return m_shuffle; }
-    RepeatMode repeatMode() const { return m_repeat; }
+    bool shuffleEnabled() const;
+    RepeatMode repeatMode() const;
     Track currentTrack() const { return m_currentTrack; }
-    QVector<Track> queue() const { return m_queue; }
+    QVector<Track> queue() const;
     QVector<Track> displayQueue() const;
     Track peekNextTrack() const;
-    int queueIndex() const { return m_queueIndex; }
+    int queueIndex() const;
+
+    QueueManager* queueManager() const { return m_queueMgr; }
 
 public slots:
     void playPause();
@@ -72,26 +76,18 @@ private:
     void connectToAudioEngine();
     void connectToMusicKitPlayer();
     void playNextTrack();
-    void rebuildShuffleOrder();
     void emitQueueChangedDebounced();
-    void scheduleSave();
-    void doSave();
     void scheduleGaplessPrepare();
     void onGaplessTransition();
 
+    QueueManager* m_queueMgr = nullptr;
+    QueuePersistence* m_queuePersist = nullptr;
     QTimer* m_queueChangeDebounce = nullptr;
-    QTimer* m_saveTimer = nullptr;
     QTimer* m_volumeSaveTimer = nullptr;
-    bool m_restoring = false;
     bool m_playing = false;
     int m_currentTime = 0;
     int m_volume = 75;
-    bool m_shuffle = false;
-    RepeatMode m_repeat = Off;
     Track m_currentTrack;
-    QVector<Track> m_queue;
-    int m_queueIndex = -1;
-    QVector<int> m_shuffledIndices;  // shuffled order of indices after current
     PlaybackSource m_currentSource = Local;
     AutoplayManager* m_autoplay = nullptr;
     bool m_autoplayActive = false;

@@ -85,6 +85,10 @@ set(CORE_SOURCES
     src/core/ThemeManager.cpp
     src/core/PlaybackState.h
     src/core/PlaybackState.cpp
+    src/core/QueueManager.h
+    src/core/QueueManager.cpp
+    src/core/QueuePersistence.h
+    src/core/QueuePersistence.cpp
     src/core/Settings.h
     src/core/Settings.cpp
     src/core/CrashHandler.h

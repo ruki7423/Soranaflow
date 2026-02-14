@@ -1,19 +1,13 @@
 #include "PlaybackState.h"
+#include "QueueManager.h"
+#include "QueuePersistence.h"
 #include "audio/AudioEngine.h"
 #include "Settings.h"
 #include "../apple/MusicKitPlayer.h"
 #include "../radio/AutoplayManager.h"
-// AudioProcessTap.h — not included; ProcessTap disabled for AM playback
-// (macOS 26.2 global tap causes echo/silence). Re-enable when fixed.
 
 #include <QDebug>
-#include <QElapsedTimer>
-#include <QMutex>
-#include <QRandomGenerator>
-#include <QSettings>
 #include <QTimer>
-#include <QtConcurrent>
-#include <algorithm>
 
 // ── Singleton ───────────────────────────────────────────────────────
 PlaybackState* PlaybackState::instance()
@@ -26,6 +20,9 @@ PlaybackState* PlaybackState::instance()
 PlaybackState::PlaybackState(QObject* parent)
     : QObject(parent)
 {
+    m_queueMgr = new QueueManager();
+    m_queuePersist = new QueuePersistence(m_queueMgr, this);
+
     m_queueChangeDebounce = new QTimer(this);
     m_queueChangeDebounce->setSingleShot(true);
     m_queueChangeDebounce->setInterval(50);
@@ -35,12 +32,6 @@ PlaybackState::PlaybackState(QObject* parent)
 
     connectToAudioEngine();
     connectToMusicKitPlayer();
-
-    // Debounced async queue save — coalesces multiple changes into one write
-    m_saveTimer = new QTimer(this);
-    m_saveTimer->setSingleShot(true);
-    m_saveTimer->setInterval(500);
-    connect(m_saveTimer, &QTimer::timeout, this, &PlaybackState::doSave);
 
     // Debounced volume save — avoids QSettings write on every slider tick
     m_volumeSaveTimer = new QTimer(this);
@@ -133,9 +124,6 @@ void PlaybackState::connectToMusicKitPlayer()
         if (playing != m_playing) {
             m_playing = playing;
             emit playStateChanged(m_playing);
-            // ProcessTap disabled for AM playback (macOS 26.2 global tap causes
-            // echo/mute issues). AM plays directly through system audio.
-            // DSP not applied to AM. Re-enable when per-process tap is restored.
         }
     });
 
@@ -144,6 +132,38 @@ void PlaybackState::connectToMusicKitPlayer()
         qDebug() << "[PlaybackState] Apple Music track ended — advancing";
         playNextTrack();
     });
+}
+
+// ── Delegated accessors ─────────────────────────────────────────────
+
+bool PlaybackState::shuffleEnabled() const
+{
+    return m_queueMgr->shuffleEnabled();
+}
+
+PlaybackState::RepeatMode PlaybackState::repeatMode() const
+{
+    return static_cast<RepeatMode>(m_queueMgr->repeatMode());
+}
+
+QVector<Track> PlaybackState::queue() const
+{
+    return m_queueMgr->queue();
+}
+
+QVector<Track> PlaybackState::displayQueue() const
+{
+    return m_queueMgr->displayQueue();
+}
+
+Track PlaybackState::peekNextTrack() const
+{
+    return m_queueMgr->peekNextTrack();
+}
+
+int PlaybackState::queueIndex() const
+{
+    return m_queueMgr->currentIndex();
 }
 
 // ── playPause ───────────────────────────────────────────────────────
@@ -182,7 +202,7 @@ void PlaybackState::playPause()
 // ── next ────────────────────────────────────────────────────────────
 void PlaybackState::next()
 {
-    if (m_queue.isEmpty())
+    if (m_queueMgr->isEmpty())
         return;
 
     playNextTrack();
@@ -191,7 +211,7 @@ void PlaybackState::next()
 // ── previous ────────────────────────────────────────────────────────
 void PlaybackState::previous()
 {
-    if (m_queue.isEmpty())
+    if (m_queueMgr->isEmpty())
         return;
 
     // If more than 3 seconds in, restart the current track
@@ -201,24 +221,17 @@ void PlaybackState::previous()
     }
 
     // Otherwise go to the previous track
-    if (m_queueIndex > 0) {
-        m_queueIndex--;
-    } else if (m_repeat == All) {
-        m_queueIndex = m_queue.size() - 1;
+    if (m_queueMgr->retreat()) {
+        m_currentTrack = m_queueMgr->currentTrack();
+        m_currentTime = 0;
+        emit timeChanged(m_currentTime);
+        emitQueueChangedDebounced();
+        emit trackChanged(m_currentTrack);
+        playTrack(m_currentTrack);
     } else {
         // Already at the first track — just restart it
         seek(0);
-        return;
     }
-
-    m_currentTrack = m_queue.at(m_queueIndex);
-    m_currentTime = 0;
-    emit timeChanged(m_currentTime);
-    emitQueueChangedDebounced();
-    emit trackChanged(m_currentTrack);
-
-    // Use playTrack() for proper source switching (Local ↔ Apple Music)
-    playTrack(m_currentTrack);
 }
 
 // ── seek ────────────────────────────────────────────────────────────
@@ -251,31 +264,11 @@ void PlaybackState::setVolume(int vol)
 // ── toggleShuffle ───────────────────────────────────────────────────
 void PlaybackState::toggleShuffle()
 {
-    m_shuffle = !m_shuffle;
-    Settings::instance()->setShuffleEnabled(m_shuffle);
-    if (m_shuffle) {
-        rebuildShuffleOrder();
-    } else {
-        m_shuffledIndices.clear();
-    }
-    emit shuffleChanged(m_shuffle);
-    scheduleSave();
+    m_queueMgr->toggleShuffle();
+    Settings::instance()->setShuffleEnabled(m_queueMgr->shuffleEnabled());
+    emit shuffleChanged(m_queueMgr->shuffleEnabled());
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
-}
-
-// ── rebuildShuffleOrder ─────────────────────────────────────────────
-void PlaybackState::rebuildShuffleOrder()
-{
-    m_shuffledIndices.clear();
-    for (int i = 0; i < m_queue.size(); ++i) {
-        if (i != m_queueIndex)
-            m_shuffledIndices.append(i);
-    }
-    // Fisher-Yates shuffle
-    for (int i = m_shuffledIndices.size() - 1; i > 0; --i) {
-        int j = QRandomGenerator::global()->bounded(i + 1);
-        std::swap(m_shuffledIndices[i], m_shuffledIndices[j]);
-    }
 }
 
 // ── emitQueueChangedDebounced ───────────────────────────────────────
@@ -284,63 +277,28 @@ void PlaybackState::emitQueueChangedDebounced()
     m_queueChangeDebounce->start();
 }
 
-// ── displayQueue ────────────────────────────────────────────────────
-QVector<Track> PlaybackState::displayQueue() const
-{
-    if (!m_shuffle || m_shuffledIndices.isEmpty())
-        return m_queue;
-
-    // Build display queue: current track first, then shuffled order
-    QVector<Track> result;
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
-        result.append(m_queue.at(m_queueIndex));
-    for (int idx : m_shuffledIndices) {
-        if (idx >= 0 && idx < m_queue.size())
-            result.append(m_queue.at(idx));
-    }
-    return result;
-}
-
 // ── cycleRepeat ─────────────────────────────────────────────────────
 void PlaybackState::cycleRepeat()
 {
-    switch (m_repeat) {
-    case Off:  m_repeat = All; break;
-    case All:  m_repeat = One; break;
-    case One:  m_repeat = Off; break;
-    }
-    Settings::instance()->setRepeatMode(static_cast<int>(m_repeat));
-    emit repeatChanged(m_repeat);
+    m_queueMgr->cycleRepeat();
+    RepeatMode mode = static_cast<RepeatMode>(m_queueMgr->repeatMode());
+    Settings::instance()->setRepeatMode(static_cast<int>(mode));
+    emit repeatChanged(mode);
 }
 
 // ── setCurrentTrackInfo (instant UI update, no audio loading) ───────
 void PlaybackState::setCurrentTrackInfo(const Track& track)
 {
-    // Reset autoplay indicator on manual track selection
-    if (m_autoplayActive) {
+    if (m_autoplayActive)
         m_autoplayActive = false;
-    }
 
     m_currentTrack = track;
     m_currentTime = 0;
 
-    // Try to find the track in the current queue
-    int idx = -1;
-    for (int i = 0; i < m_queue.size(); ++i) {
-        if (m_queue.at(i).id == track.id) {
-            idx = i;
-            break;
-        }
-    }
+    int idx = m_queueMgr->findOrInsertTrack(track);
+    m_queueMgr->setCurrentIndex(idx);
 
-    if (idx >= 0) {
-        m_queueIndex = idx;
-    } else {
-        m_queueIndex = (m_queueIndex >= 0) ? m_queueIndex + 1 : 0;
-        m_queue.insert(m_queueIndex, track);
-    }
-
-    scheduleSave();
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
     emit timeChanged(m_currentTime);
     emit trackChanged(m_currentTrack);
@@ -349,7 +307,6 @@ void PlaybackState::setCurrentTrackInfo(const Track& track)
 // ── playTrack ───────────────────────────────────────────────────────
 void PlaybackState::playTrack(const Track& track)
 {
-    // Update UI state immediately
     setCurrentTrackInfo(track);
 
     if (!m_playing) {
@@ -359,15 +316,10 @@ void PlaybackState::playTrack(const Track& track)
 
     // Determine source: empty filePath with a valid id = Apple Music
     if (track.filePath.isEmpty() && !track.id.isEmpty()) {
-        // Stop local engine if it was playing
         if (m_currentSource == Local) {
             AudioEngine::instance()->stop();
         }
         m_currentSource = AppleMusic;
-
-        // ProcessTap disabled for AM playback — macOS 26.2 global tap causes
-        // echo (CATapUnmuted) or silence (CATapMuted). AM plays directly through
-        // system audio without DSP. Re-enable when per-process tap is restored.
 
         QString songId = track.id;
         QTimer::singleShot(0, this, [songId]() {
@@ -382,7 +334,6 @@ void PlaybackState::playTrack(const Track& track)
     }
     m_currentSource = Local;
 
-    // Defer audio loading so the event loop can process the UI update first
     Track trackCopy = track;
     QTimer::singleShot(0, this, [this, trackCopy]() {
         if (!trackCopy.filePath.isEmpty()) {
@@ -390,229 +341,107 @@ void PlaybackState::playTrack(const Track& track)
             engine->setCurrentTrack(trackCopy);
             engine->load(trackCopy.filePath);
             engine->play();
-
-            // Schedule gapless preparation for the next track
             scheduleGaplessPrepare();
         }
     });
 }
 
-// ── setQueue ────────────────────────────────────────────────────────
+// ── Queue CRUD — delegate to QueueManager ───────────────────────────
+
 void PlaybackState::setQueue(const QVector<Track>& tracks)
 {
-    m_queue = tracks;
-    m_queueIndex = tracks.isEmpty() ? -1 : 0;
-    if (m_shuffle && !tracks.isEmpty()) {
-        rebuildShuffleOrder();
-    }
-    scheduleSave();
+    m_queueMgr->setQueue(tracks);
+    m_queuePersist->scheduleSave();
     emit queueChanged();
-
-    // NOTE: Do NOT call scheduleGaplessPrepare() here.
-    // setQueue() resets m_queueIndex to 0, which makes peekNextTrack()
-    // return the wrong track. The caller (playTrack) handles gapless
-    // preparation after setting the correct queue index.
 }
 
-// ── addToQueue ──────────────────────────────────────────────────────
 void PlaybackState::addToQueue(const Track& track)
 {
-    m_queue.append(track);
-    scheduleSave();
+    m_queueMgr->addToQueue(track);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── addToQueue (multiple) ───────────────────────────────────────────
 void PlaybackState::addToQueue(const QVector<Track>& tracks)
 {
-    m_queue.append(tracks);
-    scheduleSave();
+    m_queueMgr->addToQueue(tracks);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── insertNext ──────────────────────────────────────────────────────
 void PlaybackState::insertNext(const Track& track)
 {
-    int insertPos = m_queueIndex + 1;
-    if (insertPos < 0) insertPos = 0;
-    if (insertPos > m_queue.size()) insertPos = m_queue.size();
-    m_queue.insert(insertPos, track);
-    scheduleSave();
+    m_queueMgr->insertNext(track);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── insertNext (multiple) ───────────────────────────────────────────
 void PlaybackState::insertNext(const QVector<Track>& tracks)
 {
-    int insertPos = m_queueIndex + 1;
-    if (insertPos < 0) insertPos = 0;
-    if (insertPos > m_queue.size()) insertPos = m_queue.size();
-    for (int i = 0; i < tracks.size(); ++i) {
-        m_queue.insert(insertPos + i, tracks[i]);
-    }
-    scheduleSave();
+    m_queueMgr->insertNext(tracks);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── removeFromQueue ─────────────────────────────────────────────────
 void PlaybackState::removeFromQueue(int index)
 {
-    if (index < 0 || index >= m_queue.size())
-        return;
+    bool wasCurrent = (index == m_queueMgr->currentIndex());
+    m_queueMgr->removeFromQueue(index);
 
-    m_queue.removeAt(index);
-
-    // Adjust the current queue index
-    if (m_queue.isEmpty()) {
-        m_queueIndex = -1;
-    } else if (index < m_queueIndex) {
-        m_queueIndex--;
-    } else if (index == m_queueIndex) {
-        // The currently-playing track was removed
-        if (m_queueIndex >= m_queue.size())
-            m_queueIndex = m_queue.size() - 1;
-        if (m_queueIndex >= 0) {
-            m_currentTrack = m_queue.at(m_queueIndex);
-            emit trackChanged(m_currentTrack);
-        }
+    if (wasCurrent && m_queueMgr->currentIndex() >= 0) {
+        m_currentTrack = m_queueMgr->currentTrack();
+        emit trackChanged(m_currentTrack);
     }
 
-    scheduleSave();
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── clearQueue ──────────────────────────────────────────────────────
-void PlaybackState::clearQueue()
-{
-    m_queue.clear();
-    m_queueIndex = -1;
-    scheduleSave();
-    emitQueueChangedDebounced();
-}
-
-// ── clearUpcoming ───────────────────────────────────────────────────
-void PlaybackState::clearUpcoming()
-{
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        // Keep tracks up to and including current
-        m_queue.resize(m_queueIndex + 1);
-    }
-    scheduleSave();
-    emitQueueChangedDebounced();
-}
-
-// ── moveTo ──────────────────────────────────────────────────────────
 void PlaybackState::moveTo(int fromIndex, int toIndex)
 {
-    if (fromIndex < 0 || fromIndex >= m_queue.size()) return;
-    if (toIndex < 0 || toIndex >= m_queue.size()) return;
-    if (fromIndex == toIndex) return;
-
-    Track track = m_queue.takeAt(fromIndex);
-    m_queue.insert(toIndex, track);
-
-    // Adjust m_queueIndex if it was affected
-    if (m_queueIndex == fromIndex) {
-        m_queueIndex = toIndex;
-    } else {
-        if (fromIndex < m_queueIndex && toIndex >= m_queueIndex)
-            m_queueIndex--;
-        else if (fromIndex > m_queueIndex && toIndex <= m_queueIndex)
-            m_queueIndex++;
-    }
-
-    if (m_shuffle) rebuildShuffleOrder();
-    scheduleSave();
+    m_queueMgr->moveTo(fromIndex, toIndex);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
 }
 
-// ── saveQueueToSettings ─────────────────────────────────────────────
+void PlaybackState::clearQueue()
+{
+    m_queueMgr->clearQueue();
+    m_queuePersist->scheduleSave();
+    emitQueueChangedDebounced();
+}
+
+void PlaybackState::clearUpcoming()
+{
+    m_queueMgr->clearUpcoming();
+    m_queuePersist->scheduleSave();
+    emitQueueChangedDebounced();
+}
+
+// ── Persistence — delegate to QueuePersistence ──────────────────────
+
 void PlaybackState::saveQueueToSettings()
 {
-    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
+    m_queuePersist->saveImmediate();
+}
 
-    settings.beginWriteArray(QStringLiteral("queue/tracks"), m_queue.size());
-    for (int i = 0; i < m_queue.size(); ++i) {
-        settings.setArrayIndex(i);
-        const Track& t = m_queue[i];
-        settings.setValue(QStringLiteral("id"), t.id);
-        settings.setValue(QStringLiteral("title"), t.title);
-        settings.setValue(QStringLiteral("artist"), t.artist);
-        settings.setValue(QStringLiteral("album"), t.album);
-        settings.setValue(QStringLiteral("albumId"), t.albumId);
-        settings.setValue(QStringLiteral("duration"), t.duration);
-        settings.setValue(QStringLiteral("filePath"), t.filePath);
-        settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
-        settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
-        settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
-        settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
-        settings.setValue(QStringLiteral("bitrate"), t.bitrate);
-        settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
+void PlaybackState::restoreQueueFromSettings()
+{
+    m_queuePersist->restore();
+
+    // Sync local state with restored queue
+    if (m_queueMgr->currentIndex() >= 0 && m_queueMgr->currentIndex() < m_queueMgr->size()) {
+        m_currentTrack = m_queueMgr->currentTrack();
     }
-    settings.endArray();
 
-    settings.setValue(QStringLiteral("queue/currentIndex"), m_queueIndex);
-    settings.setValue(QStringLiteral("queue/shuffle"), m_shuffle);
-    settings.setValue(QStringLiteral("queue/repeat"), static_cast<int>(m_repeat));
-
-    qDebug() << "[Queue] Saved" << m_queue.size() << "tracks, index:" << m_queueIndex;
+    emit queueChanged();
+    emit shuffleChanged(m_queueMgr->shuffleEnabled());
+    emit repeatChanged(static_cast<RepeatMode>(m_queueMgr->repeatMode()));
+    if (!m_currentTrack.id.isEmpty()) {
+        emit trackChanged(m_currentTrack);
+    }
 }
 
-// ── scheduleSave (debounced — coalesces multiple changes) ───────────
-void PlaybackState::scheduleSave()
-{
-    if (m_restoring) return;
-    m_saveTimer->start();  // restarts the 500ms timer
-}
-
-// ── doSave (async — snapshot on main thread, write on worker) ───────
-void PlaybackState::doSave()
-{
-    // Snapshot queue data (fast — just copies QVector of value types)
-    QVector<Track> snapshot = m_queue;
-    int idx = m_queueIndex;
-    bool shuffle = m_shuffle;
-    int repeat = static_cast<int>(m_repeat);
-
-    (void)QtConcurrent::run([snapshot, idx, shuffle, repeat]() {
-        static QMutex mutex;
-        QMutexLocker lock(&mutex);
-
-        QElapsedTimer timer;
-        timer.start();
-
-        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
-
-        settings.beginWriteArray(QStringLiteral("queue/tracks"), snapshot.size());
-        for (int i = 0; i < snapshot.size(); ++i) {
-            settings.setArrayIndex(i);
-            const Track& t = snapshot[i];
-            settings.setValue(QStringLiteral("id"), t.id);
-            settings.setValue(QStringLiteral("title"), t.title);
-            settings.setValue(QStringLiteral("artist"), t.artist);
-            settings.setValue(QStringLiteral("album"), t.album);
-            settings.setValue(QStringLiteral("albumId"), t.albumId);
-            settings.setValue(QStringLiteral("duration"), t.duration);
-            settings.setValue(QStringLiteral("filePath"), t.filePath);
-            settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
-            settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
-            settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
-            settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
-            settings.setValue(QStringLiteral("bitrate"), t.bitrate);
-            settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
-        }
-        settings.endArray();
-
-        settings.setValue(QStringLiteral("queue/currentIndex"), idx);
-        settings.setValue(QStringLiteral("queue/shuffle"), shuffle);
-        settings.setValue(QStringLiteral("queue/repeat"), repeat);
-
-        qDebug() << "[Queue] Saved" << snapshot.size() << "tracks in"
-                 << timer.elapsed() << "ms (async, index:" << idx << ")";
-    });
-}
-
-// ── flushPendingSaves ───────────────────────────────────────────────
 void PlaybackState::flushPendingSaves()
 {
     if (m_volumeSaveTimer->isActive()) {
@@ -620,78 +449,20 @@ void PlaybackState::flushPendingSaves()
         Settings::instance()->setVolume(m_volume);
         qDebug() << "[Shutdown] Flushed pending volume save:" << m_volume;
     }
-    if (m_saveTimer->isActive()) {
-        m_saveTimer->stop();
-        doSave();
-        qDebug() << "[Shutdown] Flushed pending queue save";
-    }
+    m_queuePersist->flushPending();
 }
 
-// ── restoreQueueFromSettings ────────────────────────────────────────
-void PlaybackState::restoreQueueFromSettings()
-{
-    m_restoring = true;
-
-    QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
-
-    int count = settings.beginReadArray(QStringLiteral("queue/tracks"));
-    QVector<Track> tracks;
-    tracks.reserve(count);
-    for (int i = 0; i < count; ++i) {
-        settings.setArrayIndex(i);
-        Track t;
-        t.id = settings.value(QStringLiteral("id")).toString();
-        t.title = settings.value(QStringLiteral("title")).toString();
-        t.artist = settings.value(QStringLiteral("artist")).toString();
-        t.album = settings.value(QStringLiteral("album")).toString();
-        t.albumId = settings.value(QStringLiteral("albumId")).toString();
-        t.duration = settings.value(QStringLiteral("duration")).toInt();
-        t.filePath = settings.value(QStringLiteral("filePath")).toString();
-        t.trackNumber = settings.value(QStringLiteral("trackNumber")).toInt();
-        t.format = static_cast<AudioFormat>(settings.value(QStringLiteral("format")).toInt());
-        t.sampleRate = settings.value(QStringLiteral("sampleRate")).toString();
-        t.bitDepth = settings.value(QStringLiteral("bitDepth")).toString();
-        t.bitrate = settings.value(QStringLiteral("bitrate")).toString();
-        t.coverUrl = settings.value(QStringLiteral("coverUrl")).toString();
-        tracks.append(t);
-    }
-    settings.endArray();
-
-    m_queue = tracks;
-    m_queueIndex = settings.value(QStringLiteral("queue/currentIndex"), -1).toInt();
-    m_shuffle = settings.value(QStringLiteral("queue/shuffle"), false).toBool();
-    m_repeat = static_cast<RepeatMode>(settings.value(QStringLiteral("queue/repeat"), 0).toInt());
-
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        m_currentTrack = m_queue.at(m_queueIndex);
-    }
-
-    if (m_shuffle && !m_queue.isEmpty()) {
-        rebuildShuffleOrder();
-    }
-
-    qDebug() << "[Queue] Restored" << m_queue.size() << "tracks, index:" << m_queueIndex;
-
-    emit queueChanged();
-    emit shuffleChanged(m_shuffle);
-    emit repeatChanged(m_repeat);
-    if (!m_currentTrack.id.isEmpty()) {
-        emit trackChanged(m_currentTrack);
-    }
-
-    m_restoring = false;
-}
-
-// ── playNextTrack (core next-track logic with repeat/shuffle) ───────
+// ── playNextTrack (core next-track logic) ───────────────────────────
 void PlaybackState::playNextTrack()
 {
-    if (m_queue.isEmpty())
+    if (m_queueMgr->isEmpty())
         return;
 
     auto* engine = AudioEngine::instance();
 
-    // Repeat One — replay the same track
-    if (m_repeat == One) {
+    auto result = m_queueMgr->advance();
+
+    if (result == QueueManager::RepeatOne) {
         m_currentTime = 0;
         emit timeChanged(m_currentTime);
         if (m_currentSource == AppleMusic) {
@@ -707,100 +478,30 @@ void PlaybackState::playNextTrack()
         return;
     }
 
-    // Shuffle — use pre-computed shuffle order
-    if (m_shuffle) {
-        if (m_shuffledIndices.isEmpty()) {
-            rebuildShuffleOrder();
+    if (result == QueueManager::EndOfQueue) {
+        // Try autoplay before stopping
+        if (m_autoplay && m_autoplay->isEnabled()) {
+            m_autoplay->requestNextTrack(m_currentTrack.artist, m_currentTrack.title);
+            return;
         }
-        if (!m_shuffledIndices.isEmpty()) {
-            m_queueIndex = m_shuffledIndices.takeFirst();
-        } else {
-            // Only one track or shuffle exhausted
-            if (m_repeat == All) {
-                rebuildShuffleOrder();
-                if (!m_shuffledIndices.isEmpty())
-                    m_queueIndex = m_shuffledIndices.takeFirst();
-            } else {
-                // Shuffle exhausted, Repeat Off — try autoplay
-                if (m_autoplay && m_autoplay->isEnabled()) {
-                    m_autoplay->requestNextTrack(m_currentTrack.artist, m_currentTrack.title);
-                    return;
-                }
-                m_playing = false;
-                if (m_currentSource == AppleMusic)
-                    MusicKitPlayer::instance()->stop();
-                else
-                    engine->stop();
-                emit playStateChanged(m_playing);
-                return;
-            }
-        }
-    } else {
-        // Sequential advance
-        m_queueIndex++;
-
-        if (m_queueIndex >= m_queue.size()) {
-            if (m_repeat == All) {
-                m_queueIndex = 0;
-            } else {
-                // Repeat Off and we've reached the end — try autoplay
-                m_queueIndex = m_queue.size() - 1;
-                if (m_autoplay && m_autoplay->isEnabled()) {
-                    m_autoplay->requestNextTrack(m_currentTrack.artist, m_currentTrack.title);
-                    return;
-                }
-                m_currentTime = 0;
-                m_playing = false;
-                if (m_currentSource == AppleMusic)
-                    MusicKitPlayer::instance()->stop();
-                else
-                    engine->stop();
-                emit timeChanged(m_currentTime);
-                emit playStateChanged(m_playing);
-                return;
-            }
-        }
+        m_currentTime = 0;
+        m_playing = false;
+        if (m_currentSource == AppleMusic)
+            MusicKitPlayer::instance()->stop();
+        else
+            engine->stop();
+        emit timeChanged(m_currentTime);
+        emit playStateChanged(m_playing);
+        return;
     }
 
-    m_currentTrack = m_queue.at(m_queueIndex);
+    // Advanced — play the new track
+    m_currentTrack = m_queueMgr->currentTrack();
     m_currentTime = 0;
     emit timeChanged(m_currentTime);
     emitQueueChangedDebounced();
     emit trackChanged(m_currentTrack);
-
-    // Use playTrack() for proper source switching (Local ↔ Apple Music)
     playTrack(m_currentTrack);
-}
-
-// ── peekNextTrack ───────────────────────────────────────────────────
-Track PlaybackState::peekNextTrack() const
-{
-    if (m_queue.isEmpty()) return Track();
-
-    // Repeat One — same track
-    if (m_repeat == One) return m_currentTrack;
-
-    int nextIdx = -1;
-
-    if (m_shuffle) {
-        if (!m_shuffledIndices.isEmpty()) {
-            nextIdx = m_shuffledIndices.first();
-        } else if (m_repeat == All) {
-            nextIdx = 0;
-        }
-    } else {
-        nextIdx = m_queueIndex + 1;
-        if (nextIdx >= m_queue.size()) {
-            if (m_repeat == All)
-                nextIdx = 0;
-            else
-                return Track(); // end of queue
-        }
-    }
-
-    if (nextIdx >= 0 && nextIdx < m_queue.size())
-        return m_queue.at(nextIdx);
-    return Track();
 }
 
 // ── scheduleGaplessPrepare ──────────────────────────────────────────
@@ -811,14 +512,14 @@ void PlaybackState::scheduleGaplessPrepare()
     if (!gapless && !crossfade) return;
     if (m_currentSource != Local) return;
 
-    Track next = peekNextTrack();
+    Track next = m_queueMgr->peekNextTrack();
     if (next.filePath.isEmpty()) {
         AudioEngine::instance()->cancelNextTrack();
         return;
     }
 
     qDebug() << "[Gapless] Scheduling prepare:"
-             << "current idx=" << m_queueIndex
+             << "current idx=" << m_queueMgr->currentIndex()
              << "title=" << m_currentTrack.title
              << "→ next title=" << next.title
              << "path=" << next.filePath;
@@ -830,44 +531,32 @@ void PlaybackState::onGaplessTransition()
 {
     qDebug() << "[Gapless] Transition occurred, advancing queue";
 
-    if (m_queue.isEmpty()) return;
+    if (m_queueMgr->isEmpty()) return;
 
-    if (m_repeat == One) {
+    auto result = m_queueMgr->advance();
+
+    if (result == QueueManager::RepeatOne) {
         m_currentTime = 0;
         emit timeChanged(m_currentTime);
         return;
     }
 
-    if (m_shuffle) {
-        if (!m_shuffledIndices.isEmpty()) {
-            m_queueIndex = m_shuffledIndices.takeFirst();
-        } else if (m_repeat == All) {
-            rebuildShuffleOrder();
-            if (!m_shuffledIndices.isEmpty())
-                m_queueIndex = m_shuffledIndices.takeFirst();
-        }
-    } else {
-        m_queueIndex++;
-        if (m_queueIndex >= m_queue.size()) {
-            if (m_repeat == All)
-                m_queueIndex = 0;
-            else
-                m_queueIndex = m_queue.size() - 1;
-        }
+    if (result == QueueManager::EndOfQueue) {
+        // Gapless transition at end — nothing more to do
+        return;
     }
 
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        m_currentTrack = m_queue.at(m_queueIndex);
-        m_currentTime = 0;
-        emit timeChanged(m_currentTime);
-        scheduleSave();
-        emitQueueChangedDebounced();
-        emit trackChanged(m_currentTrack);
+    // Advanced — update state for the new track
+    m_currentTrack = m_queueMgr->currentTrack();
+    m_currentTime = 0;
+    emit timeChanged(m_currentTime);
+    m_queuePersist->scheduleSave();
+    emitQueueChangedDebounced();
+    emit trackChanged(m_currentTrack);
 
-        // Update volume leveling for the new track
-        AudioEngine::instance()->setCurrentTrack(m_currentTrack);
+    // Update volume leveling for the new track
+    AudioEngine::instance()->setCurrentTrack(m_currentTrack);
 
-        // Prepare the next-next track for continued gapless playback
-        scheduleGaplessPrepare();
-    }
+    // Prepare the next-next track for continued gapless playback
+    scheduleGaplessPrepare();
 }
