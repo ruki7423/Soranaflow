@@ -2146,6 +2146,10 @@ QWidget* AudioSettingsTab::createVSTCard(QVBoxLayout* parentLayout)
         if (!proc) {
             qWarning() << "[VST3] Double-click: failed to create processor for"
                         << pluginName;
+            StyledMessageBox::warning(this, QStringLiteral("VST3 Plugin Error"),
+                QStringLiteral("Failed to load \"%1\".\n\n"
+                "The plugin may be incompatible, damaged, or blocked by macOS security.\n"
+                "Try right-clicking the plugin in Finder → Open to allow it.").arg(pluginName));
             return;
         }
 
@@ -2203,6 +2207,10 @@ QWidget* AudioSettingsTab::createVSTCard(QVBoxLayout* parentLayout)
         if (!proc) {
             qWarning() << "[VST2] Double-click: failed to create processor for"
                         << pluginName;
+            StyledMessageBox::warning(this, QStringLiteral("VST2 Plugin Error"),
+                QStringLiteral("Failed to load \"%1\".\n\n"
+                "The plugin may be incompatible, damaged, or blocked by macOS security.\n"
+                "Try right-clicking the plugin in Finder → Open to allow it.").arg(pluginName));
             return;
         }
 

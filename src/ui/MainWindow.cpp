@@ -29,6 +29,8 @@
 #ifdef Q_OS_MAC
 #include "../platform/macos/MacMediaIntegration.h"
 #endif
+#include "dialogs/StyledMessageBox.h"
+#include <QFileInfo>
 #include <QDebug>
 #include <QTimer>
 #include <QCloseEvent>
@@ -426,6 +428,7 @@ void MainWindow::initializeDeferred()
 
             auto* pipeline = AudioEngine::instance()->dspPipeline();
             int loaded = 0;
+            QStringList failedPlugins;
             for (const QString& path : paths) {
                 bool isVst2 = path.endsWith(QStringLiteral(".vst"));
                 std::shared_ptr<IDSPProcessor> proc;
@@ -435,6 +438,7 @@ void MainWindow::initializeDeferred()
                     proc = vst3host->createProcessorFromPath(path.toStdString());
                 if (!proc) {
                     qDebug() << "[STARTUP] VST load FAILED:" << path;
+                    failedPlugins.append(QFileInfo(path).completeBaseName());
                     continue;
                 }
                 if (pipeline) {
@@ -446,6 +450,16 @@ void MainWindow::initializeDeferred()
             }
             qDebug() << "[STARTUP] VST plugins loaded:" << loaded
                      << "of" << paths.size();
+
+            if (!failedPlugins.isEmpty()) {
+                QTimer::singleShot(500, this, [this, failedPlugins]() {
+                    StyledMessageBox::warning(this, QStringLiteral("VST Plugin Loading"),
+                        QStringLiteral("The following plugins could not be loaded:\n\n%1\n\n"
+                        "They may be incompatible, damaged, or blocked by macOS security.\n"
+                        "Try right-clicking each plugin in Finder → Open to allow it.")
+                            .arg(failedPlugins.join(QStringLiteral("\n"))));
+                });
+            }
         }
     }
 
