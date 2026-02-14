@@ -370,6 +370,8 @@ set(UI_SERVICES_SOURCES
     src/ui/services/MetadataFixService.cpp
     src/ui/services/CoverArtService.h
     src/ui/services/CoverArtService.cpp
+    src/ui/services/NavigationService.h
+    src/ui/services/NavigationService.cpp
 )
 
 set(RESOURCES

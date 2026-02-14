@@ -19,7 +19,7 @@
 #include <QEvent>
 #include <QMenu>
 #include <QContextMenuEvent>
-#include "../MainWindow.h"
+#include "../services/NavigationService.h"
 #include "../../core/library/PlaylistManager.h"
 #include "../../ui/dialogs/NewPlaylistDialog.h"
 
@@ -183,22 +183,21 @@ void AppleMusicView::setupUI()
         connect(m_backBtn, &QPushButton::clicked, this, [this]() {
             if (!m_backStack.isEmpty()) {
                 navigateBack();
-            } else if (auto* mw = MainWindow::instance()) {
-                mw->navigateBack();
+            } else {
+                NavigationService::instance()->navigateBack();
             }
         });
         // Forward: internal nav first, then global
         connect(m_forwardBtn, &QPushButton::clicked, this, [this]() {
             if (!m_forwardStack.isEmpty()) {
                 navigateForward();
-            } else if (auto* mw = MainWindow::instance()) {
-                mw->navigateForward();
+            } else {
+                NavigationService::instance()->navigateForward();
             }
         });
 
-        if (auto* mw = MainWindow::instance()) {
-            connect(mw, &MainWindow::globalNavChanged, this, [this]() { updateNavBar(); });
-        }
+        connect(NavigationService::instance(), &NavigationService::navChanged,
+                this, [this]() { updateNavBar(); });
 
         mainLayout->addLayout(headerRow);
     }
@@ -403,9 +402,9 @@ void AppleMusicView::updateNavBar()
     m_navBar->setVisible(showNav);
 
     // Back: enabled if internal stack has entries OR global can go back
-    auto* mw = MainWindow::instance();
-    bool canBack = !m_backStack.isEmpty() || (mw && mw->canGoBack());
-    bool canFwd = !m_forwardStack.isEmpty() || (mw && mw->canGoForward());
+    auto* nav = NavigationService::instance();
+    bool canBack = !m_backStack.isEmpty() || nav->canGoBack();
+    bool canFwd = !m_forwardStack.isEmpty() || nav->canGoForward();
 
     m_backBtn->setEnabled(canBack);
     m_forwardBtn->setEnabled(canFwd);

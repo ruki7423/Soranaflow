@@ -1,5 +1,5 @@
 #include "ArtistsView.h"
-#include "../MainWindow.h"
+#include "../services/NavigationService.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
@@ -158,8 +158,8 @@ void ArtistsView::setupUI()
     connect(m_smallIconBtn, &QPushButton::clicked, this, [this]() { setViewMode(SmallIcons); });
     connect(m_listBtn, &QPushButton::clicked, this, [this]() { setViewMode(ListView); });
 
-    auto updateNavBtnStyle = [this]() {
-        auto* mw = MainWindow::instance();
+    auto* nav = NavigationService::instance();
+    auto updateNavBtnStyle = [this, nav]() {
         auto c = ThemeManager::instance()->colors();
         auto navStyle = [&c](bool enabled) {
             Q_UNUSED(enabled)
@@ -168,8 +168,8 @@ void ArtistsView::setupUI()
                 "QPushButton:hover { background: %1; }"
                 "QPushButton:disabled { background: transparent; }").arg(c.hover);
         };
-        bool canBack = mw && mw->canGoBack();
-        bool canFwd = mw && mw->canGoForward();
+        bool canBack = nav->canGoBack();
+        bool canFwd = nav->canGoForward();
         m_navBackBtn->setEnabled(canBack);
         m_navForwardBtn->setEnabled(canFwd);
         m_navBackBtn->setStyleSheet(navStyle(canBack));
@@ -177,14 +177,9 @@ void ArtistsView::setupUI()
     };
     updateNavBtnStyle();
 
-    connect(m_navBackBtn, &QPushButton::clicked, this, []() {
-        if (auto* mw = MainWindow::instance()) mw->navigateBack();
-    });
-    connect(m_navForwardBtn, &QPushButton::clicked, this, []() {
-        if (auto* mw = MainWindow::instance()) mw->navigateForward();
-    });
-    connect(MainWindow::instance(), &MainWindow::globalNavChanged,
-            this, updateNavBtnStyle);
+    connect(m_navBackBtn, &QPushButton::clicked, nav, &NavigationService::navigateBack);
+    connect(m_navForwardBtn, &QPushButton::clicked, nav, &NavigationService::navigateForward);
+    connect(nav, &NavigationService::navChanged, this, updateNavBtnStyle);
 
     mainLayout->addLayout(headerLayout);
 
