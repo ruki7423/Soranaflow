@@ -25,6 +25,17 @@
 
 ---
 
+## What's New (v1.6.1)
+
+### Bug Fixes
+- Fixed crash (deadlock) when enabling Upsampling in Settings
+- Fixed Appearance tab highlighting in Settings
+
+### Internal
+- Phase 1 modularization: extracted MetadataFixService, CoverArtService, SignalPathBuilder, VolumeLevelingManager; split SettingsView into 6 focused tab widgets
+
+---
+
 ## What's New (v1.6.0)
 
 ### Audio
@@ -86,7 +97,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.6.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.6.0/SoranaFlow-1.6.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.6.1](https://github.com/ruki7423/Soranaflow/releases/download/v1.6.1/SoranaFlow-1.6.1.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -121,13 +132,17 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 20 (v1.0.0 → v1.6.0) |
+| GitHub Releases | 21 (v1.0.0 → v1.6.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.6.1 — Upsampling Crash Fix
+
+- Fixed deadlock when enabling Upsampling, fixed Appearance tab highlighting
 
 ### v1.6.0 — DSD DoP Fix, Apple Music, Responsive UI
 
