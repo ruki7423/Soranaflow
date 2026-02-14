@@ -1,8 +1,6 @@
 #include "VST3Host.h"
 #include "VST3Plugin.h"
 #include "../core/dsp/IDSPProcessor.h"
-#include "../core/dsp/DSPPipeline.h"
-#include "../core/audio/AudioEngine.h"
 
 #include <QWidget>
 #include <QVBoxLayout>
@@ -167,38 +165,19 @@ void VST3Host::openPluginEditor(int pluginIndex, QWidget* parent)
     const auto& info = m_plugins[pluginIndex];
     qDebug() << "=== VST3Host::openPluginEditor ===" << QString::fromStdString(info.name);
 
-    // Try to find an already-loaded VST3Plugin instance
+    // Find an already-loaded VST3Plugin instance via our weak references
+    // (createProcessor/createProcessorFromPath always registers here)
     VST3Plugin* activePlugin = nullptr;
-
-    // 1. Check the DSP pipeline for an active processor matching this plugin
-    auto* pipeline = AudioEngine::instance()->dspPipeline();
-    if (pipeline) {
-        for (int i = 0; i < pipeline->processorCount(); ++i) {
-            auto* proc = pipeline->processor(i);
-            if (proc) {
-                auto* vst3proc = dynamic_cast<VST3Plugin*>(proc);
-                if (vst3proc && vst3proc->pluginPath() == info.path) {
-                    activePlugin = vst3proc;
-                    qDebug() << "VST3: Found plugin in DSP pipeline at index" << i;
-                    break;
-                }
+    for (auto it = m_loadedPlugins.begin(); it != m_loadedPlugins.end(); ) {
+        if (auto sp = it->lock()) {
+            if (sp->pluginPath() == info.path) {
+                activePlugin = sp.get();
+                qDebug() << "VST3: Found loaded plugin instance";
+                break;
             }
-        }
-    }
-
-    // 2. Check our weak references
-    if (!activePlugin) {
-        for (auto it = m_loadedPlugins.begin(); it != m_loadedPlugins.end(); ) {
-            if (auto sp = it->lock()) {
-                if (sp->pluginPath() == info.path) {
-                    activePlugin = sp.get();
-                    qDebug() << "VST3: Found plugin in weak reference list";
-                    break;
-                }
-                ++it;
-            } else {
-                it = m_loadedPlugins.erase(it);
-            }
+            ++it;
+        } else {
+            it = m_loadedPlugins.erase(it);
         }
     }
 
