@@ -313,6 +313,15 @@ bool CoreAudioOutput::start()
     if (!d.audioUnit) return false;
     if (d.running.load(std::memory_order_acquire)) return true;
 
+    // Flush CoreAudio's internal ring buffers to prevent stale data
+    // from the previous format/rate bleeding into the new stream.
+    // Critical for DSD↔PCM transitions where sample rate changes dramatically.
+    OSStatus resetErr = AudioUnitReset(d.audioUnit, kAudioUnitScope_Global, 0);
+    if (resetErr != noErr) {
+        fprintf(stderr, "CoreAudioOutput::start: AudioUnitReset failed (OSStatus %d)\n",
+                (int)resetErr);
+    }
+
     if (AudioOutputUnitStart(d.audioUnit) != noErr)
         return false;
 

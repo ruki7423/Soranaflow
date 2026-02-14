@@ -305,6 +305,10 @@ bool AudioEngine::load(const QString& filePath)
         return false;
     }
 
+    // Capture previous DSD state before stop() closes decoders
+    bool prevWasDoP = m_usingDSDDecoder.load(std::memory_order_relaxed)
+                      && m_dsdDecoder && m_dsdDecoder->isDoPMode();
+
     stop();
 
     std::lock_guard<std::mutex> lock(m_decoderMutex);
@@ -486,6 +490,15 @@ bool AudioEngine::load(const QString& filePath)
     { std::lock_guard<std::mutex> lock(m_filePathMutex); m_currentFilePath = filePath; }
 
     updateHeadroomGain();
+
+    // Log DSD-involved transitions (output was fully restarted via stop/close/open/start)
+    bool nextIsDoP = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
+    if (prevWasDoP || nextIsDoP) {
+        qDebug() << "[AudioEngine] DSD transition:"
+                 << (prevWasDoP ? "DoP" : "PCM") << "->"
+                 << (nextIsDoP ? "DoP" : "PCM")
+                 << "— output restarted with AudioUnitReset";
+    }
 
     qDebug() << "=== AudioEngine::load OK ===";
     emit durationChanged(m_duration);
