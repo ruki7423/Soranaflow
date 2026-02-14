@@ -1152,10 +1152,11 @@ void AudioSettingsTab::loadVstPlugins()
             const auto& plugins = host->plugins();
             for (int i = 0; i < (int)plugins.size(); ++i) {
                 if (plugins[i].path == path.toStdString()) {
-                    displayName = QString::fromStdString(plugins[i].name) +
-                        QStringLiteral(" (") +
-                        QString::fromStdString(plugins[i].vendor) +
-                        QStringLiteral(")");
+                    displayName = QString::fromStdString(plugins[i].name);
+                    if (!plugins[i].vendor.empty())
+                        displayName += QStringLiteral(" (")
+                            + QString::fromStdString(plugins[i].vendor)
+                            + QStringLiteral(")");
                     pluginIndex = i;
                     break;
                 }
@@ -2038,11 +2039,12 @@ QWidget* AudioSettingsTab::createVSTCard(QVBoxLayout* parentLayout)
             m_vst3AvailableList->clear();
             const auto& plugins = VST3Host::instance()->plugins();
             for (int i = 0; i < (int)plugins.size(); ++i) {
-                auto* item = new QListWidgetItem(
-                    QString::fromStdString(plugins[i].name) +
-                    QStringLiteral(" (") +
-                    QString::fromStdString(plugins[i].vendor) +
-                    QStringLiteral(")"));
+                QString displayName = QString::fromStdString(plugins[i].name);
+                if (!plugins[i].vendor.empty())
+                    displayName += QStringLiteral(" (")
+                        + QString::fromStdString(plugins[i].vendor)
+                        + QStringLiteral(")");
+                auto* item = new QListWidgetItem(displayName);
                 item->setData(Qt::UserRole, i);
                 item->setData(Qt::UserRole + 1,
                     QString::fromStdString(plugins[i].path));
