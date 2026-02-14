@@ -55,6 +55,7 @@ struct Track {
     QString bitDepth;       // e.g. "24-bit"
     QString bitrate;        // e.g. "4608 kbps"
     QString coverUrl;
+    int     year = 0;        // release year from DATE/YEAR tag
     int     trackNumber = 0;
     int     discNumber = 0;
     QString filePath;       // empty for mock tracks
@@ -128,7 +129,8 @@ inline TrackIndex indexFromTrack(const Track& t) {
 struct Album {
     QString         id;
     QString         title;
-    QString         artist;
+    QString         artist;      // track artist (from GROUP BY)
+    QString         albumArtist; // ALBUMARTIST tag — preferred for sorting
     QString         artistId;
     int             year = 0;
     QString         coverUrl;

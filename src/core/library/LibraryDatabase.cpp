@@ -326,6 +326,12 @@ void LibraryDatabase::createIndexes()
     // Migration: add album_artist for compilations / VA sorting
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN album_artist TEXT"));
 
+    // Migration: add year to tracks (extracted from DATE/YEAR tags)
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN year INTEGER DEFAULT 0"));
+
+    // Migration: add album_artist to albums (preferred sort field from ALBUMARTIST tag)
+    q.exec(QStringLiteral("ALTER TABLE albums ADD COLUMN album_artist TEXT"));
+
     // Covering index for batch skip-check query (path+size+mtime in one B-tree scan)
     q.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_tracks_path_size_mtime "
@@ -906,7 +912,10 @@ void LibraryDatabase::doRebuildInternal()
             "  MAX(format) as format, "
             "  MAX(CASE WHEN cover_url IS NOT NULL AND cover_url != '' THEN cover_url ELSE '' END) as cover_url, "
             "  COUNT(*) as track_count, "
-            "  SUM(duration) as total_duration "
+            "  SUM(duration) as total_duration, "
+            "  MAX(CASE WHEN year > 0 THEN year ELSE 0 END) as album_year, "
+            "  MAX(CASE WHEN album_artist IS NOT NULL AND TRIM(album_artist) != '' "
+            "    THEN TRIM(album_artist) ELSE '' END) as album_artist "
             "FROM tracks "
             "WHERE album IS NOT NULL AND TRIM(album) != '' AND album_id IS NOT NULL AND album_id != '' "
             "GROUP BY album_id "
@@ -926,6 +935,8 @@ void LibraryDatabase::doRebuildInternal()
             a.coverUrl    = q.value(5).toString();
             a.totalTracks = q.value(6).toInt();
             a.duration    = q.value(7).toInt();
+            a.year        = q.value(8).toInt();
+            a.albumArtist = q.value(9).toString();
 
             insertAlbum(a);
             albumCount++;

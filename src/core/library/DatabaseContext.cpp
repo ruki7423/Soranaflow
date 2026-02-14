@@ -71,6 +71,11 @@ Track DatabaseContext::trackFromQuery(const QSqlQuery& query) const
     t.albumMbid        = query.value(QStringLiteral("album_mbid")).toString();
     t.releaseGroupMbid = query.value(QStringLiteral("release_group_mbid")).toString();
 
+    // Year (migration column — may not exist in old DBs)
+    int yearIdx = query.record().indexOf(QStringLiteral("year"));
+    if (yearIdx >= 0)
+        t.year = query.value(yearIdx).toInt();
+
     // Channel count
     int chIdx = query.record().indexOf(QStringLiteral("channel_count"));
     if (chIdx >= 0) {

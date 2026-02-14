@@ -163,8 +163,8 @@ bool TrackRepository::insertTrack(const Track& track,
         "(id, title, artist, album, album_id, artist_id, duration, format, "
         "sample_rate, bit_depth, bitrate, cover_url, track_number, disc_number, file_path, "
         "recording_mbid, artist_mbid, album_mbid, release_group_mbid, channel_count, "
-        "file_size, file_mtime, album_artist) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "file_size, file_mtime, album_artist, year) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ))) {
         qWarning() << "TrackRepository::insertTrack PREPARE failed:" << q.lastError().text();
         return false;
@@ -194,6 +194,7 @@ bool TrackRepository::insertTrack(const Track& track,
     q.addBindValue(track.fileSize);
     q.addBindValue(track.fileMtime);
     q.addBindValue(track.albumArtist);
+    q.addBindValue(track.year);
 
     if (!q.exec()) {
         qWarning() << "TrackRepository::insertTrack failed:" << q.lastError().text();
@@ -229,7 +230,7 @@ bool TrackRepository::updateTrack(const Track& track)
         "duration = ?, format = ?, sample_rate = ?, bit_depth = ?, bitrate = ?, "
         "cover_url = ?, track_number = ?, disc_number = ?, file_path = ?, "
         "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ?, "
-        "channel_count = ?, file_size = ?, file_mtime = ?, album_artist = ? "
+        "channel_count = ?, file_size = ?, file_mtime = ?, album_artist = ?, year = ? "
         "WHERE id = ?"
     ));
 
@@ -255,6 +256,7 @@ bool TrackRepository::updateTrack(const Track& track)
     q.addBindValue(track.fileSize);
     q.addBindValue(track.fileMtime);
     q.addBindValue(track.albumArtist);
+    q.addBindValue(track.year);
     q.addBindValue(track.id);
 
     if (!q.exec()) {

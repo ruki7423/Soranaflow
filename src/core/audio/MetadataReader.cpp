@@ -93,6 +93,23 @@ std::optional<Track> MetadataReader::readTrack(const QString& filePath)
         }
     }
 
+    // Year/date — try DATE first (ISO 8601), then YEAR, then tag->year()
+    if (props.contains("DATE")) {
+        auto vals = props["DATE"];
+        if (!vals.isEmpty()) {
+            QString dateStr = QString::fromStdString(vals.front().to8Bit(true));
+            track.year = dateStr.left(4).toInt();  // "2021-05-12" → 2021
+        }
+    }
+    if (track.year <= 0 && props.contains("YEAR")) {
+        auto vals = props["YEAR"];
+        if (!vals.isEmpty())
+            track.year = QString::fromStdString(vals.front().to8Bit(true)).left(4).toInt();
+    }
+    if (track.year <= 0 && f.tag() && f.tag()->year() > 0) {
+        track.year = static_cast<int>(f.tag()->year());
+    }
+
     // ReplayGain
     if (props.contains("REPLAYGAIN_TRACK_GAIN")) {
         auto vals = props["REPLAYGAIN_TRACK_GAIN"];

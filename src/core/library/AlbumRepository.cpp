@@ -3,6 +3,7 @@
 
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlRecord>
 #include <QMutex>
 #include <QDebug>
 #include <QElapsedTimer>
@@ -19,8 +20,8 @@ bool AlbumRepository::insertAlbum(const Album& album)
     QSqlQuery q(*m_ctx->writeDb);
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO albums "
-        "(id, title, artist, artist_id, year, cover_url, format, total_tracks, duration, genres) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "(id, title, artist, artist_id, year, cover_url, format, total_tracks, duration, genres, album_artist) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ));
 
     q.addBindValue(album.id);
@@ -33,6 +34,7 @@ bool AlbumRepository::insertAlbum(const Album& album)
     q.addBindValue(album.totalTracks);
     q.addBindValue(album.duration);
     q.addBindValue(album.genres.join(QStringLiteral(",")));
+    q.addBindValue(album.albumArtist);
 
     if (!q.exec()) {
         qWarning() << "AlbumRepository::insertAlbum failed:" << q.lastError().text();
@@ -71,6 +73,11 @@ QVector<Album> AlbumRepository::allAlbums() const
         a.totalTracks = q.value(QStringLiteral("total_tracks")).toInt();
         a.duration    = q.value(QStringLiteral("duration")).toInt();
 
+        // album_artist (migration column — may not exist in old DBs)
+        int aaIdx = q.record().indexOf(QStringLiteral("album_artist"));
+        if (aaIdx >= 0)
+            a.albumArtist = q.value(aaIdx).toString();
+
         QString genresStr = q.value(QStringLiteral("genres")).toString();
         if (!genresStr.isEmpty())
             a.genres = genresStr.split(QStringLiteral(","));
@@ -101,6 +108,10 @@ Album AlbumRepository::albumById(const QString& id) const
         a.format      = m_ctx->audioFormatFromString(q.value(QStringLiteral("format")).toString());
         a.totalTracks = q.value(QStringLiteral("total_tracks")).toInt();
         a.duration    = q.value(QStringLiteral("duration")).toInt();
+
+        int aaIdx = q.record().indexOf(QStringLiteral("album_artist"));
+        if (aaIdx >= 0)
+            a.albumArtist = q.value(aaIdx).toString();
 
         QString genresStr = q.value(QStringLiteral("genres")).toString();
         if (!genresStr.isEmpty())

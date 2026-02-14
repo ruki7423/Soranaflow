@@ -526,7 +526,7 @@ void MusicDataProvider::buildMockData()
     int alb1Duration = 0;
     for (const auto& t : alb1Tracks) alb1Duration += t.duration;
 
-    Album album1{alb1, "Neon Horizons", art1Name, art1, 2024, alb1Cover,
+    Album album1{alb1, "Neon Horizons", art1Name, art1Name, art1, 2024, alb1Cover,
                  AudioFormat::FLAC, static_cast<int>(alb1Tracks.size()), alb1Duration, alb1Tracks,
                  {"Electronic", "Synthwave"}};
 
@@ -542,7 +542,7 @@ void MusicDataProvider::buildMockData()
     int alb2Duration = 0;
     for (const auto& t : alb2Tracks) alb2Duration += t.duration;
 
-    Album album2{alb2, "Digital Mirage", art1Name, art1, 2023, alb2Cover,
+    Album album2{alb2, "Digital Mirage", art1Name, art1Name, art1, 2023, alb2Cover,
                  AudioFormat::DSD64, static_cast<int>(alb2Tracks.size()), alb2Duration, alb2Tracks,
                  {"Electronic", "Ambient"}};
 
@@ -569,7 +569,7 @@ void MusicDataProvider::buildMockData()
     int alb3Duration = 0;
     for (const auto& t : alb3Tracks) alb3Duration += t.duration;
 
-    Album album3{alb3, "Velvet Underground Sessions", art2Name, art2, 2024, alb3Cover,
+    Album album3{alb3, "Velvet Underground Sessions", art2Name, art2Name, art2, 2024, alb3Cover,
                  AudioFormat::DSD128, static_cast<int>(alb3Tracks.size()), alb3Duration, alb3Tracks,
                  {"Jazz", "Blues"}};
 
@@ -595,7 +595,7 @@ void MusicDataProvider::buildMockData()
     int alb4Duration = 0;
     for (const auto& t : alb4Tracks) alb4Duration += t.duration;
 
-    Album album4{alb4, "Tidal Resonance", art3Name, art3, 2024, alb4Cover,
+    Album album4{alb4, "Tidal Resonance", art3Name, art3Name, art3, 2024, alb4Cover,
                  AudioFormat::FLAC, static_cast<int>(alb4Tracks.size()), alb4Duration, alb4Tracks,
                  {"Ambient", "Downtempo"}};
 
@@ -611,7 +611,7 @@ void MusicDataProvider::buildMockData()
     int alb5Duration = 0;
     for (const auto& t : alb5Tracks) alb5Duration += t.duration;
 
-    Album album5{alb5, "Ephemeral Light", art3Name, art3, 2023, alb5Cover,
+    Album album5{alb5, "Ephemeral Light", art3Name, art3Name, art3, 2023, alb5Cover,
                  AudioFormat::ALAC, static_cast<int>(alb5Tracks.size()), alb5Duration, alb5Tracks,
                  {"Ambient", "Chillout"}};
 
@@ -639,7 +639,7 @@ void MusicDataProvider::buildMockData()
     int alb6Duration = 0;
     for (const auto& t : alb6Tracks) alb6Duration += t.duration;
 
-    Album album6{alb6, "Fractal Architecture", art4Name, art4, 2024, alb6Cover,
+    Album album6{alb6, "Fractal Architecture", art4Name, art4Name, art4, 2024, alb6Cover,
                  AudioFormat::WAV, static_cast<int>(alb6Tracks.size()), alb6Duration, alb6Tracks,
                  {"Progressive Rock", "Art Rock"}};
 
@@ -665,7 +665,7 @@ void MusicDataProvider::buildMockData()
     int alb7Duration = 0;
     for (const auto& t : alb7Tracks) alb7Duration += t.duration;
 
-    Album album7{alb7, "Petals in the Wind", art5Name, art5, 2023, alb7Cover,
+    Album album7{alb7, "Petals in the Wind", art5Name, art5Name, art5, 2023, alb7Cover,
                  AudioFormat::DSD64, static_cast<int>(alb7Tracks.size()), alb7Duration, alb7Tracks,
                  {"Classical Crossover", "World"}};
 
@@ -683,7 +683,7 @@ void MusicDataProvider::buildMockData()
     int alb8Duration = 0;
     for (const auto& t : alb8Tracks) alb8Duration += t.duration;
 
-    Album album8{alb8, "Silk Road Echoes", art5Name, art5, 2022, alb8Cover,
+    Album album8{alb8, "Silk Road Echoes", art5Name, art5Name, art5, 2022, alb8Cover,
                  AudioFormat::MP3, static_cast<int>(alb8Tracks.size()), alb8Duration, alb8Tracks,
                  {"Classical Crossover", "World"}};
 

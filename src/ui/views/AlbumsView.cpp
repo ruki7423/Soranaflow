@@ -349,7 +349,10 @@ void AlbumsView::reloadAlbums()
         break;
     case SortAlbumArtistYear:
         std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
-            int cmp = a.artist.compare(b.artist, Qt::CaseInsensitive);
+            // Prefer albumArtist (ALBUMARTIST tag), fall back to track artist
+            const QString& aArt = a.albumArtist.isEmpty() ? a.artist : a.albumArtist;
+            const QString& bArt = b.albumArtist.isEmpty() ? b.artist : b.albumArtist;
+            int cmp = aArt.compare(bArt, Qt::CaseInsensitive);
             if (cmp != 0) return cmp < 0;
             return a.year != b.year ? a.year < b.year
                 : a.title.compare(b.title, Qt::CaseInsensitive) < 0;

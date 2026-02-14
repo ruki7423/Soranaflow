@@ -378,6 +378,13 @@ void NowPlayingView::onTrackChanged(const Track& track)
         totalTracks = album.totalTracks;
     }
 
+    // Update album label with year (prefer track.year, fallback to album.year)
+    int displayYear = track.year > 0 ? track.year : album.year;
+    if (displayYear > 0)
+        m_albumLabel->setText(track.album + QStringLiteral(" (%1)").arg(displayYear));
+    else
+        m_albumLabel->setText(track.album);
+
     // Validate trackNumber (avoid garbage values from uninitialized data)
     QString trackDisplay;
     if (track.trackNumber > 0 && track.trackNumber < 10000) {
