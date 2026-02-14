@@ -108,15 +108,9 @@ void ArtistDetailView::setupUI()
     contentLayout->setContentsMargins(0, 0, 0, 24);
     contentLayout->setSpacing(0);
 
-    // ── Hero background banner ────────────────────────────────────────
+    // ── Hero background banner (disabled — kept as zero-height placeholder) ──
     m_heroBackground = new QLabel(contentWidget);
-    m_heroBackground->setFixedHeight(300);
-    m_heroBackground->setAlignment(Qt::AlignCenter);
-    m_heroBackground->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_heroBackground->setScaledContents(false);
-    m_heroBackground->setStyleSheet(
-        QStringLiteral("background: %1; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;")
-            .arg(ThemeManager::instance()->colors().backgroundSecondary));
+    m_heroBackground->setFixedHeight(0);
     m_heroBackground->setVisible(false);
     contentLayout->addWidget(m_heroBackground);
 
@@ -270,7 +264,8 @@ void ArtistDetailView::setupUI()
 
 void ArtistDetailView::setArtist(const QString& artistId)
 {
-    m_artist = MusicDataProvider::instance()->artistById(artistId);
+    // Use LibraryDatabase directly — MDP cache has albums without track vectors
+    m_artist = LibraryDatabase::instance()->artistById(artistId);
     updateDisplay();
 }
 
@@ -819,14 +814,28 @@ static QString sanitizeAnnotation(const QString& raw)
 
     if (t.length() < 10) return QString();
 
-    // 6. HTML-escape text content
+    // 6. Extract bare URLs BEFORE HTML-escaping (escaping breaks URL regex)
+    QRegularExpression urlRx(QStringLiteral("(https?://[^\\s<>\"'\\]\\)]+)"));
+    QStringList bareUrls;
+    {
+        auto it = urlRx.globalMatch(t);
+        while (it.hasNext()) bareUrls.append(it.next().captured(1));
+    }
+    for (int i = 0; i < bareUrls.size(); ++i)
+        t.replace(bareUrls[i], QStringLiteral("\x02URL%1\x02").arg(i));
+
+    // 7. HTML-escape text content (safe — no URLs to corrupt)
     t = t.toHtmlEscaped();
 
-    // 7. Convert bare URLs to clickable <a> tags
-    t.replace(QRegularExpression(QStringLiteral("https?://[^\\s&lt;]+")),
-              QStringLiteral("<a href=\"\\0\" style=\"color:%1;\">\\0</a>").arg(linkColor));
+    // 8. Restore bare URLs as clickable <a> tags
+    for (int i = 0; i < bareUrls.size(); ++i) {
+        QString escaped = bareUrls[i].toHtmlEscaped();
+        t.replace(QStringLiteral("\x02URL%1\x02").arg(i),
+                  QStringLiteral("<a href=\"%1\" style=\"color:%2;\">%1</a>")
+                      .arg(escaped, linkColor));
+    }
 
-    // 8. Restore named [url|text] links as clickable <a> tags
+    // 9. Restore named [url|text] links as clickable <a> tags
     for (int i = 0; i < namedLinks.size(); ++i) {
         const auto& lnk = namedLinks[i];
         t.replace(QStringLiteral("\x01LINK%1\x01").arg(i),
@@ -834,7 +843,7 @@ static QString sanitizeAnnotation(const QString& raw)
                       .arg(lnk.url.toHtmlEscaped(), linkColor, lnk.text.toHtmlEscaped()));
     }
 
-    // 9. Newlines → <br> for RichText
+    // 10. Newlines → <br> for RichText
     t.replace(QStringLiteral("\n"), QStringLiteral("<br>"));
 
     return t;
@@ -909,87 +918,14 @@ void ArtistDetailView::applyCircularPixmap(const QPixmap& pix)
     m_artistImage->setStyleSheet(QStringLiteral("background: transparent; border-radius: 96px;"));
 }
 
-void ArtistDetailView::applyHeroPixmap(const QPixmap& pix)
+void ArtistDetailView::applyHeroPixmap(const QPixmap& /*pix*/)
 {
-    m_cachedHeroOriginal = pix;  // cache original for resize re-use
-
-    int heroW = m_heroBackground->width();
-    if (heroW <= 0) heroW = width();
-    if (heroW <= 0) heroW = 800; // fallback
-
-    QPixmap scaled = pix.scaled(heroW, 300,
-                                Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    int cx = (scaled.width() - heroW) / 2;
-    int cy = (scaled.height() - 300) / 2;
-    if (cx < 0) cx = 0;
-    if (cy < 0) cy = 0;
-    QPixmap cropped = scaled.copy(cx, cy, heroW, 300);
-
-    // Apply dark gradient overlay for text readability
-    QPainter p(&cropped);
-    QLinearGradient grad(0, 0, 0, 300);
-    grad.setColorAt(0, QColor(0, 0, 0, 0));
-    grad.setColorAt(0.5, QColor(0, 0, 0, 80));
-    grad.setColorAt(1, QColor(0, 0, 0, 180));
-    p.fillRect(cropped.rect(), grad);
-    p.end();
-
-    m_heroBackground->setPixmap(cropped);
-    m_heroBackground->setVisible(true);
-    qDebug() << "[ArtistDetail] Hero background applied, size:" << cropped.size();
+    // Hero banner disabled
 }
 
 void ArtistDetailView::applyAlbumArtFallback()
 {
-    // Find best album cover from this artist
-    QPixmap albumCover;
-    for (const Album& album : std::as_const(m_artist.albums)) {
-        albumCover = findAlbumCoverArt(album);
-        if (!albumCover.isNull()) break;
-    }
-    if (albumCover.isNull()) {
-        qDebug() << "[ArtistDetail] No album art for fallback hero";
-        return;
-    }
-
-    // Hero: blur via scale-down-then-up trick + darken
-    int heroW = m_heroBackground->width();
-    if (heroW < 400) heroW = width();
-    if (heroW < 400 && m_scrollArea) heroW = m_scrollArea->viewport()->width();
-    if (heroW < 400) heroW = 1200;  // absolute fallback for pre-layout
-    constexpr int heroH = 300;
-
-    // Scale to tiny square first (IgnoreAspectRatio ensures square output for uniform blur)
-    QPixmap small = albumCover.scaled(48, 48,
-        Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    // Scale back up to fill hero area
-    QPixmap blurred = small.scaled(heroW, heroH,
-        Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-
-    // Center-crop to exact hero dimensions
-    int cx = qMax(0, (blurred.width() - heroW) / 2);
-    int cy = qMax(0, (blurred.height() - heroH) / 2);
-    QPixmap cropped = blurred.copy(cx, cy, heroW, heroH);
-
-    // Dark overlay
-    QPainter p(&cropped);
-    p.fillRect(cropped.rect(), QColor(0, 0, 0, 140));
-    p.end();
-
-    m_heroBackground->setPixmap(cropped);
-    m_heroBackground->setVisible(true);
-    m_heroFromFanart = false;
-    qDebug() << "[ArtistDetail] Album art fallback hero applied, size:" << cropped.size();
-
-    // If widget wasn't laid out yet, schedule a re-apply after layout
-    if (m_heroBackground->width() < 400) {
-        QTimer::singleShot(50, this, [this]() {
-            if (!m_heroFromFanart && m_heroBackground->isVisible()
-                && m_heroBackground->width() >= 400) {
-                applyAlbumArtFallback();
-            }
-        });
-    }
+    // Hero banner disabled
 }
 
 // ── Last.fm biography fallback ──────────────────────────────────────
@@ -1049,11 +985,25 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
             bio = bio.trimmed();
 
         if (!bio.isEmpty()) {
-            // HTML-escape + convert bare URLs to clickable links
-            bio = bio.toHtmlEscaped();
+            // Extract URLs before HTML-escaping (escaping breaks URL regex)
             const QString linkColor = ThemeManager::instance()->colors().accent;
-            bio.replace(QRegularExpression(QStringLiteral("https?://[^\\s&lt;]+")),
-                        QStringLiteral("<a href=\"\\0\" style=\"color:%1;\">\\0</a>").arg(linkColor));
+            QRegularExpression urlRx(QStringLiteral("(https?://[^\\s<>\"'\\]\\)]+)"));
+            QStringList bioUrls;
+            {
+                auto it = urlRx.globalMatch(bio);
+                while (it.hasNext()) bioUrls.append(it.next().captured(1));
+            }
+            for (int i = 0; i < bioUrls.size(); ++i)
+                bio.replace(bioUrls[i], QStringLiteral("\x02URL%1\x02").arg(i));
+
+            bio = bio.toHtmlEscaped();
+
+            for (int i = 0; i < bioUrls.size(); ++i) {
+                QString escaped = bioUrls[i].toHtmlEscaped();
+                bio.replace(QStringLiteral("\x02URL%1\x02").arg(i),
+                            QStringLiteral("<a href=\"%1\" style=\"color:%2;\">%1</a>")
+                                .arg(escaped, linkColor));
+            }
             bio.replace(QStringLiteral("\n"), QStringLiteral("<br>"));
             m_bioHeader->setVisible(true);
             m_bioLabel->setVisible(true);
@@ -1068,10 +1018,7 @@ void ArtistDetailView::fetchLastFmBio(const QString& artistName)
 void ArtistDetailView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    // Re-apply hero from cached original (avoids re-loading from disk/network)
-    if (m_heroBackground->isVisible() && !m_cachedHeroOriginal.isNull()) {
-        applyHeroPixmap(m_cachedHeroOriginal);
-    }
+    // Hero banner disabled — no resize re-apply needed
 }
 
 // ── refreshTheme ────────────────────────────────────────────────────

@@ -710,6 +710,14 @@ void TrackTableView::setEmbeddedMode(bool embedded)
         const int totalHeight = m_model->rowCount() * UISizes::rowHeight
                               + horizontalHeader()->height() + 2;
         setFixedHeight(totalHeight);
+
+        // Stretch Title column to fill available width
+        for (int i = 0; i < m_config.columns.size(); ++i) {
+            if (m_config.columns[i] == TrackColumn::Title) {
+                horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
+                break;
+            }
+        }
     } else {
         setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);

@@ -60,19 +60,10 @@ void AlbumDetailView::setupUI()
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // ── Hero background (full-width blurred album art) ──────────
+    // ── Hero background (disabled — kept as zero-height placeholder) ──
     m_heroBackground = new QLabel(scrollContent);
-    m_heroBackground->setFixedHeight(300);
-    m_heroBackground->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_heroBackground->setScaledContents(false);
-    m_heroBackground->setAlignment(Qt::AlignCenter);
+    m_heroBackground->setFixedHeight(0);
     m_heroBackground->setVisible(false);
-    {
-        auto c = ThemeManager::instance()->colors();
-        m_heroBackground->setStyleSheet(
-            QStringLiteral("background: %1; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;")
-                .arg(c.backgroundSecondary));
-    }
     m_mainLayout->addWidget(m_heroBackground);
 
     // ── Back button ────────────────────────────────────────────────
@@ -506,46 +497,16 @@ bool AlbumDetailView::eventFilter(QObject* obj, QEvent* event)
 }
 
 // ── applyHeroBackground ─────────────────────────────────────────────
-void AlbumDetailView::applyHeroBackground(const QPixmap& pix)
+void AlbumDetailView::applyHeroBackground(const QPixmap& /*pix*/)
 {
-    if (pix.isNull()) {
-        m_heroBackground->setVisible(false);
-        return;
-    }
-
-    int heroW = m_heroBackground->width();
-    if (heroW < 400) heroW = width();
-    if (heroW < 400 && m_scrollArea) heroW = m_scrollArea->viewport()->width();
-    if (heroW < 400) heroW = 1200;
-    constexpr int heroH = 300;
-
-    // Scale down to create blur seed, then scale back up
-    QPixmap small = pix.scaled(48, 48, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    QPixmap blurred = small.scaled(heroW, heroH, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    int cx = qMax(0, (blurred.width() - heroW) / 2);
-    int cy = qMax(0, (blurred.height() - heroH) / 2);
-    QPixmap cropped = blurred.copy(cx, cy, heroW, heroH);
-
-    // Dark gradient overlay for readability
-    QPainter p(&cropped);
-    QLinearGradient grad(0, 0, 0, heroH);
-    grad.setColorAt(0, QColor(0, 0, 0, 0));
-    grad.setColorAt(0.5, QColor(0, 0, 0, 80));
-    grad.setColorAt(1, QColor(0, 0, 0, 180));
-    p.fillRect(cropped.rect(), grad);
-    p.end();
-
-    m_heroBackground->setPixmap(cropped);
-    m_heroBackground->setVisible(true);
+    // Hero banner disabled
 }
 
 // ── resizeEvent ────────────────────────────────────────────────────
 void AlbumDetailView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    if (m_heroBackground && m_heroBackground->isVisible() && !m_heroSourcePixmap.isNull()) {
-        applyHeroBackground(m_heroSourcePixmap);
-    }
+    // Hero banner disabled — no resize re-apply needed
 }
 
 // ── refreshTheme ────────────────────────────────────────────────────

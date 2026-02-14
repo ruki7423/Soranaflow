@@ -73,7 +73,7 @@ void AppSidebar::setupUI()
 
         auto* collapseBtn = new QPushButton(m_logoBar);
         collapseBtn->setObjectName("collapseButton");
-        collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/chevron-left.svg"));
+        collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/menu.svg"));
         collapseBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
         collapseBtn->setFixedSize(UISizes::smallButtonSize, UISizes::smallButtonSize);
         collapseBtn->setFlat(true);
@@ -452,7 +452,7 @@ void AppSidebar::toggleCollapse()
         // Show the collapse arrow button
         if (collapseBtn) {
             collapseBtn->show();
-            collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/chevron-left.svg"));
+            collapseBtn->setIcon(ThemeManager::instance()->cachedIcon(":/icons/menu.svg"));
         }
 
         // Show elements
