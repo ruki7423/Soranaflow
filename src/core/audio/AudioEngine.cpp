@@ -309,6 +309,18 @@ bool AudioEngine::load(const QString& filePath)
     bool prevWasDoP = m_usingDSDDecoder.load(std::memory_order_relaxed)
                       && m_dsdDecoder && m_dsdDecoder->isDoPMode();
 
+    // Silence the render callback BEFORE teardown to prevent stale DoP data
+    // from reaching the DAC during the transition window.
+    // Critical for DSD→PCM and DSD→DSD transitions where the callback may
+    // fire one more time with old DoP state while format is being changed.
+    m_output->setTransitioning(true);
+
+    // Clear DoP passthrough early so any in-flight callback after stop()
+    // applies volume scaling to silence (zeros) instead of treating it as DoP
+    if (prevWasDoP) {
+        m_output->setDoPPassthrough(false);
+    }
+
     stop();
 
     std::lock_guard<std::mutex> lock(m_decoderMutex);
@@ -491,13 +503,13 @@ bool AudioEngine::load(const QString& filePath)
 
     updateHeadroomGain();
 
-    // Log DSD-involved transitions (output was fully restarted via stop/close/open/start)
+    // Log DSD-involved transitions
     bool nextIsDoP = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
     if (prevWasDoP || nextIsDoP) {
         qDebug() << "[AudioEngine] DSD transition:"
                  << (prevWasDoP ? "DoP" : "PCM") << "->"
                  << (nextIsDoP ? "DoP" : "PCM")
-                 << "— output restarted with AudioUnitReset";
+                 << "— transitioning mute + AudioUnitReset";
     }
 
     qDebug() << "=== AudioEngine::load OK ===";

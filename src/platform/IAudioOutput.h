@@ -54,6 +54,10 @@ public:
     // DoP passthrough — disables volume scaling so DoP markers survive intact
     virtual void setDoPPassthrough(bool) {}
 
+    // Transition mute — silences render callback during format changes
+    // Prevents stale DoP data from reaching DAC during DSD teardown
+    virtual void setTransitioning(bool) {}
+
     // Device queries (were static on CoreAudioOutput — const since they are pure queries)
     virtual std::vector<AudioDevice> enumerateDevices() const = 0;
     virtual double getMaxSampleRate(uint32_t deviceId = 0) const = 0;

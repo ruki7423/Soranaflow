@@ -21,6 +21,7 @@ struct CoreAudioOutput::Impl {
     float                   volume  = 1.0f;
     bool                    bitPerfect = false;
     std::atomic<bool>       dopPassthrough{false};
+    std::atomic<bool>       transitioning{false};
 
     static OSStatus renderCallback(void* inRefCon,
                                    AudioUnitRenderActionFlags* ioActionFlags,
@@ -47,6 +48,10 @@ struct CoreAudioOutput::Impl {
 
         // If main thread is swapping the callback, output silence this cycle
         if (self->swappingCallback.load(std::memory_order_acquire)) return noErr;
+
+        // If transitioning between tracks (format change), output silence
+        // Prevents stale DoP data from reaching the DAC during DSD teardown
+        if (self->transitioning.load(std::memory_order_acquire)) return noErr;
 
         float* outBuf = static_cast<float*>(ioData->mBuffers[0].mData);
         int totalSamples = inNumberFrames * self->format.channels;
@@ -326,6 +331,7 @@ bool CoreAudioOutput::start()
         return false;
 
     d.running.store(true, std::memory_order_release);
+    d.transitioning.store(false, std::memory_order_release);
     return true;
 }
 
@@ -980,6 +986,11 @@ bool CoreAudioOutput::bitPerfectMode() const
 void CoreAudioOutput::setDoPPassthrough(bool enabled)
 {
     m_impl->dopPassthrough.store(enabled, std::memory_order_release);
+}
+
+void CoreAudioOutput::setTransitioning(bool enabled)
+{
+    m_impl->transitioning.store(enabled, std::memory_order_release);
 }
 
 std::vector<AudioDevice> CoreAudioOutput::enumerateDevices() const { return enumerateDevicesStatic(); }

@@ -45,6 +45,9 @@ public:
     // DoP passthrough — skip volume scaling for DSD-over-PCM
     void setDoPPassthrough(bool enabled) override;
 
+    // Transition mute — silences render callback during format changes
+    void setTransitioning(bool enabled) override;
+
     // Static helpers (used by virtual wrappers and internally)
     static std::vector<AudioDevice> enumerateDevicesStatic();
     static double getMaxSampleRateStatic(uint32_t deviceId = 0);
