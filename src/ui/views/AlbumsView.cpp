@@ -108,6 +108,7 @@ void AlbumsView::setupUI()
     // ── Sort combo ────────────────────────────────────────────────────
     m_sortCombo = new StyledComboBox(this);
     m_sortCombo->addItem(QStringLiteral("Artist"), SortArtist);
+    m_sortCombo->addItem(QStringLiteral("Album Artist"), SortAlbumArtist);
     m_sortCombo->addItem(QStringLiteral("Album Artist \u2192 Year"), SortAlbumArtistYear);
     m_sortCombo->addItem(QStringLiteral("Year"), SortYear);
     m_sortCombo->addItem(QStringLiteral("Title"), SortTitle);
@@ -347,9 +348,16 @@ void AlbumsView::reloadAlbums()
             return cmp != 0 ? cmp < 0 : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
         });
         break;
+    case SortAlbumArtist:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            const QString& aArt = a.albumArtist.isEmpty() ? a.artist : a.albumArtist;
+            const QString& bArt = b.albumArtist.isEmpty() ? b.artist : b.albumArtist;
+            int cmp = aArt.compare(bArt, Qt::CaseInsensitive);
+            return cmp != 0 ? cmp < 0 : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
     case SortAlbumArtistYear:
         std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
-            // Prefer albumArtist (ALBUMARTIST tag), fall back to track artist
             const QString& aArt = a.albumArtist.isEmpty() ? a.artist : a.albumArtist;
             const QString& bArt = b.albumArtist.isEmpty() ? b.artist : b.albumArtist;
             int cmp = aArt.compare(bArt, Qt::CaseInsensitive);
