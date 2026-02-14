@@ -1422,6 +1422,16 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             return newFrames;
         }
 
+        // DoP track ended — mute output immediately to prevent zeros
+        // (no DoP markers) from reaching the DAC during the ~50ms until
+        // onPositionTimer fires. Without this, the DAC interprets zeros
+        // as corrupted DoP data → crackle on DSD→PCM and DSD→DSD transitions.
+        // Both stores are atomic — safe for the realtime audio thread.
+        if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()) {
+            m_output->setTransitioning(true);
+            m_output->setDoPPassthrough(false);
+        }
+
         // Signal main thread via atomic flag (RT-safe)
         m_rtPlaybackEndFlag.store(true, std::memory_order_release);
     }
@@ -1439,6 +1449,10 @@ void AudioEngine::onPositionTimer()
         emit gaplessTransitionOccurred();
     }
     if (m_rtPlaybackEndFlag.exchange(false, std::memory_order_acquire)) {
+        // Ensure output is muted before stop (audio thread may have
+        // already set these, but belt-and-suspenders for safety)
+        m_output->setTransitioning(true);
+        m_output->setDoPPassthrough(false);
         m_output->stop();
         m_positionTimer->stop();
         m_state = Stopped;
