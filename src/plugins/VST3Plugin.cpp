@@ -406,7 +406,8 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     if (!m_enabled || !m_loaded || !m_processor || !m_processing)
         return;
 
-    std::lock_guard<std::mutex> lock(m_processMutex);
+    std::unique_lock<std::mutex> lock(m_processMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return;  // Skip this cycle, don't block audio thread
 
     // Ensure buffers are large enough
     if (channels != m_channels || frames > m_maxBlockSize) {

@@ -251,7 +251,8 @@ void VST2Plugin::process(float* buf, int frames, int channels)
     if (!m_enabled || !m_effect || !m_effect->process_float)
         return;
 
-    std::lock_guard<std::mutex> lock(m_processMutex);
+    std::unique_lock<std::mutex> lock(m_processMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return;  // Skip this cycle, don't block audio thread
 
     // One-time diagnostic — capture input peak before processing
     static bool s_vst2Diag = false;
