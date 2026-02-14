@@ -22,6 +22,60 @@ struct CoreAudioOutput::Impl {
     bool                    bitPerfect = false;
     std::atomic<bool>       dopPassthrough{false};
     std::atomic<bool>       transitioning{false};
+    std::atomic<bool>       dopMarker{false};  // DoP marker alternation state for silence generation
+
+    // ── DoP silence helpers ─────────────────────────────────────────────
+    // When the DAC is in DoP mode, it expects every sample to have 0x05 or
+    // 0xFA in the top byte (alternating).  PCM zeros (0x000000) have no
+    // valid markers → the DAC exits DoP mode abruptly → crackle/noise.
+    //
+    // These helpers fill buffers with valid DoP silence: alternating markers
+    // with 0x69 DSD idle payload.  The DAC stays in DSD mode and outputs
+    // clean silence until the AudioUnit is fully stopped.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Fill the entire AudioBufferList with DoP silence.
+    // Used for early-return paths (transitioning, swapping, not-running).
+    static void fillDoPSilenceBuffer(AudioBufferList* ioData, Impl* self)
+    {
+        if (ioData->mNumberBuffers == 0 || self->format.channels <= 0) return;
+        float* buf = static_cast<float*>(ioData->mBuffers[0].mData);
+        int ch = self->format.channels;
+        int totalFrames = (int)(ioData->mBuffers[0].mDataByteSize / (ch * sizeof(float)));
+        bool m = self->dopMarker.load(std::memory_order_relaxed);
+        for (int f = 0; f < totalFrames; f++) {
+            uint8_t mb = m ? 0xFA : 0x05;
+            m = !m;
+            // DoP word: [marker][0x69][0x69] — DSD idle pattern
+            uint32_t dopWord = ((uint32_t)mb << 16) | 0x6969;
+            int32_t signed24 = (int32_t)dopWord;
+            if (signed24 & 0x800000) signed24 |= (int32_t)0xFF000000;
+            float sample = (float)signed24 / 8388608.0f;
+            for (int c = 0; c < ch; c++)
+                buf[f * ch + c] = sample;
+        }
+        self->dopMarker.store(m, std::memory_order_relaxed);
+    }
+
+    // Fill the tail of a buffer (from startFrame to endFrame) with DoP silence.
+    // Used after renderCb returns fewer frames than requested.
+    static void fillDoPSilenceTail(float* buf, int startFrame, int endFrame,
+                                   int channels, Impl* self)
+    {
+        if (startFrame >= endFrame || channels <= 0) return;
+        bool m = self->dopMarker.load(std::memory_order_relaxed);
+        for (int f = startFrame; f < endFrame; f++) {
+            uint8_t mb = m ? 0xFA : 0x05;
+            m = !m;
+            uint32_t dopWord = ((uint32_t)mb << 16) | 0x6969;
+            int32_t signed24 = (int32_t)dopWord;
+            if (signed24 & 0x800000) signed24 |= (int32_t)0xFF000000;
+            float sample = (float)signed24 / 8388608.0f;
+            for (int c = 0; c < channels; c++)
+                buf[f * channels + c] = sample;
+        }
+        self->dopMarker.store(m, std::memory_order_relaxed);
+    }
 
     static OSStatus renderCallback(void* inRefCon,
                                    AudioUnitRenderActionFlags* ioActionFlags,
@@ -34,7 +88,7 @@ struct CoreAudioOutput::Impl {
         (void)inTimeStamp;
         (void)inBusNumber;
 
-        // Fill with silence by default
+        // Fill with PCM silence by default (safe fallback)
         for (UInt32 i = 0; i < ioData->mNumberBuffers; i++) {
             std::memset(ioData->mBuffers[i].mData, 0, ioData->mBuffers[i].mDataByteSize);
         }
@@ -44,14 +98,27 @@ struct CoreAudioOutput::Impl {
         // Safety checks — bail out early if shutting down
         if (!self) return noErr;
         if (self->destroyed.load(std::memory_order_acquire)) return noErr;
-        if (!self->running.load(std::memory_order_acquire)) return noErr;
+
+        bool isDoP = self->dopPassthrough.load(std::memory_order_relaxed);
+
+        if (!self->running.load(std::memory_order_acquire)) {
+            // During stop(): output DoP silence so DAC doesn't see markerless
+            // zeros and exit DoP mode with a crackle
+            if (isDoP) fillDoPSilenceBuffer(ioData, self);
+            return noErr;
+        }
 
         // If main thread is swapping the callback, output silence this cycle
-        if (self->swappingCallback.load(std::memory_order_acquire)) return noErr;
+        if (self->swappingCallback.load(std::memory_order_acquire)) {
+            if (isDoP) fillDoPSilenceBuffer(ioData, self);
+            return noErr;
+        }
 
         // If transitioning between tracks (format change), output silence
-        // Prevents stale DoP data from reaching the DAC during DSD teardown
-        if (self->transitioning.load(std::memory_order_acquire)) return noErr;
+        if (self->transitioning.load(std::memory_order_acquire)) {
+            if (isDoP) fillDoPSilenceBuffer(ioData, self);
+            return noErr;
+        }
 
         float* outBuf = static_cast<float*>(ioData->mBuffers[0].mData);
         int totalSamples = inNumberFrames * self->format.channels;
@@ -66,15 +133,28 @@ struct CoreAudioOutput::Impl {
             // If lock failed, framesRead stays 0 → silence this cycle
         }
 
-        // Zero any remaining samples
-        if (framesRead < (int)inNumberFrames) {
-            int samplesWritten = framesRead * self->format.channels;
-            std::memset(outBuf + samplesWritten, 0,
-                        (totalSamples - samplesWritten) * sizeof(float));
+        // Fill remaining samples with appropriate silence
+        if (isDoP) {
+            // Advance marker tracker by actual DoP frames decoded
+            if (framesRead > 0 && (framesRead % 2))
+                self->dopMarker.store(!self->dopMarker.load(std::memory_order_relaxed),
+                                     std::memory_order_relaxed);
+            // Fill tail with DoP silence (valid markers + idle payload)
+            // so DAC stays in DSD mode instead of seeing PCM zeros
+            if (framesRead < (int)inNumberFrames)
+                fillDoPSilenceTail(outBuf, framesRead, (int)inNumberFrames,
+                                   self->format.channels, self);
+        } else {
+            // PCM: zero remaining samples
+            if (framesRead < (int)inNumberFrames) {
+                int samplesWritten = framesRead * self->format.channels;
+                std::memset(outBuf + samplesWritten, 0,
+                            (totalSamples - samplesWritten) * sizeof(float));
+            }
         }
 
         // Apply volume (skip for DoP — scaling destroys DoP markers)
-        if (!self->dopPassthrough.load(std::memory_order_relaxed)) {
+        if (!isDoP) {
             float vol = self->volume;
             if (vol < 1.0f) {
                 for (int i = 0; i < totalSamples; ++i) {
@@ -986,6 +1066,10 @@ bool CoreAudioOutput::bitPerfectMode() const
 void CoreAudioOutput::setDoPPassthrough(bool enabled)
 {
     m_impl->dopPassthrough.store(enabled, std::memory_order_release);
+    if (enabled) {
+        // Sync marker state with decoder start (always begins with 0x05 = false)
+        m_impl->dopMarker.store(false, std::memory_order_relaxed);
+    }
 }
 
 void CoreAudioOutput::setTransitioning(bool enabled)

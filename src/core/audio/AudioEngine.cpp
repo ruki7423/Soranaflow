@@ -315,13 +315,15 @@ bool AudioEngine::load(const QString& filePath)
     // fire one more time with old DoP state while format is being changed.
     m_output->setTransitioning(true);
 
-    // Clear DoP passthrough early so any in-flight callback after stop()
-    // applies volume scaling to silence (zeros) instead of treating it as DoP
+    // Keep dopPassthrough=true during stop() so the render callback outputs
+    // DoP silence (valid markers) instead of PCM zeros.  The DAC stays in
+    // DSD mode and produces clean silence until the AudioUnit fully stops.
+    stop();
+
+    // Clear DoP passthrough AFTER stop — AudioUnit is stopped, no more callbacks
     if (prevWasDoP) {
         m_output->setDoPPassthrough(false);
     }
-
-    stop();
 
     std::lock_guard<std::mutex> lock(m_decoderMutex);
 
@@ -1422,14 +1424,14 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             return newFrames;
         }
 
-        // DoP track ended — mute output immediately to prevent zeros
-        // (no DoP markers) from reaching the DAC during the ~50ms until
-        // onPositionTimer fires. Without this, the DAC interprets zeros
-        // as corrupted DoP data → crackle on DSD→PCM and DSD→DSD transitions.
-        // Both stores are atomic — safe for the realtime audio thread.
+        // DoP track ended — set transitioning so the render callback outputs
+        // DoP silence (valid markers + idle payload) instead of calling
+        // renderCb.  Keep dopPassthrough=true so the callback knows to use
+        // DoP-formatted silence rather than PCM zeros.  The DAC stays in DSD
+        // mode and produces clean silence during the ~50ms until
+        // onPositionTimer stops the AudioUnit.
         if (m_usingDSDDecoder && m_dsdDecoder->isDoPMode()) {
             m_output->setTransitioning(true);
-            m_output->setDoPPassthrough(false);
         }
 
         // Signal main thread via atomic flag (RT-safe)
@@ -1450,10 +1452,13 @@ void AudioEngine::onPositionTimer()
     }
     if (m_rtPlaybackEndFlag.exchange(false, std::memory_order_acquire)) {
         // Ensure output is muted before stop (audio thread may have
-        // already set these, but belt-and-suspenders for safety)
+        // already set these, but belt-and-suspenders for safety).
+        // Keep dopPassthrough=true so render callback outputs DoP silence
+        // (valid markers) instead of PCM zeros during AudioOutputUnitStop.
         m_output->setTransitioning(true);
-        m_output->setDoPPassthrough(false);
         m_output->stop();
+        // Clear AFTER stop — AudioUnit is stopped, no more callbacks
+        m_output->setDoPPassthrough(false);
         m_positionTimer->stop();
         m_state = Stopped;
         emit playbackFinished();
