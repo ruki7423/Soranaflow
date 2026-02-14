@@ -4,21 +4,24 @@
 #include <mutex>
 #include <vector>
 #include <string>
+#include "IDSPProcessor.h"
 #ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
 #endif
 
-class ConvolutionProcessor
+class ConvolutionProcessor : public IDSPProcessor
 {
 public:
     ConvolutionProcessor();
-    ~ConvolutionProcessor();
+    ~ConvolutionProcessor() override;
 
     static constexpr int MAX_CHANNELS = 24;
 
-    // Thread-safe controls (called from main thread)
-    void setEnabled(bool enabled);
-    bool isEnabled() const { return m_enabled.load(std::memory_order_relaxed); }
+    // IDSPProcessor interface
+    void process(float* buf, int frames, int channels) override;
+    std::string getName() const override { return "Convolution"; }
+    bool isEnabled() const override { return m_enabled.load(std::memory_order_relaxed); }
+    void setEnabled(bool enabled) override;
 
     void setSampleRate(int rate);
 
@@ -27,10 +30,6 @@ public:
     void clearIR();
     bool hasIR() const { return m_hasIR.load(std::memory_order_relaxed); }
     std::string irFilePath() const;
-
-    // Process interleaved float samples in-place (1..MAX_CHANNELS)
-    // Called ONLY from the audio render thread
-    void process(float* buffer, int frameCount, int channels);
 
     // Self-test: verify convolution math on startup
     static bool selfTest();

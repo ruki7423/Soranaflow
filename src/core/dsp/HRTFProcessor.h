@@ -11,6 +11,7 @@
 // If libmysofa is not installed, this processor is disabled at compile time.
 
 #include <QString>
+#include "IDSPProcessor.h"
 
 #ifdef HAVE_LIBMYSOFA
 
@@ -18,11 +19,11 @@
 #include <vector>
 #include <atomic>
 
-class HRTFProcessor
+class HRTFProcessor : public IDSPProcessor
 {
 public:
     HRTFProcessor();
-    ~HRTFProcessor();
+    ~HRTFProcessor() override;
 
     // Load SOFA file containing HRTF data
     bool loadSOFA(const QString& filePath);
@@ -30,9 +31,12 @@ public:
     bool isLoaded() const { return m_loaded; }
     QString sofaPath() const { return m_sofaPath; }
 
-    // Enable/disable processing
-    void setEnabled(bool enabled);
-    bool isEnabled() const { return m_enabled.load(std::memory_order_relaxed); }
+    // IDSPProcessor interface
+    void process(float* buf, int frames, int channels) override;
+    std::string getName() const override { return "HRTF"; }
+    bool isEnabled() const override { return m_enabled.load(std::memory_order_relaxed); }
+    void setEnabled(bool enabled) override;
+    void reset() override;
 
     // Speaker angle from center (10° to 90°, default 30°)
     void setSpeakerAngle(float degrees);
@@ -41,12 +45,8 @@ public:
     // Prepare for given sample rate
     void setSampleRate(int rate);
 
-    // Process interleaved stereo float samples in-place
-    // Called ONLY from the audio render thread
+    // Direct stereo process — called by AudioEngine render path
     void process(float* buffer, int frameCount);
-
-    // Reset filter state
-    void reset();
 
 private:
     void updateFilters();
@@ -81,26 +81,28 @@ private:
 #else // !HAVE_LIBMYSOFA
 
 // Stub class when libmysofa is not available
-class HRTFProcessor
+class HRTFProcessor : public IDSPProcessor
 {
 public:
     HRTFProcessor() = default;
-    ~HRTFProcessor() = default;
+    ~HRTFProcessor() override = default;
 
     bool loadSOFA(const QString&) { return false; }
     void unloadSOFA() {}
     bool isLoaded() const { return false; }
     QString sofaPath() const { return QString(); }
 
-    void setEnabled(bool) {}
-    bool isEnabled() const { return false; }
+    void process(float*, int, int) override {}
+    std::string getName() const override { return "HRTF"; }
+    bool isEnabled() const override { return false; }
+    void setEnabled(bool) override {}
+    void reset() override {}
 
     void setSpeakerAngle(float) {}
     float speakerAngle() const { return 30.0f; }
 
     void setSampleRate(int) {}
     void process(float*, int) {}
-    void reset() {}
 
     static bool isAvailable() { return false; }
 };

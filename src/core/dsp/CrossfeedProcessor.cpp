@@ -73,6 +73,12 @@ void CrossfeedProcessor::recalculate()
     m_delayLen = std::max(m_delayLen, 1);
 }
 
+void CrossfeedProcessor::process(float* buf, int frames, int channels)
+{
+    (void)channels; // stereo-only
+    process(buf, frames);
+}
+
 void CrossfeedProcessor::process(float* buffer, int frameCount)
 {
     bool wantEnabled = m_enabled.load(std::memory_order_relaxed);

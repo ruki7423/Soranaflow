@@ -2,22 +2,26 @@
 
 #include <atomic>
 #include <cmath>
+#include "IDSPProcessor.h"
 
-class CrossfeedProcessor
+class CrossfeedProcessor : public IDSPProcessor
 {
 public:
     enum Level { Light = 0, Medium = 1, Strong = 2 };
 
     CrossfeedProcessor();
 
-    void setEnabled(bool enabled);
-    bool isEnabled() const { return m_enabled.load(std::memory_order_relaxed); }
+    // IDSPProcessor interface
+    void process(float* buf, int frames, int channels) override;
+    std::string getName() const override { return "Crossfeed"; }
+    bool isEnabled() const override { return m_enabled.load(std::memory_order_relaxed); }
+    void setEnabled(bool enabled) override;
+
     void setLevel(Level level);
     Level level() const { return m_level; }
     void setSampleRate(int rate);
 
-    // Process interleaved stereo float samples in-place
-    // Called ONLY from the audio render thread
+    // Direct stereo process — called by AudioEngine render path
     void process(float* buffer, int frameCount);
 
 private:

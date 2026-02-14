@@ -144,6 +144,12 @@ void HRTFProcessor::reset()
     m_wetMix = 0.0f;
 }
 
+void HRTFProcessor::process(float* buf, int frames, int channels)
+{
+    (void)channels; // stereo-only
+    process(buf, frames);
+}
+
 void HRTFProcessor::process(float* buffer, int frameCount)
 {
     bool wantEnabled = m_enabled.load(std::memory_order_relaxed);
