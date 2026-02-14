@@ -165,9 +165,6 @@ private:
     // HRTF (Binaural Spatial Audio)
     HRTFProcessor m_hrtf;
 
-    // Render diagnostics
-    std::atomic<bool> m_renderDiagOnce{false};
-
     // RT-safe signaling flags (set on audio thread, polled on main thread)
     std::atomic<bool> m_rtGaplessFlag{false};
     std::atomic<bool> m_rtPlaybackEndFlag{false};

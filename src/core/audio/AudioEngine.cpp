@@ -1258,7 +1258,6 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
 
         // Apply DSP pipeline (gain, EQ, plugins) — skip in bit-perfect mode or DoP
         if (framesRead > 0 && !dopPassthrough && !m_bitPerfect.load(std::memory_order_relaxed)) {
-            (void)m_renderDiagOnce.exchange(true, std::memory_order_relaxed);
             m_dspPipeline->process(buf, framesRead, channels);
         }
 

@@ -81,14 +81,21 @@ bool VST3Plugin::loadFromPath(const std::string& vst3Path)
         return false;
     }
 
-    // Find the first Audio Module Class (effect/instrument)
+    // Find the best Audio Module Class — prefer Fx over Instrument
     int classIndex = -1;
+    int fallbackIndex = -1;
     for (int i = 0; i < (int)classInfos.size(); ++i) {
         if (classInfos[i].category() == kVstAudioEffectClass) {
-            classIndex = i;
-            break;
+            auto sub = classInfos[i].subCategoriesString();
+            if (sub.find("Fx") != std::string::npos) {
+                classIndex = i;  // Fx class — preferred for audio processing
+                break;
+            }
+            if (fallbackIndex < 0)
+                fallbackIndex = i;  // first non-Fx audio class
         }
     }
+    if (classIndex < 0) classIndex = fallbackIndex;
     if (classIndex < 0) {
         classIndex = 0;
         qDebug() << "VST3: No audio effect class found, using first class";
@@ -401,16 +408,6 @@ void VST3Plugin::process(float* buf, int frames, int channels)
 
     std::lock_guard<std::mutex> lock(m_processMutex);
 
-    // One-time diagnostic — capture input peak
-    static bool s_vst3Diag = false;
-    bool doLog = !s_vst3Diag;
-    float inputPeak = 0;
-    if (doLog) {
-        int n = std::min(frames * channels, 1024);
-        for (int i = 0; i < n; ++i)
-            inputPeak = std::max(inputPeak, std::abs(buf[i]));
-    }
-
     // Ensure buffers are large enough
     if (channels != m_channels || frames > m_maxBlockSize) {
         m_channels = channels;
@@ -484,19 +481,6 @@ void VST3Plugin::process(float* buf, int frames, int channels)
         for (int ch = 0; ch < channels; ++ch) {
             buf[f * channels + ch] = m_outputChannelBuffers[ch][f];
         }
-    }
-
-    // One-time diagnostic — capture output peak and log comparison
-    if (doLog) {
-        float outputPeak = 0;
-        int n = std::min(frames * channels, 1024);
-        for (int i = 0; i < n; ++i)
-            outputPeak = std::max(outputPeak, std::abs(buf[i]));
-        qDebug() << "[VST3 DIAG]" << QString::fromStdString(m_pluginName)
-                 << "in:" << inputPeak << "out:" << outputPeak
-                 << "frames:" << frames << "ch:" << channels
-                 << "enabled:" << m_enabled;
-        s_vst3Diag = true;
     }
 }
 
