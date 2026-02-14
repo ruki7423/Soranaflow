@@ -77,8 +77,43 @@ else()
     endif()
 endif()
 
-# Source files
-set(CORE_SOURCES
+# ── Common include directories for all modules ───────────────────
+set(SORANA_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/dsp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/library
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/plugins
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/widgets
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/views
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/dialogs
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/radio
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/apple
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/tidal
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+    ${CMAKE_CURRENT_BINARY_DIR}  # For generated SoranaFlow-Swift.h
+)
+
+# Helper: configure a Sorana module OBJECT library
+function(sorana_module_setup TARGET)
+    set_target_properties(${TARGET} PROPERTIES
+        AUTOMOC ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+    target_include_directories(${TARGET} PRIVATE ${SORANA_INCLUDE_DIRS})
+endfunction()
+
+# ══════════════════════════════════════════════════════════════════
+#  Module OBJECT Libraries
+# ══════════════════════════════════════════════════════════════════
+
+# ── sorana_core ───────────────────────────────────────────────────
+add_library(sorana_core OBJECT
     src/core/IStreamingService.h
     src/core/ServiceLocator.h
     src/core/MusicData.h
@@ -100,8 +135,14 @@ set(CORE_SOURCES
     src/core/lyrics/LyricsProvider.h
     src/core/lyrics/LyricsProvider.cpp
 )
+sorana_module_setup(sorana_core)
+target_link_libraries(sorana_core PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Svg Qt6::Sql Qt6::Network Qt6::Concurrent
+    PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE
+)
 
-set(LIBRARY_SOURCES
+# ── sorana_library ────────────────────────────────────────────────
+add_library(sorana_library OBJECT
     src/core/library/LibraryDatabase.h
     src/core/library/LibraryDatabase.cpp
     src/core/library/DatabaseContext.h
@@ -121,8 +162,11 @@ set(LIBRARY_SOURCES
     src/core/library/AutoOrganizer.h
     src/core/library/AutoOrganizer.cpp
 )
+sorana_module_setup(sorana_library)
+target_link_libraries(sorana_library PRIVATE Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Concurrent)
 
-set(AUDIO_SOURCES
+# ── sorana_audio ──────────────────────────────────────────────────
+add_library(sorana_audio OBJECT
     src/core/audio/AudioFormat.h
     src/core/audio/SignalPathInfo.h
     src/core/audio/SignalPathBuilder.h
@@ -147,8 +191,15 @@ set(AUDIO_SOURCES
     src/core/audio/AudioDeviceManager.h
     src/platform/macos/AudioDeviceManager_mac.cpp
 )
+sorana_module_setup(sorana_audio)
+target_link_libraries(sorana_audio PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Concurrent
+    PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE
+    PkgConfig::TAGLIB PkgConfig::SOXR PkgConfig::EBUR128
+)
 
-set(DSP_SOURCES
+# ── sorana_dsp ────────────────────────────────────────────────────
+add_library(sorana_dsp OBJECT
     src/core/dsp/IDSPProcessor.h
     src/core/dsp/GainProcessor.h
     src/core/dsp/EqualizerProcessor.h
@@ -166,8 +217,14 @@ set(DSP_SOURCES
     src/core/dsp/HRTFProcessor.h
     src/core/dsp/HRTFProcessor.cpp
 )
+sorana_module_setup(sorana_dsp)
+target_link_libraries(sorana_dsp PRIVATE
+    Qt6::Core PkgConfig::SOXR PkgConfig::EBUR128
+    PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE
+)
 
-set(METADATA_SOURCES
+# ── sorana_metadata ───────────────────────────────────────────────
+add_library(sorana_metadata OBJECT
     src/metadata/RateLimiter.h
     src/metadata/RateLimiter.cpp
     src/metadata/MusicBrainzProvider.h
@@ -183,15 +240,27 @@ set(METADATA_SOURCES
     src/metadata/AudioFingerprinter.h
     src/metadata/AudioFingerprinter.cpp
 )
+sorana_module_setup(sorana_metadata)
+target_link_libraries(sorana_metadata PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Network PkgConfig::CHROMAPRINT
+    PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE
+)
 
-set(RADIO_SOURCES
+# ── sorana_radio ──────────────────────────────────────────────────
+add_library(sorana_radio OBJECT
     src/radio/LastFmProvider.h
     src/radio/LastFmProvider.cpp
     src/radio/AutoplayManager.h
     src/radio/AutoplayManager.cpp
 )
+sorana_module_setup(sorana_radio)
+target_link_libraries(sorana_radio PRIVATE Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Network)
 
-set(PLUGIN_SOURCES
+# VST3 SDK path (needed by sorana_plugins)
+set(VST3_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk)
+
+# ── sorana_plugins ────────────────────────────────────────────────
+add_library(sorana_plugins OBJECT
     src/plugins/VST3Host.h
     src/plugins/VST3Host.cpp
     src/plugins/VST3Plugin.h
@@ -201,10 +270,14 @@ set(PLUGIN_SOURCES
     src/plugins/VST2Plugin.h
     src/plugins/VST2Plugin.cpp
 )
+sorana_module_setup(sorana_plugins)
+target_include_directories(sorana_plugins PRIVATE
+    ${VST3_SDK_ROOT}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vst2sdk/include
+)
+target_link_libraries(sorana_plugins PRIVATE Qt6::Core Qt6::Widgets)
 
-# VST3 SDK sources
-set(VST3_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk)
-
+# VST3 SDK sources (VST3_SDK_ROOT defined above with sorana_plugins)
 set(VST3_SDK_SOURCES
     # Base sources
     ${VST3_SDK_ROOT}/base/source/baseiids.cpp
@@ -248,7 +321,8 @@ if(APPLE)
     )
 endif()
 
-set(PLATFORM_SOURCES
+# ── sorana_platform ───────────────────────────────────────────────
+add_library(sorana_platform OBJECT
     src/platform/AudioDevice.h
     src/platform/IAudioOutput.h
     src/platform/macos/CoreAudioOutput.h
@@ -262,8 +336,16 @@ set(PLATFORM_SOURCES
     src/platform/macos/AudioProcessTap.h
     src/platform/macos/AudioProcessTap.mm
 )
+sorana_module_setup(sorana_platform)
+target_link_libraries(sorana_platform PRIVATE Qt6::Core Qt6::Widgets)
+set(SPARKLE_PATH "/opt/homebrew/Caskroom/sparkle/2.8.1/Sparkle.framework")
+if(APPLE AND EXISTS "${SPARKLE_PATH}")
+    # Add parent dir as framework search path so #import <Sparkle/Sparkle.h> works
+    get_filename_component(SPARKLE_PARENT "${SPARKLE_PATH}" DIRECTORY)
+    target_compile_options(sorana_platform PRIVATE "-F${SPARKLE_PARENT}")
+endif()
 
-# BookmarkManager + MacMediaIntegration need ARC
+# .mm files needing ARC
 if(APPLE)
     set_source_files_properties(src/platform/macos/BookmarkManager.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
@@ -279,26 +361,31 @@ if(APPLE)
     )
 endif()
 
-# Apple Music integration (macOS 13+)
+# ── sorana_apple_music (macOS 13+) ────────────────────────────────
 if(APPLE)
-    set(APPLE_MUSIC_SOURCES
+    add_library(sorana_apple_music OBJECT
         src/apple/AppleMusicManager.h
         src/apple/AppleMusicBridge.mm
         src/apple/MusicKitPlayer.h
         src/apple/MusicKitPlayer.mm
     )
+    sorana_module_setup(sorana_apple_music)
+    target_link_libraries(sorana_apple_music PRIVATE Qt6::Core Qt6::Network)
     set_source_files_properties(src/apple/AppleMusicBridge.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
     )
 endif()
 
-# Tidal integration
-set(TIDAL_SOURCES
+# ── sorana_tidal ──────────────────────────────────────────────────
+add_library(sorana_tidal OBJECT
     src/tidal/TidalManager.h
     src/tidal/TidalManager.cpp
 )
+sorana_module_setup(sorana_tidal)
+target_link_libraries(sorana_tidal PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
 
-set(WIDGET_SOURCES
+# ── sorana_widgets ────────────────────────────────────────────────
+add_library(sorana_widgets OBJECT
     src/widgets/StyledButton.h
     src/widgets/StyledButton.cpp
     src/widgets/StyledSlider.h
@@ -322,8 +409,11 @@ set(WIDGET_SOURCES
     src/widgets/LyricsWidget.h
     src/widgets/LyricsWidget.cpp
 )
+sorana_module_setup(sorana_widgets)
+target_link_libraries(sorana_widgets PRIVATE Qt6::Core Qt6::Widgets Qt6::Svg Qt6::SvgWidgets Qt6::Sql Qt6::Network)
 
-set(UI_SOURCES
+# ── sorana_ui (views, dialogs, services) ──────────────────────────
+add_library(sorana_ui OBJECT
     src/ui/SoranaFlowLogo.h
     src/ui/SoranaFlowLogo.cpp
     src/ui/AppSidebar.h
@@ -332,9 +422,6 @@ set(UI_SOURCES
     src/ui/PlaybackBar.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
-)
-
-set(VIEW_SOURCES
     src/ui/views/NowPlayingView.h
     src/ui/views/NowPlayingView.cpp
     src/ui/views/LibraryView.h
@@ -384,15 +471,17 @@ set(VIEW_SOURCES
     src/ui/dialogs/NewPlaylistDialog.cpp
     src/ui/dialogs/StyledMessageBox.h
     src/ui/dialogs/StyledMessageBox.cpp
-)
-
-set(UI_SERVICES_SOURCES
     src/ui/services/MetadataFixService.h
     src/ui/services/MetadataFixService.cpp
     src/ui/services/CoverArtService.h
     src/ui/services/CoverArtService.cpp
     src/ui/services/NavigationService.h
     src/ui/services/NavigationService.cpp
+)
+sorana_module_setup(sorana_ui)
+target_link_libraries(sorana_ui PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Svg Qt6::SvgWidgets Qt6::Sql Qt6::Network Qt6::Concurrent
+    PkgConfig::SOXR PkgConfig::TAGLIB PkgConfig::CHROMAPRINT
 )
 
 set(RESOURCES
@@ -413,47 +502,28 @@ if(APPLE)
         MACOSX_PACKAGE_LOCATION "Resources"
     )
 
-    # Sparkle auto-update framework
-    set(SPARKLE_PATH "/opt/homebrew/Caskroom/sparkle/2.8.1/Sparkle.framework")
-
     add_executable(${PROJECT_NAME} MACOSX_BUNDLE
         src/main.cpp
         ${APP_ICON_FILE}
-        ${CORE_SOURCES}
-        ${LIBRARY_SOURCES}
-        ${AUDIO_SOURCES}
-        ${DSP_SOURCES}
-        ${METADATA_SOURCES}
-        ${RADIO_SOURCES}
-        ${PLUGIN_SOURCES}
-        ${PLATFORM_SOURCES}
-        ${APPLE_MUSIC_SOURCES}
-        ${TIDAL_SOURCES}
-        ${WIDGET_SOURCES}
-        ${UI_SOURCES}
-        ${VIEW_SOURCES}
-        ${UI_SERVICES_SOURCES}
         ${RESOURCES}
         ${VST3_SDK_SOURCES}
         ${VST3_SDK_OBJCXX_SOURCES}
     )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        sorana_core sorana_library sorana_audio sorana_dsp
+        sorana_metadata sorana_radio sorana_plugins sorana_platform
+        sorana_apple_music sorana_tidal sorana_widgets sorana_ui
+    )
 else()
     add_executable(${PROJECT_NAME}
         src/main.cpp
-        ${CORE_SOURCES}
-        ${LIBRARY_SOURCES}
-        ${AUDIO_SOURCES}
-        ${DSP_SOURCES}
-        ${METADATA_SOURCES}
-        ${RADIO_SOURCES}
-        ${PLUGIN_SOURCES}
-        ${PLATFORM_SOURCES}
-        ${WIDGET_SOURCES}
-        ${UI_SOURCES}
-        ${VIEW_SOURCES}
-        ${UI_SERVICES_SOURCES}
         ${RESOURCES}
         ${VST3_SDK_SOURCES}
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        sorana_core sorana_library sorana_audio sorana_dsp
+        sorana_metadata sorana_radio sorana_plugins sorana_platform
+        sorana_tidal sorana_widgets sorana_ui
     )
 endif()
 
@@ -479,27 +549,12 @@ configure_file(
 )
 include_directories(${CMAKE_BINARY_DIR}/generated)
 
-# Include directories
+# Include directories (for main.cpp + VST3 SDK sources)
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/audio
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/dsp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/library
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/plugins
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/widgets
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/views
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/dialogs
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/metadata
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/radio
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/apple
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/tidal
+    ${SORANA_INCLUDE_DIRS}
     ${VST3_SDK_ROOT}
     ${CMAKE_CURRENT_SOURCE_DIR}/external/vst2sdk/include
     ${TAGLIB_INCLUDE_DIRS}
-    ${CMAKE_CURRENT_BINARY_DIR}  # For generated SoranaFlow-Swift.h
 )
 
 # Link Qt6 libraries
