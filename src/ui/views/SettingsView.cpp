@@ -2613,8 +2613,10 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
                 m_vst3AvailableList->addItem(item);
             }
             if (plugins.empty()) {
-                m_vst3AvailableList->addItem(
-                    QStringLiteral("No VST3 plugins found"));
+                auto* hint = new QListWidgetItem(QStringLiteral("No VST3 plugins found"));
+                hint->setFlags(Qt::NoItemFlags);
+                hint->setForeground(QColor(128, 128, 128));
+                m_vst3AvailableList->addItem(hint);
             }
         }
         // Scan VST2
@@ -2631,8 +2633,10 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
                 m_vst2AvailableList->addItem(item);
             }
             if (plugins.empty()) {
-                m_vst2AvailableList->addItem(
-                    QStringLiteral("No VST2 plugins found"));
+                auto* hint = new QListWidgetItem(QStringLiteral("No VST2 plugins found"));
+                hint->setFlags(Qt::NoItemFlags);
+                hint->setForeground(QColor(128, 128, 128));
+                m_vst2AvailableList->addItem(hint);
             }
         }
     });
@@ -2675,8 +2679,13 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
     m_vst3AvailableList->setMinimumHeight(80);
     m_vst3AvailableList->setMaximumHeight(150);
     m_vst3AvailableList->setStyleSheet(vstListStyle);
-    m_vst3AvailableList->addItem(
-        QStringLiteral("Click \"Scan for Plugins\" to detect installed VST3 plugins"));
+    {
+        auto* hint = new QListWidgetItem(
+            QStringLiteral("Click \"Scan for Plugins\" to detect installed VST3 plugins"));
+        hint->setFlags(Qt::NoItemFlags);
+        hint->setForeground(QColor(128, 128, 128));
+        m_vst3AvailableList->addItem(hint);
+    }
     vstLayout->addWidget(m_vst3AvailableList);
 
     // Double-click to add
@@ -2684,13 +2693,25 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
             this, [this](QListWidgetItem* item) {
         if (!item || !(item->flags() & Qt::ItemIsEnabled)) return;
 
-        int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginPath = item->data(Qt::UserRole + 1).toString();
+        if (pluginPath.isEmpty()) return;
+
+        // Skip if already in active list
+        for (int i = 0; i < m_vst3ActiveList->count(); ++i) {
+            if (m_vst3ActiveList->item(i)->data(Qt::UserRole + 1).toString() == pluginPath)
+                return;
+        }
+
+        int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginName = item->text();
 
         auto* host = VST3Host::instance();
         auto proc = host->createProcessor(pluginIndex);
-        if (!proc) return;
+        if (!proc) {
+            qWarning() << "[VST3] Double-click: failed to create processor for"
+                        << pluginName;
+            return;
+        }
 
         auto* pipeline = AudioEngine::instance()->dspPipeline();
         if (pipeline) pipeline->addProcessor(proc);
@@ -2716,8 +2737,13 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
     m_vst2AvailableList->setMinimumHeight(80);
     m_vst2AvailableList->setMaximumHeight(150);
     m_vst2AvailableList->setStyleSheet(vstListStyle);
-    m_vst2AvailableList->addItem(
-        QStringLiteral("Click \"Scan for Plugins\" to detect installed VST2 plugins"));
+    {
+        auto* hint = new QListWidgetItem(
+            QStringLiteral("Click \"Scan for Plugins\" to detect installed VST2 plugins"));
+        hint->setFlags(Qt::NoItemFlags);
+        hint->setForeground(QColor(128, 128, 128));
+        m_vst2AvailableList->addItem(hint);
+    }
     vstLayout->addWidget(m_vst2AvailableList);
 
     // Double-click VST2 to add
@@ -2725,12 +2751,24 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
             this, [this](QListWidgetItem* item) {
         if (!item || !(item->flags() & Qt::ItemIsEnabled)) return;
 
-        int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginPath = item->data(Qt::UserRole + 1).toString();
+        if (pluginPath.isEmpty()) return;
+
+        // Skip if already in active list
+        for (int i = 0; i < m_vst3ActiveList->count(); ++i) {
+            if (m_vst3ActiveList->item(i)->data(Qt::UserRole + 1).toString() == pluginPath)
+                return;
+        }
+
+        int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginName = item->text();
 
         auto proc = VST2Host::instance()->createProcessor(pluginIndex);
-        if (!proc) return;
+        if (!proc) {
+            qWarning() << "[VST2] Double-click: failed to create processor for"
+                        << pluginName;
+            return;
+        }
 
         auto* pipeline = AudioEngine::instance()->dspPipeline();
         if (pipeline) pipeline->addProcessor(proc);
@@ -2752,13 +2790,39 @@ QWidget* SettingsView::createVSTCard(QVBoxLayout* parentLayout)
             .arg(ThemeManager::instance()->colors().foreground));
     vstLayout->addWidget(activeLabel);
 
-    // Active plugins list
-    m_vst3ActiveList = new QListWidget(vstCard);
+    // Active plugins list (with hint overlay)
+    auto* activeContainer = new QWidget(vstCard);
+    activeContainer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+    auto* activeStack = new QVBoxLayout(activeContainer);
+    activeStack->setContentsMargins(0, 0, 0, 0);
+    activeStack->setSpacing(0);
+
+    m_vst3ActiveList = new QListWidget(activeContainer);
     m_vst3ActiveList->setMinimumHeight(60);
     m_vst3ActiveList->setMaximumHeight(120);
     m_vst3ActiveList->setDragDropMode(QAbstractItemView::InternalMove);
     m_vst3ActiveList->setStyleSheet(vstListStyle);
-    vstLayout->addWidget(m_vst3ActiveList);
+    activeStack->addWidget(m_vst3ActiveList);
+
+    auto* activeHintLabel = new QLabel(
+        QStringLiteral("Double-click a scanned plugin to activate it"), activeContainer);
+    activeHintLabel->setStyleSheet(QStringLiteral(
+        "color: %1; font-style: italic; font-size: 12px; padding: 8px;"
+        " background: transparent; border: none;")
+            .arg(c.foregroundMuted));
+    activeHintLabel->setAlignment(Qt::AlignCenter);
+    activeStack->addWidget(activeHintLabel);
+
+    // Hide hint when active list has items, show when empty
+    auto updateHint = [activeHintLabel, this]() {
+        activeHintLabel->setVisible(m_vst3ActiveList->count() == 0);
+    };
+    connect(m_vst3ActiveList->model(), &QAbstractItemModel::rowsInserted,
+            activeHintLabel, updateHint);
+    connect(m_vst3ActiveList->model(), &QAbstractItemModel::rowsRemoved,
+            activeHintLabel, updateHint);
+
+    vstLayout->addWidget(activeContainer);
 
     // Enable/disable via checkbox
     connect(m_vst3ActiveList, &QListWidget::itemChanged,

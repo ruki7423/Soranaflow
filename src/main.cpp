@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
     app.setOrganizationDomain("soranaflow.com");
     app.setOrganizationName("SoranaFlow");
     app.setApplicationName("Sorana Flow");
-    app.setApplicationVersion("1.5.0");
+    app.setApplicationVersion(APP_VERSION);
 
     // Single-instance guard — prevent duplicate launches
     QLockFile lockFile(QDir::tempPath() + QStringLiteral("/soranaflow.lock"));
