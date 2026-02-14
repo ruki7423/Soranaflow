@@ -25,22 +25,24 @@
 
 ---
 
-## What's New (v1.5.4)
-
-### Performance
-- Fixed ~2 minute startup delay when external drives were disconnected
-- Eliminated lag when resizing column headers
-- Faster search, album browsing, and artist views
+## What's New (v1.6.0)
 
 ### Audio
-- Fixed DSD DoP playback (crackling and silence after ~30 seconds)
-- Resolved silent Apple Music playback after disconnect/reconnect
+- Fixed DSD DoP crackling, pops, and track transition noise
+- Fixed VST3 plugin class selection causing silent playback
+- Buffer size now filtered by device capability
+- Gapless DoP marker state preserved across track boundaries
 
-### User Interface
-- Fixed library columns (Artist, Album, Format, Duration) not displaying after update
-- Column widths automatically reset and are freely resizable
-- Restored Title column resizing in library view
-- Smoother cover art loading and window resizing
+### Apple Music
+- Fixed first-click playback failure with state machine + command queue
+- Added loading indicator during MusicKit DRM handshake
+
+### Library & UI
+- New Album Artist column with sortable header
+- Albums view: new sort options (Artist, Album Artist, Year, Title)
+- Responsive layout: window resize adapts all views
+- Artist page: album covers, popular tracks, clickable URLs
+- Auto-organize confirmation warning
 
 ## Features
 
@@ -84,7 +86,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.5.4](https://github.com/ruki7423/Soranaflow/releases/download/v1.5.4/Soranaflow.1.5.4.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.6.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.6.0/SoranaFlow-1.6.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -119,7 +121,7 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 19 (v1.0.0 → v1.5.4) |
+| GitHub Releases | 20 (v1.0.0 → v1.6.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
@@ -127,10 +129,14 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## Changelog
 
+### v1.6.0 — DSD DoP Fix, Apple Music, Responsive UI
+
+- Fixed DSD crackling, Apple Music first-click, VST3 class selection
+- See [What's New (v1.6.0)](#whats-new-v160) for full details
+
 ### v1.5.4 — Performance & Column Fixes
 
-- Fixed startup delay, column resize lag, DSD playback, and library display issues
-- See [What's New (v1.5.4)](#whats-new-v154) for full details
+- Fixed startup delay, column resize lag, and library display issues
 
 ### v1.5.3 — Header State Migration
 
