@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
-project(SoranaFlow VERSION 1.6.0 LANGUAGES CXX)
+project(SoranaFlow VERSION 1.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -109,6 +109,10 @@ set(LIBRARY_SOURCES
 set(AUDIO_SOURCES
     src/core/audio/AudioFormat.h
     src/core/audio/SignalPathInfo.h
+    src/core/audio/SignalPathBuilder.h
+    src/core/audio/SignalPathBuilder.cpp
+    src/core/audio/VolumeLevelingManager.h
+    src/core/audio/VolumeLevelingManager.cpp
     src/core/audio/AudioDecoder.h
     src/core/audio/AudioDecoder.cpp
     src/core/audio/DSDDecoder.h
@@ -330,6 +334,17 @@ set(VIEW_SOURCES
     src/ui/views/QueueView.cpp
     src/ui/views/SettingsView.h
     src/ui/views/SettingsView.cpp
+    src/ui/views/settings/SettingsUtils.h
+    src/ui/views/settings/AudioSettingsTab.h
+    src/ui/views/settings/AudioSettingsTab.cpp
+    src/ui/views/settings/LibrarySettingsTab.h
+    src/ui/views/settings/LibrarySettingsTab.cpp
+    src/ui/views/settings/AppleMusicSettingsTab.h
+    src/ui/views/settings/AppleMusicSettingsTab.cpp
+    src/ui/views/settings/AppearanceSettingsTab.h
+    src/ui/views/settings/AppearanceSettingsTab.cpp
+    src/ui/views/settings/AboutSettingsTab.h
+    src/ui/views/settings/AboutSettingsTab.cpp
     src/ui/views/AppleMusicView.h
     src/ui/views/AppleMusicView.cpp
     src/ui/views/FolderBrowserView.h
@@ -348,6 +363,13 @@ set(VIEW_SOURCES
     src/ui/dialogs/NewPlaylistDialog.cpp
     src/ui/dialogs/StyledMessageBox.h
     src/ui/dialogs/StyledMessageBox.cpp
+)
+
+set(UI_SERVICES_SOURCES
+    src/ui/services/MetadataFixService.h
+    src/ui/services/MetadataFixService.cpp
+    src/ui/services/CoverArtService.h
+    src/ui/services/CoverArtService.cpp
 )
 
 set(RESOURCES
@@ -387,6 +409,7 @@ if(APPLE)
         ${WIDGET_SOURCES}
         ${UI_SOURCES}
         ${VIEW_SOURCES}
+        ${UI_SERVICES_SOURCES}
         ${RESOURCES}
         ${VST3_SDK_SOURCES}
         ${VST3_SDK_OBJCXX_SOURCES}
@@ -405,6 +428,7 @@ else()
         ${WIDGET_SOURCES}
         ${UI_SOURCES}
         ${VIEW_SOURCES}
+        ${UI_SERVICES_SOURCES}
         ${RESOURCES}
         ${VST3_SDK_SOURCES}
     )
