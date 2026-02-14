@@ -16,6 +16,20 @@ VolumeLevelingManager::VolumeLevelingManager(QObject* parent)
 void VolumeLevelingManager::setCurrentTrack(const Track& track)
 {
     m_currentTrack = track;
+
+    // Enrich with stored ReplayGain data from DB if the track doesn't have it
+    // (e.g. when converted from TrackIndex which doesn't carry RG fields)
+    if (!m_currentTrack.hasReplayGain && !m_currentTrack.filePath.isEmpty()) {
+        auto dbTrack = LibraryDatabase::instance()->trackByPath(m_currentTrack.filePath);
+        if (dbTrack && dbTrack->hasReplayGain) {
+            m_currentTrack.replayGainTrack     = dbTrack->replayGainTrack;
+            m_currentTrack.replayGainAlbum     = dbTrack->replayGainAlbum;
+            m_currentTrack.replayGainTrackPeak = dbTrack->replayGainTrackPeak;
+            m_currentTrack.replayGainAlbumPeak = dbTrack->replayGainAlbumPeak;
+            m_currentTrack.hasReplayGain       = true;
+        }
+    }
+
     updateGain();
 
     // Background R128 analysis if no gain data and leveling is enabled
