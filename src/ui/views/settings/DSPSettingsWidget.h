@@ -68,5 +68,6 @@ private:
     EQBandRow m_bandRows[20] = {};
     QSpinBox* m_bandCountSpin = nullptr;
     StyledComboBox* m_eqPresetCombo = nullptr;
+    QWidget* m_eqContentWidget = nullptr;
     int m_activeBandCount = 1;
 };

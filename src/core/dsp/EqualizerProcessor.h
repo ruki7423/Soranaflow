@@ -25,7 +25,7 @@ struct EQBand {
     FilterType type  = Peak;
     float frequency  = 1000.0f;   // Hz
     float gainDb     = 0.0f;      // dB (-24 to +24)
-    float q          = 1.0f;      // Quality factor (0.1 to 30)
+    float q          = 0.7071f;   // Quality factor (0.1 to 30), default = 1/√2 Butterworth
 };
 
 // 20-band parametric EQ processor (REW-style)

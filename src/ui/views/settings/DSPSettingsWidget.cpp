@@ -21,6 +21,8 @@
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QAbstractSpinBox>
+#include <QToolButton>
+#include <QSettings>
 #include <cmath>
 #include "../../dialogs/StyledMessageBox.h"
 
@@ -152,6 +154,29 @@ bool DSPSettingsWidget::eventFilter(QObject* obj, QEvent* event)
             return true;
         }
     }
+
+    // Double-click on Q/Freq/Gain spinbox → reset to default
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        auto* spin = qobject_cast<QDoubleSpinBox*>(obj);
+        if (spin) {
+            for (int i = 0; i < m_activeBandCount; ++i) {
+                auto& r = m_bandRows[i];
+                if (spin == r.qSpin) {
+                    spin->setValue(0.7071);  // Butterworth default
+                    return true;
+                }
+                if (spin == r.gainSpin) {
+                    spin->setValue(0.0);     // 0 dB (flat)
+                    return true;
+                }
+                if (spin == r.freqSpin) {
+                    spin->setValue(1000.0);  // 1 kHz default
+                    return true;
+                }
+            }
+        }
+    }
+
     return QWidget::eventFilter(obj, event);
 }
 
@@ -528,6 +553,19 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
         "font-size: 15px; font-weight: 600; color: %1; border: none; background: transparent;")
             .arg(ThemeManager::instance()->colors().foreground));
     headerLayout->addWidget(dspTitle);
+
+    auto* collapseBtn = new QToolButton(headerWidget);
+    collapseBtn->setArrowType(Qt::DownArrow);
+    collapseBtn->setCheckable(true);
+    collapseBtn->setStyleSheet(QStringLiteral(
+        "QToolButton { background: transparent; border: none; color: %1; }"
+        "QToolButton:hover { background: %2; border-radius: 4px; }")
+            .arg(ThemeManager::instance()->colors().foregroundMuted,
+                 ThemeManager::instance()->colors().hover));
+    collapseBtn->setFixedSize(24, 24);
+    collapseBtn->setToolTip(QStringLiteral("Collapse/expand EQ bands"));
+    headerLayout->addWidget(collapseBtn);
+
     headerLayout->addStretch();
 
     // Preset combo
@@ -561,6 +599,13 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
     });
     headerLayout->addWidget(m_dspEnabledSwitch);
     dspLayout->addWidget(headerWidget);
+
+    // ── Collapsible content container ──────────────────────────────
+    m_eqContentWidget = new QWidget(dspCard);
+    m_eqContentWidget->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+    auto* contentLayout = new QVBoxLayout(m_eqContentWidget);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
 
     // ── Row 1: Preamplification ─────────────────────────────────────
     auto* preampRow = new QWidget(dspCard);
@@ -636,7 +681,7 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
     });
 
     preampLayout->addStretch();
-    dspLayout->addWidget(preampRow);
+    contentLayout->addWidget(preampRow);
 
     // ── Frequency response graph ────────────────────────────────────
     auto* graphWidget = new QWidget(dspCard);
@@ -654,7 +699,7 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
     m_eqGraph = new EQGraphWidget(dspCard);
     m_eqGraph->setStyleSheet(QStringLiteral("border: none; background: transparent;"));
     graphInnerLayout->addWidget(m_eqGraph);
-    dspLayout->addWidget(graphWidget);
+    contentLayout->addWidget(graphWidget);
 
     // ── Column headers ──────────────────────────────────────────────
     auto* colHeaderWidget = new QWidget(dspCard);
@@ -689,7 +734,7 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
     addColHeader(QStringLiteral(""),   40);  // Q dial
     addColHeader(QStringLiteral("Q"),  70);
     colHeaderLayout->addStretch();
-    dspLayout->addWidget(colHeaderWidget);
+    contentLayout->addWidget(colHeaderWidget);
 
     // ── Band rows container (no scroll — parent audio tab scrolls) ──
     m_bandRowsContainer = new QWidget(dspCard);
@@ -698,7 +743,7 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
     m_bandRowsLayout->setContentsMargins(0, 0, 0, 0);
     m_bandRowsLayout->setSpacing(0);
 
-    dspLayout->addWidget(m_bandRowsContainer);
+    contentLayout->addWidget(m_bandRowsContainer);
 
     // ── Band count control bar (Add/Remove) ─────────────────────────
     auto* bandCountBar = new QWidget(dspCard);
@@ -1003,7 +1048,40 @@ QWidget* DSPSettingsWidget::createDSPCard(QVBoxLayout* parentLayout)
                 .arg(preampDb != 0.0f ? QStringLiteral(" with %1 dB preamp").arg(preampDb, 0, 'f', 1) : QString()));
     });
 
-    dspLayout->addWidget(bandCountBar);
+    contentLayout->addWidget(bandCountBar);
+    dspLayout->addWidget(m_eqContentWidget);
+
+    // Restore collapsed state
+    {
+        QSettings qsettings;
+        bool collapsed = qsettings.value(QStringLiteral("eq/collapsed"), false).toBool();
+        if (collapsed) {
+            m_eqContentWidget->setVisible(false);
+            collapseBtn->setArrowType(Qt::RightArrow);
+            collapseBtn->setChecked(true);
+            headerWidget->setStyleSheet(QStringLiteral(
+                "background: %1; border-radius: 12px;")
+                    .arg(ThemeManager::instance()->colors().backgroundTertiary));
+        }
+    }
+
+    connect(collapseBtn, &QToolButton::toggled, this, [this, collapseBtn, headerWidget](bool checked) {
+        m_eqContentWidget->setVisible(!checked);
+        collapseBtn->setArrowType(checked ? Qt::RightArrow : Qt::DownArrow);
+        {
+            QSettings qsettings;
+            qsettings.setValue(QStringLiteral("eq/collapsed"), checked);
+        }
+        auto bg = ThemeManager::instance()->colors().backgroundTertiary;
+        if (checked) {
+            headerWidget->setStyleSheet(QStringLiteral(
+                "background: %1; border-radius: 12px;").arg(bg));
+        } else {
+            headerWidget->setStyleSheet(QStringLiteral(
+                "background: %1; border-top-left-radius: 12px;"
+                " border-top-right-radius: 12px;").arg(bg));
+        }
+    });
 
     // Build the initial band rows
     rebuildBandRows();
@@ -1371,7 +1449,7 @@ void DSPSettingsWidget::applyEQPreset(const QString& presetName)
         band.type      = EQBand::Peak;
         band.frequency = presetFreqs[i];
         band.gainDb    = presets[idx][i];
-        band.q         = 1.0f;
+        band.q         = 0.7071f;
 
         // Save to settings
         Settings::instance()->setEqBandEnabled(i, true);
