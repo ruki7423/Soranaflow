@@ -288,6 +288,10 @@ bool AudioEngine::load(const QString& filePath)
     qDebug() << "=== AudioEngine::load ===" << filePath;
 
     // Safety checks
+    if (!m_output || !m_decoder || !m_dsdDecoder || !m_dspPipeline) {
+        qWarning() << "AudioEngine::load: engine not initialized or shut down";
+        return false;
+    }
     if (filePath.isEmpty()) {
         qWarning() << "AudioEngine::load: empty file path";
         emit errorOccurred(QStringLiteral("No file path provided"));
@@ -529,6 +533,8 @@ void AudioEngine::play()
     qDebug() << "AudioEngine::play() state:" << m_state
              << "deviceId:" << m_currentDeviceId;
 
+    if (!m_output || !m_decoder || !m_dsdDecoder) return;
+
     if (m_state == Playing) {
         qDebug() << "AudioEngine::play() - already playing, ignoring";
         return;
@@ -554,6 +560,7 @@ void AudioEngine::play()
 void AudioEngine::pause()
 {
     if (m_state != Playing) return;
+    if (!m_output) return;
 
     m_output->stop();
     m_positionTimer->stop();
@@ -579,13 +586,13 @@ void AudioEngine::stop()
 
     {
         std::lock_guard<std::mutex> lock(m_decoderMutex);
-        m_decoder->close();
-        m_dsdDecoder->close();
+        if (m_decoder) m_decoder->close();
+        if (m_dsdDecoder) m_dsdDecoder->close();
         m_gapless.resetLocked();
     }
     m_usingDSDDecoder = false;
     m_framesRendered.store(0, std::memory_order_relaxed);
-    m_dspPipeline->reset();
+    if (m_dspPipeline) m_dspPipeline->reset();
 
     // Zero pre-allocated buffer to prevent stale data on next track start
     if (!m_decodeBuf.empty())
@@ -604,14 +611,14 @@ void AudioEngine::seek(double secs)
 {
     std::lock_guard<std::mutex> lock(m_decoderMutex);
     bool seekOk = false;
-    if (m_usingDSDDecoder && m_dsdDecoder->isOpen()) {
+    if (m_usingDSDDecoder && m_dsdDecoder && m_dsdDecoder->isOpen()) {
         seekOk = m_dsdDecoder->seek(secs);
-    } else if (m_decoder->isOpen()) {
+    } else if (m_decoder && m_decoder->isOpen()) {
         seekOk = m_decoder->seek(secs);
     }
     if (seekOk) {
         m_framesRendered.store((int64_t)(secs * m_sampleRate), std::memory_order_relaxed);
-        m_dspPipeline->reset();
+        if (m_dspPipeline) m_dspPipeline->reset();
         emit positionChanged(secs);
     }
 }
@@ -620,7 +627,7 @@ void AudioEngine::seek(double secs)
 void AudioEngine::setVolume(float vol)
 {
     m_volume = (vol < 0.0f) ? 0.0f : (vol > 1.0f ? 1.0f : vol);
-    m_output->setVolume(m_volume);
+    if (m_output) m_output->setVolume(m_volume);
 }
 
 // ── position ────────────────────────────────────────────────────────
@@ -651,6 +658,8 @@ bool AudioEngine::setOutputDevice(uint32_t deviceId)
             deviceId = 0;
         }
     }
+
+    if (!m_output) return false;
 
     // Release hog mode on old device before switching
     bool hadHog = m_output->isExclusiveMode();
@@ -725,7 +734,7 @@ void AudioEngine::setSampleRate(double newRate)
 void AudioEngine::setBitPerfectMode(bool enabled)
 {
     m_bitPerfect.store(enabled, std::memory_order_relaxed);
-    m_output->setBitPerfectMode(enabled);
+    if (m_output) m_output->setBitPerfectMode(enabled);
     Settings::instance()->setBitPerfectMode(enabled);
     qDebug() << "Bit-perfect mode:" << (enabled ? "ON" : "OFF");
 }
@@ -759,6 +768,7 @@ void AudioEngine::setAutoSampleRate(bool enabled)
 void AudioEngine::setExclusiveMode(bool enabled)
 {
     Settings::instance()->setExclusiveMode(enabled);
+    if (!m_output) return;
     bool success = m_output->setHogMode(enabled);
     if (success) {
         qDebug() << "Exclusive mode:" << (enabled ? "ON" : "OFF");
@@ -770,13 +780,13 @@ void AudioEngine::setExclusiveMode(bool enabled)
 
 bool AudioEngine::exclusiveMode() const
 {
-    return m_output->isExclusiveMode();
+    return m_output ? m_output->isExclusiveMode() : false;
 }
 
 // ── maxDeviceSampleRate ─────────────────────────────────────────────
 double AudioEngine::maxDeviceSampleRate() const
 {
-    return m_output->getMaxSampleRate(m_currentDeviceId);
+    return m_output ? m_output->getMaxSampleRate(m_currentDeviceId) : 0.0;
 }
 
 // ── upsampler ──────────────────────────────────────────────────────
