@@ -12,7 +12,7 @@
 #include "../../../widgets/StyledComboBox.h"
 #include "../../../widgets/StyledScrollArea.h"
 
-#include "../dialogs/StyledMessageBox.h"
+#include "../../dialogs/StyledMessageBox.h"
 
 #ifdef Q_OS_MACOS
 #include "../../../platform/macos/BookmarkManager.h"
