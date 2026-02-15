@@ -59,5 +59,8 @@
         <!-- Stylesheets -->
         <file>styles/dark-theme.qss</file>
         <file>styles/light-theme.qss</file>
+
+        <!-- Bundled MusicKit JS (Apple Music integration, avoids CDN download) -->
+        <file>js/musickit.min.js</file>
     </qresource>
 </RCC>

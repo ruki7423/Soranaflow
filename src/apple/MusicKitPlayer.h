@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <optional>
 
 // Opaque pointer for Objective-C++ WKWebView implementation
@@ -101,4 +102,5 @@ private:
     bool m_cleanedUp = false;
     QString m_pendingSongId;
     QString m_pendingUserToken;
+    QElapsedTimer m_loadTimer;
 };

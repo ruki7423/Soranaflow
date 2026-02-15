@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QTimer>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -300,7 +301,8 @@ void MusicKitPlayer::webViewDidFinishLoad()
 {
     m_webViewReady = true;
     qDebug() << "[MusicKitPlayer] WKWebView ready (token embedded in HTML:"
-             << !m_pendingUserToken.isEmpty() << ")";
+             << !m_pendingUserToken.isEmpty() << ") elapsed:"
+             << m_loadTimer.elapsed() << "ms";
 }
 
 // ── ensureWebView — lazy initialization ─────────────────────────────
@@ -309,7 +311,8 @@ void MusicKitPlayer::ensureWebView()
     if (m_initialized) return;
     m_initialized = true;
 
-    qDebug() << "[MusicKitPlayer] Initializing WKWebView...";
+    m_loadTimer.start();
+    qDebug() << "[MusicKitPlayer] Initializing WKWebView... (t=0ms)";
 
     @autoreleasepool {
         m_wk = new MusicKitWebViewPrivate;
@@ -504,7 +507,8 @@ void MusicKitPlayer::setPlaybackQuality(const QString& quality)
 void MusicKitPlayer::onMusicKitReady()
 {
     m_ready = true;
-    qDebug() << "[MusicKitPlayer] MusicKit JS ready!";
+    qDebug() << "[MusicKitPlayer] MusicKit JS ready! Total load time:"
+             << m_loadTimer.elapsed() << "ms";
     emit ready();
     emit musicKitReady();
 
@@ -978,6 +982,43 @@ QString MusicKitPlayer::generateHTML()
     userToken.replace(QLatin1Char('\r'), QLatin1String("\\r"));
     qDebug() << "[MusicKitPlayer] Embedding token in HTML, length:" << m_pendingUserToken.length();
 
+    // Load bundled MusicKit JS from Qt resources (eliminates CDN download)
+    QString musickitJS;
+    {
+        QFile f(QStringLiteral(":/js/musickit.min.js"));
+        if (f.open(QIODevice::ReadOnly)) {
+            musickitJS = QString::fromUtf8(f.readAll());
+            qDebug() << "[MusicKitPlayer] Bundled MusicKit JS:" << musickitJS.length() << "chars";
+        } else {
+            qWarning() << "[MusicKitPlayer] Bundled MusicKit JS not found, CDN fallback";
+        }
+    }
+
+    // Build MusicKit script block (bundled inline or CDN loader)
+    QString musickitScriptBlock;
+    QString musickitInitCall;
+    if (!musickitJS.isEmpty()) {
+        musickitScriptBlock = QStringLiteral("<script>\n") + musickitJS + QStringLiteral("\n</script>\n");
+        musickitInitCall = QStringLiteral(
+            "log('[MusicKit] MusicKit JS loaded from bundle — no CDN download needed');\n"
+            "configureMusicKit();\n");
+    } else {
+        musickitInitCall = QStringLiteral(
+            "log('[MusicKit] Loading MusicKit JS from CDN...');\n"
+            "var cdnScript = document.createElement('script');\n"
+            "cdnScript.src = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js';\n"
+            "cdnScript.setAttribute('data-web-components', '');\n"
+            "cdnScript.onload = function() {\n"
+            "    log('[MusicKit] MusicKit JS loaded from CDN');\n"
+            "    configureMusicKit();\n"
+            "};\n"
+            "cdnScript.onerror = function(e) {\n"
+            "    log('[MusicKit] FAILED to load MusicKit JS from CDN');\n"
+            "    msg('error', 'Failed to load MusicKit JS from CDN');\n"
+            "};\n"
+            "document.head.appendChild(cdnScript);\n");
+    }
+
     QString html = QStringLiteral(R"HTML(
 <!DOCTYPE html>
 <html>
@@ -989,7 +1030,8 @@ QString MusicKitPlayer::generateHTML()
 <script>
 var music = null;
 var playbackStartedEmitted = false;
-var __musicUserToken = '%3' || null;
+var __musicUserToken = 'SORANA_USER_TOKEN' || null;
+var __startTime = Date.now();
 
 // ── Native bridge helpers ──────────────────────────────────────────
 function msg(name, body) {
@@ -998,27 +1040,16 @@ function msg(name, body) {
     }
 }
 
-function log(text) { msg('log', text); }
+function log(text) { msg('log', '[' + (Date.now() - __startTime) + 'ms] ' + text); }
 
-log('[MusicKit] Loading MusicKit JS from CDN...');
 
-// Load MusicKit JS dynamically
-var script = document.createElement('script');
-script.src = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js';
-script.setAttribute('data-web-components', '');
-script.onload = function() {
-    log('[MusicKit] MusicKit JS loaded from CDN');
-    configureMusicKit();
-};
-script.onerror = function(e) {
-    log('[MusicKit] Failed to load MusicKit JS from CDN');
-    msg('error', 'Failed to load MusicKit JS from CDN');
-};
-document.head.appendChild(script);
-
+</script>
+SORANA_MUSICKIT_SCRIPT
+<script>
+SORANA_INIT_CALL
 async function configureMusicKit() {
     try {
-        var token = '%1';
+        var token = 'SORANA_DEV_TOKEN';
         log('[MusicKit] Configuring with token length: ' + token.length);
 
         if (!token || token === '' || token === 'DEVELOPER_TOKEN') {
@@ -1031,7 +1062,7 @@ async function configureMusicKit() {
             developerToken: token,
             app: {
                 name: 'Sorana Flow',
-                build: '%2'
+                build: 'SORANA_VERSION'
             }
         };
 
@@ -1075,15 +1106,8 @@ async function configureMusicKit() {
                 log('[MusicKit] authorize() error (non-fatal): ' + authErr);
             }
         } else {
-            // No token at all — first-time user, authorize popup expected
-            log('[MusicKit] No token — calling authorize() for first-time setup');
-            try {
-                msg('authWillPrompt', true);
-                await music.authorize();
-                log('[MusicKit] authorize() succeeded — isAuthorized: ' + music.isAuthorized);
-            } catch (authErr) {
-                log('[MusicKit] authorize() error (non-fatal): ' + authErr);
-            }
+            // No token — pre-warm mode, skip authorize to avoid unexpected popup
+            log('[MusicKit] No token — pre-warm mode, skipping authorize()');
         }
         log('[MusicKit] Auth check done — isAuthorized: ' + music.isAuthorized);
 
@@ -1337,7 +1361,15 @@ function setPlaybackBitrate(quality) {
 </script>
 </body>
 </html>
-)HTML").arg(devToken, QCoreApplication::applicationVersion(), userToken);
+)HTML");
+
+    // Replace placeholders (not using arg() to avoid % conflicts with bundled MusicKit JS)
+    html.replace(QLatin1String("SORANA_INIT_CALL"), musickitInitCall);
+    html.replace(QLatin1String("SORANA_DEV_TOKEN"), devToken);
+    html.replace(QLatin1String("SORANA_VERSION"), QCoreApplication::applicationVersion());
+    html.replace(QLatin1String("SORANA_USER_TOKEN"), userToken);
+    // Insert bundled MusicKit JS last (614KB, avoid searching through it for other placeholders)
+    html.replace(QLatin1String("SORANA_MUSICKIT_SCRIPT"), musickitScriptBlock);
 
     return html;
 }
