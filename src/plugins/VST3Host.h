@@ -12,8 +12,10 @@ class VST3Plugin;
 struct VST3PluginInfo {
     std::string name;
     std::string vendor;
+    std::string category;   // "Fx", "Instrument", or ""
     std::string path;       // .vst3 bundle path
     std::string uid;        // unique plugin ID
+    int classIndex = -1;    // index into module's classInfos (-1 = auto-select)
     bool isInstrument = false;
     bool isEffect = true;
 };

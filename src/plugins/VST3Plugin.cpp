@@ -1,6 +1,7 @@
 #include "VST3Plugin.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/base/ibstream.h"
 
 #include <QWidget>
 #include <QWindow>
@@ -9,9 +10,77 @@
 #include <QCheckBox>
 #include <QApplication>
 #include <QDebug>
+#include <cstring>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Lightweight IBStream for state sync (stack-allocated, not ref-counted)
+// ═══════════════════════════════════════════════════════════════════════
+
+class MemoryStream : public IBStream
+{
+public:
+    // FUnknown — stack-allocated, no real ref-counting needed
+    tresult PLUGIN_API queryInterface(const TUID, void** obj) override
+    { if (obj) *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    tresult PLUGIN_API read(void* buffer, int32 numBytes, int32* numBytesRead) override
+    {
+        if (!buffer || numBytes < 0) return kInvalidArgument;
+        int32 avail = static_cast<int32>(m_data.size()) - static_cast<int32>(m_pos);
+        if (avail < 0) avail = 0;
+        int32 toRead = (numBytes < avail) ? numBytes : avail;
+        if (toRead > 0) {
+            std::memcpy(buffer, m_data.data() + m_pos, static_cast<size_t>(toRead));
+            m_pos += static_cast<size_t>(toRead);
+        }
+        if (numBytesRead) *numBytesRead = toRead;
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API write(void* buffer, int32 numBytes, int32* numBytesWritten) override
+    {
+        if (!buffer || numBytes < 0) return kInvalidArgument;
+        size_t end = m_pos + static_cast<size_t>(numBytes);
+        if (end > m_data.size()) m_data.resize(end);
+        std::memcpy(m_data.data() + m_pos, buffer, static_cast<size_t>(numBytes));
+        m_pos += static_cast<size_t>(numBytes);
+        if (numBytesWritten) *numBytesWritten = numBytes;
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override
+    {
+        int64 newPos = 0;
+        switch (mode) {
+        case IBStream::kIBSeekSet: newPos = pos; break;
+        case IBStream::kIBSeekCur: newPos = static_cast<int64>(m_pos) + pos; break;
+        case IBStream::kIBSeekEnd: newPos = static_cast<int64>(m_data.size()) + pos; break;
+        default: return kInvalidArgument;
+        }
+        if (newPos < 0) newPos = 0;
+        m_pos = static_cast<size_t>(newPos);
+        if (result) *result = static_cast<int64>(m_pos);
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API tell(int64* pos) override
+    {
+        if (pos) *pos = static_cast<int64>(m_pos);
+        return kResultOk;
+    }
+
+private:
+    std::vector<uint8_t> m_data;
+    size_t m_pos = 0;
+};
+
+// Single host context for all VST3 plugin instances
+static Steinberg::Vst::HostApplication g_hostApp;
 
 // ═══════════════════════════════════════════════════════════════════════
 //  PlugFrameAdapter — resize callback for plugin editor
@@ -48,9 +117,10 @@ VST3Plugin::~VST3Plugin()
 //  Load a .vst3 bundle
 // ═══════════════════════════════════════════════════════════════════════
 
-bool VST3Plugin::loadFromPath(const std::string& vst3Path)
+bool VST3Plugin::loadFromPath(const std::string& vst3Path, int classIndex)
 {
-    qDebug() << "=== VST3Plugin::loadFromPath ===" << QString::fromStdString(vst3Path);
+    qDebug() << "=== VST3Plugin::loadFromPath ===" << QString::fromStdString(vst3Path)
+             << "classIndex:" << classIndex;
 
     if (m_loaded) unload();
 
@@ -81,27 +151,34 @@ bool VST3Plugin::loadFromPath(const std::string& vst3Path)
         return false;
     }
 
-    // Find the best Audio Module Class — prefer Fx over Instrument
-    int classIndex = -1;
-    int fallbackIndex = -1;
-    for (int i = 0; i < (int)classInfos.size(); ++i) {
-        if (classInfos[i].category() == kVstAudioEffectClass) {
-            auto sub = classInfos[i].subCategoriesString();
-            if (sub.find("Fx") != std::string::npos) {
-                classIndex = i;  // Fx class — preferred for audio processing
-                break;
+    // Select the audio class to load.
+    // If classIndex was specified (>= 0), use it directly.
+    // Otherwise, auto-select: prefer Fx over Instrument.
+    int selectedClass = classIndex;
+    if (selectedClass < 0 || selectedClass >= (int)classInfos.size()) {
+        selectedClass = -1;
+        int fallbackIndex = -1;
+        for (int i = 0; i < (int)classInfos.size(); ++i) {
+            if (classInfos[i].category() == kVstAudioEffectClass) {
+                auto sub = classInfos[i].subCategoriesString();
+                if (sub.find("Fx") != std::string::npos) {
+                    selectedClass = i;  // Fx class — preferred for audio processing
+                    break;
+                }
+                if (fallbackIndex < 0)
+                    fallbackIndex = i;  // first non-Fx audio class
             }
-            if (fallbackIndex < 0)
-                fallbackIndex = i;  // first non-Fx audio class
         }
-    }
-    if (classIndex < 0) classIndex = fallbackIndex;
-    if (classIndex < 0) {
-        classIndex = 0;
-        qDebug() << "VST3: No audio effect class found, using first class";
+        if (selectedClass < 0) selectedClass = fallbackIndex;
+        if (selectedClass < 0) {
+            selectedClass = 0;
+            qDebug() << "VST3: No audio effect class found, using first class";
+        }
+    } else {
+        qDebug() << "VST3: Using specified classIndex:" << selectedClass;
     }
 
-    auto& info = classInfos[classIndex];
+    auto& info = classInfos[selectedClass];
     m_pluginName = info.name();
     m_pluginVendor = info.vendor();
     m_pluginUID = info.ID().toString();
@@ -186,14 +263,18 @@ bool VST3Plugin::loadFromPath(const std::string& vst3Path)
         connectComponents();
     }
 
-    // 10. Sync component state to controller
-    if (m_controller && m_separateController) {
-        // Get component state and pass to controller
-        // This is important for the controller to know about the component's state
-        // Many plugins require this before createView() works
-        qDebug() << "VST3: Syncing component state to controller";
-        // Note: Full state sync requires IBStream implementation which is complex.
-        // The PlugProvider class handles this, but for now we rely on the connection.
+    // 10. Sync component state to controller (REQUIRED by VST3 spec)
+    // Many plugins refuse to process or show GUI without this.
+    if (m_controller) {
+        MemoryStream stream;
+        tresult getStateResult = m_component->getState(&stream);
+        if (getStateResult == kResultOk) {
+            stream.seek(0, IBStream::kIBSeekSet, nullptr);
+            tresult syncResult = m_controller->setComponentState(&stream);
+            qDebug() << "VST3: State sync component→controller:" << syncResult;
+        } else {
+            qDebug() << "VST3: getState returned" << getStateResult << "(no state to sync)";
+        }
     }
 
     if (m_controller) {
@@ -202,13 +283,13 @@ bool VST3Plugin::loadFromPath(const std::string& vst3Path)
         qDebug() << "VST3: No edit controller available (no GUI)";
     }
 
-    // 11. Setup processing with default parameters
+    // 11. Configure and activate busses (BEFORE setupProcessing per VST3 spec)
+    activateBusses();
+
+    // 12. Setup processing with default parameters
     if (!setupProcessing(m_sampleRate, m_maxBlockSize)) {
         qWarning() << "VST3: setupProcessing failed";
     }
-
-    // 12. Activate busses
-    activateBusses();
 
     // 13. Activate the component
     m_component->setActive(true);
@@ -272,8 +353,7 @@ bool VST3Plugin::initializeComponent()
 {
     if (!m_component) return false;
 
-    static Steinberg::Vst::HostApplication hostApp;
-    tresult result = m_component->initialize(&hostApp);
+    tresult result = m_component->initialize(&g_hostApp);
     qDebug() << "VST3: Component initialize result:" << result;
 
     if (result != kResultOk && result != kNotImplemented) {
@@ -291,8 +371,7 @@ bool VST3Plugin::initializeController()
 {
     if (!m_controller) return false;
 
-    static Steinberg::Vst::HostApplication hostApp;
-    tresult result = m_controller->initialize(&hostApp);
+    tresult result = m_controller->initialize(&g_hostApp);
     qDebug() << "VST3: Controller initialize result:" << result;
 
     if (result != kResultOk && result != kNotImplemented) {
@@ -383,32 +462,76 @@ bool VST3Plugin::activateBusses()
 {
     if (!m_component) return false;
 
-    // Set stereo speaker arrangement BEFORE activating busses.
-    // Without this, some plugins default to mono and only process the left channel.
+    int32 numAudioIn  = m_component->getBusCount(kAudio, kInput);
+    int32 numAudioOut = m_component->getBusCount(kAudio, kOutput);
+    int32 numEventIn  = m_component->getBusCount(kEvent, kInput);
+    int32 numEventOut = m_component->getBusCount(kEvent, kOutput);
+    qDebug() << "VST3: Bus counts — audioIn:" << numAudioIn
+             << "audioOut:" << numAudioOut
+             << "eventIn:" << numEventIn
+             << "eventOut:" << numEventOut;
+
+    // ── 1. Negotiate speaker arrangement ─────────────────────────────
     if (m_processor) {
-        SpeakerArrangement stereo = SpeakerArr::kStereo;
-        tresult arrResult = m_processor->setBusArrangements(&stereo, 1, &stereo, 1);
+        // Build arrangement arrays matching the plugin's actual bus count
+        std::vector<SpeakerArrangement> inArr(numAudioIn, SpeakerArr::kStereo);
+        std::vector<SpeakerArrangement> outArr(numAudioOut, SpeakerArr::kStereo);
+
+        // Plugins with 0 audio inputs (instruments) — just set output arrangement
+        tresult arrResult = m_processor->setBusArrangements(
+            inArr.empty() ? nullptr : inArr.data(), numAudioIn,
+            outArr.empty() ? nullptr : outArr.data(), numAudioOut);
         qDebug() << "VST3: setBusArrangements(stereo) result:" << arrResult;
+
         if (arrResult != kResultOk && arrResult != kNotImplemented) {
-            qDebug() << "VST3: Plugin did not accept stereo arrangement, querying current";
-            SpeakerArrangement currentIn = 0, currentOut = 0;
-            m_processor->getBusArrangement(kOutput, 0, currentOut);
-            m_processor->getBusArrangement(kInput, 0, currentIn);
-            qDebug() << "VST3: Current arrangement — in:" << currentIn << "out:" << currentOut;
+            // Plugin rejected our arrangement — query what it actually wants
+            qDebug() << "VST3: Plugin rejected stereo, querying preferred arrangement";
+
+            for (int32 i = 0; i < numAudioIn; ++i) {
+                m_processor->getBusArrangement(kInput, i, inArr[i]);
+                qDebug() << "  Input bus" << i << "arrangement:" << inArr[i];
+            }
+            for (int32 i = 0; i < numAudioOut; ++i) {
+                m_processor->getBusArrangement(kOutput, i, outArr[i]);
+                qDebug() << "  Output bus" << i << "arrangement:" << outArr[i];
+            }
+
+            // Try again with the plugin's preferred arrangement
+            tresult retryResult = m_processor->setBusArrangements(
+                inArr.empty() ? nullptr : inArr.data(), numAudioIn,
+                outArr.empty() ? nullptr : outArr.data(), numAudioOut);
+            qDebug() << "VST3: setBusArrangements(plugin-preferred) result:" << retryResult;
+
+            // Update channel count to match what the plugin actually uses
+            if (retryResult == kResultOk && numAudioOut > 0) {
+                SpeakerArrangement finalOut = 0;
+                m_processor->getBusArrangement(kOutput, 0, finalOut);
+                int pluginChannels = SpeakerArr::getChannelCount(finalOut);
+                if (pluginChannels > 0 && pluginChannels != m_channels) {
+                    qDebug() << "VST3: Adapting channel count to" << pluginChannels;
+                    m_channels = pluginChannels;
+                }
+            }
         }
     }
 
-    int32 numInputBusses = m_component->getBusCount(kAudio, kInput);
-    if (numInputBusses > 0) {
-        m_component->activateBus(kAudio, kInput, 0, true);
+    // ── 2. Activate audio busses ─────────────────────────────────────
+    for (int32 i = 0; i < numAudioIn; ++i) {
+        m_component->activateBus(kAudio, kInput, i, (i == 0));  // only main bus active
+    }
+    for (int32 i = 0; i < numAudioOut; ++i) {
+        m_component->activateBus(kAudio, kOutput, i, (i == 0)); // only main bus active
     }
 
-    int32 numOutputBusses = m_component->getBusCount(kAudio, kOutput);
-    if (numOutputBusses > 0) {
-        m_component->activateBus(kAudio, kOutput, 0, true);
+    // ── 3. Activate event busses (some Fx plugins accept MIDI) ───────
+    for (int32 i = 0; i < numEventIn; ++i) {
+        m_component->activateBus(kEvent, kInput, i, true);
+    }
+    for (int32 i = 0; i < numEventOut; ++i) {
+        m_component->activateBus(kEvent, kOutput, i, true);
     }
 
-    qDebug() << "VST3: Busses activated (in:" << numInputBusses << "out:" << numOutputBusses << ")";
+    qDebug() << "VST3: All busses activated";
     return true;
 }
 
@@ -424,22 +547,9 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     std::unique_lock<std::mutex> lock(m_processMutex, std::try_to_lock);
     if (!lock.owns_lock()) return;  // Skip this cycle, don't block audio thread
 
-    // Ensure buffers are large enough
-    if (channels != m_channels || frames > m_maxBlockSize) {
-        m_channels = channels;
-        if (frames > m_maxBlockSize) m_maxBlockSize = frames;
-
-        m_inputChannelBuffers.resize(channels);
-        m_outputChannelBuffers.resize(channels);
-        m_inputPtrs.resize(channels);
-        m_outputPtrs.resize(channels);
-
-        for (int ch = 0; ch < channels; ++ch) {
-            m_inputChannelBuffers[ch].resize(m_maxBlockSize, 0.0f);
-            m_outputChannelBuffers[ch].resize(m_maxBlockSize, 0.0f);
-            m_inputPtrs[ch] = m_inputChannelBuffers[ch].data();
-            m_outputPtrs[ch] = m_outputChannelBuffers[ch].data();
-        }
+    // Verify pre-allocated buffers are sufficient (never allocate on audio thread)
+    if (channels > (int)m_inputPtrs.size() || frames > m_maxBlockSize) {
+        return;  // Buffer mismatch — prepare() must be called first
     }
 
     // Deinterleave: interleaved buf -> per-channel input buffers
@@ -506,6 +616,7 @@ void VST3Plugin::prepare(double sampleRate, int channels)
     m_channels = channels;
 
     if (m_loaded && m_processor) {
+        // Deactivate for reconfiguration (VST3 spec requires this order)
         if (m_processing) {
             m_processor->setProcessing(false);
         }
@@ -513,11 +624,9 @@ void VST3Plugin::prepare(double sampleRate, int channels)
             m_component->setActive(false);
         }
 
+        // Re-negotiate bus arrangements then setup processing
+        activateBusses();
         setupProcessing(sampleRate, m_maxBlockSize);
-
-        // Re-apply stereo arrangement after re-setup
-        SpeakerArrangement stereo = SpeakerArr::kStereo;
-        m_processor->setBusArrangements(&stereo, 1, &stereo, 1);
 
         if (m_component) {
             m_component->setActive(true);

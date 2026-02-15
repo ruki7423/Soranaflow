@@ -54,7 +54,8 @@ public:
     ~VST3Plugin() override;
 
     // Load a .vst3 bundle from disk. Returns true on success.
-    bool loadFromPath(const std::string& vst3Path);
+    // classIndex: specific class to load (-1 = auto-select best audio class)
+    bool loadFromPath(const std::string& vst3Path, int classIndex = -1);
 
     // Unload and release all SDK objects.
     void unload();

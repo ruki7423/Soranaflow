@@ -37,20 +37,22 @@ void VST3Host::scanPlugins()
     }
     scanDirectory("/Library/Audio/Plug-Ins/VST3");
 
-    // Dedup by canonical path (resolves symlinks between user/system dirs)
+    // Dedup by canonical path + UID (resolves symlinks between user/system dirs)
+    // Use path+uid as key since one bundle can contain multiple classes
     std::set<std::string> seen;
     auto it = m_plugins.begin();
     while (it != m_plugins.end()) {
         std::error_code ec;
         std::string canonical = fs::weakly_canonical(it->path, ec).string();
         if (ec) canonical = it->path;
+        std::string key = canonical + "|" + it->uid;
 
-        if (seen.count(canonical)) {
+        if (seen.count(key)) {
             qDebug() << "[VST3] Skipping duplicate:" << QString::fromStdString(it->name)
                      << "at" << QString::fromStdString(it->path);
             it = m_plugins.erase(it);
         } else {
-            seen.insert(canonical);
+            seen.insert(key);
             ++it;
         }
     }
@@ -84,21 +86,86 @@ void VST3Host::scanDirectory(const std::string& dir)
         // .vst3 bundle found — don't recurse into it
         it.disable_recursion_pending();
 
-        // Lightweight scan: extract name from filename only.
-        // Do NOT load the module — loading triggers ObjC class
-        // registration and iLok/PACE auth for every plugin,
-        // causing duplicate-class warnings and startup delays.
-        // Full metadata is read when the user loads a plugin.
-        VST3PluginInfo info;
-        info.path = it->path().string();
-        info.name = it->path().stem().string();
-        info.vendor = "";
-        info.uid = it->path().string();
+        std::string bundlePath = it->path().string();
+        std::string bundleName = it->path().stem().string();
 
-        qDebug() << "VST3 found:" << QString::fromStdString(info.name)
-                 << "at" << QString::fromStdString(info.path);
+        // Load the module to enumerate audio classes and read real metadata.
+        // This gives us per-class entries (e.g. "Serum2 (Fx)" + "Serum2 (Instrument)")
+        // and accurate vendor/UID information.
+        std::string errorDesc;
+        auto module = VST3::Hosting::Module::create(bundlePath, errorDesc);
+        if (!module) {
+            // Module failed to load — fall back to filename-only entry
+            qDebug() << "VST3 scan: cannot load" << QString::fromStdString(bundleName)
+                     << "-" << QString::fromStdString(errorDesc)
+                     << "(adding as filename-only entry)";
+            VST3PluginInfo info;
+            info.path = bundlePath;
+            info.name = bundleName;
+            info.uid = bundlePath;
+            m_plugins.push_back(std::move(info));
+            continue;
+        }
 
-        m_plugins.push_back(std::move(info));
+        auto& factory = module->getFactory();
+        auto classInfos = factory.classInfos();
+
+        // Collect audio effect classes
+        std::vector<int> audioClassIndices;
+        for (int i = 0; i < (int)classInfos.size(); ++i) {
+            if (classInfos[i].category() == kVstAudioEffectClass) {
+                audioClassIndices.push_back(i);
+            }
+        }
+
+        if (audioClassIndices.empty()) {
+            // No audio classes — add as filename-only entry
+            qDebug() << "VST3 found:" << QString::fromStdString(bundleName)
+                     << "(no audio classes) at" << QString::fromStdString(bundlePath);
+            VST3PluginInfo info;
+            info.path = bundlePath;
+            info.name = bundleName;
+            info.uid = bundlePath;
+            m_plugins.push_back(std::move(info));
+            continue;
+        }
+
+        bool multiClass = (audioClassIndices.size() > 1);
+
+        for (int idx : audioClassIndices) {
+            auto& ci = classInfos[idx];
+            auto sub = ci.subCategoriesString();
+
+            VST3PluginInfo info;
+            info.path = bundlePath;
+            info.vendor = ci.vendor();
+            info.uid = ci.ID().toString();
+            info.classIndex = idx;
+
+            // Determine category from subcategories
+            bool isInstrument = (sub.find("Instrument") != std::string::npos);
+            bool isFx = (sub.find("Fx") != std::string::npos);
+            info.isInstrument = isInstrument;
+            info.isEffect = !isInstrument;
+
+            if (isInstrument) info.category = "Instrument";
+            else if (isFx) info.category = "Fx";
+
+            // Name: append category only if bundle has multiple audio classes
+            if (multiClass && !info.category.empty()) {
+                info.name = ci.name() + " (" + info.category + ")";
+            } else {
+                info.name = ci.name();
+            }
+
+            qDebug() << "VST3 found:" << QString::fromStdString(info.name)
+                     << "vendor:" << QString::fromStdString(info.vendor)
+                     << "class:" << idx << "at" << QString::fromStdString(bundlePath);
+
+            m_plugins.push_back(std::move(info));
+        }
+
+        // Module is released here — we only needed it for metadata
     }
 }
 
@@ -108,7 +175,8 @@ std::shared_ptr<IDSPProcessor> VST3Host::createProcessor(int pluginIndex)
         return nullptr;
 
     auto plugin = std::make_shared<VST3Plugin>();
-    if (!plugin->loadFromPath(m_plugins[pluginIndex].path)) {
+    if (!plugin->loadFromPath(m_plugins[pluginIndex].path,
+                              m_plugins[pluginIndex].classIndex)) {
         qWarning() << "VST3: Failed to create processor for"
                     << QString::fromStdString(m_plugins[pluginIndex].name);
         return nullptr;
@@ -170,7 +238,8 @@ void VST3Host::openPluginEditor(int pluginIndex, QWidget* parent)
     VST3Plugin* activePlugin = nullptr;
     for (auto it = m_loadedPlugins.begin(); it != m_loadedPlugins.end(); ) {
         if (auto sp = it->lock()) {
-            if (sp->pluginPath() == info.path) {
+            if (sp->pluginPath() == info.path &&
+                (info.uid.empty() || sp->pluginUID() == info.uid)) {
                 activePlugin = sp.get();
                 qDebug() << "VST3: Found loaded plugin instance";
                 break;
