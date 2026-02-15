@@ -445,6 +445,12 @@ add_library(sorana_ui OBJECT
     src/ui/views/settings/SettingsUtils.h
     src/ui/views/settings/AudioSettingsTab.h
     src/ui/views/settings/AudioSettingsTab.cpp
+    src/ui/views/settings/OutputSettingsWidget.h
+    src/ui/views/settings/OutputSettingsWidget.cpp
+    src/ui/views/settings/DSPSettingsWidget.h
+    src/ui/views/settings/DSPSettingsWidget.cpp
+    src/ui/views/settings/VSTSettingsWidget.h
+    src/ui/views/settings/VSTSettingsWidget.cpp
     src/ui/views/settings/LibrarySettingsTab.h
     src/ui/views/settings/LibrarySettingsTab.cpp
     src/ui/views/settings/AppleMusicSettingsTab.h
