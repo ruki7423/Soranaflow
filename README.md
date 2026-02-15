@@ -25,6 +25,26 @@
 
 ---
 
+## What's New (v1.7.3)
+
+### VST3 Hosting Improvements
+- Fixed component-to-controller state sync via IBStream protocol
+- Fixed initialization order: bus activation now precedes process setup
+- Added proper bus arrangement negotiation with stereo fallback
+- Per-class VST3 plugin enumeration for multi-effect bundles
+
+### EQ Improvements
+- Default Q changed to 0.7071 (Butterworth — flat response, no resonance)
+- Double-click Q/Freq/Gain spinboxes to reset to defaults
+- Collapsible EQ section with persistent state
+
+### Bug Fixes
+- AudioEngine nullptr guards prevent crashes during initialization
+- Fixed include path in LibrarySettingsTab
+- Split AudioSettingsTab into focused sub-widgets for maintainability
+
+---
+
 ## What's New (v1.7.2)
 
 ### Bug Fixes
@@ -117,7 +137,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.2](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.2/SoranaFlow-1.7.2.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.3](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.3/Soranaflow-1.7.3.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -152,13 +172,19 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 23 (v1.0.0 → v1.7.2) |
+| GitHub Releases | 24 (v1.0.0 → v1.7.3) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.3 — VST3 Hosting + EQ Improvements
+
+- VST3 IBStream state sync, init order fix, bus negotiation, per-class scan
+- EQ: Butterworth default Q, double-click reset, collapsible section
+- AudioEngine nullptr guards, AudioSettingsTab split
 
 ### v1.7.2 — VST Plugin Fix
 
