@@ -25,6 +25,17 @@
 
 ---
 
+## What's New (v1.7.4)
+
+### Apple Music Playback Fixes
+- Fixed ghost playback when switching from Apple Music to local files
+- Fixed first double-click ignored after opening Apple Music tab
+- Fixed title/audio mismatch during rapid song changes
+- Removed "Loading..." title flash during song transitions
+- macOS: clicks on inactive window now pass through immediately
+
+---
+
 ## What's New (v1.7.3)
 
 ### VST3 Hosting Improvements
@@ -137,7 +148,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.3](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.3/Soranaflow-1.7.3.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.4](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.4/SoranaFlow-1.7.4.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -172,13 +183,17 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 24 (v1.0.0 → v1.7.3) |
+| GitHub Releases | 25 (v1.0.0 → v1.7.4) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.4 — Apple Music Playback Fixes
+
+- Ghost playback fix, first-click fix, title/audio mismatch fix, acceptsFirstMouse
 
 ### v1.7.3 — VST3 Hosting + EQ Improvements
 
