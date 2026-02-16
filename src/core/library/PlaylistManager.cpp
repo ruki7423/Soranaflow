@@ -3,6 +3,11 @@
 
 #include <QUuid>
 #include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
+#include <QTextStream>
+#include <QDir>
+#include <QDebug>
 
 // ── Singleton ───────────────────────────────────────────────────────
 PlaylistManager* PlaylistManager::instance()
@@ -91,6 +96,75 @@ bool PlaylistManager::reorderTrack(const QString& playlistId, int fromPos, int t
         return true;
     }
     return false;
+}
+
+// ── importM3U ────────────────────────────────────────────────────────
+QString PlaylistManager::importM3U(const QString& filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "[PlaylistManager] Failed to open m3u file:" << filePath;
+        return QString();
+    }
+
+    // Derive playlist name from filename (without extension)
+    QString playlistName = QFileInfo(filePath).completeBaseName();
+    if (playlistName.isEmpty())
+        playlistName = QStringLiteral("Imported Playlist");
+
+    QDir baseDir = QFileInfo(filePath).absoluteDir();
+    QTextStream in(&file);
+
+    QStringList trackPaths;
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+            continue;
+
+        // Resolve relative paths against the m3u file's directory
+        QString resolved = line;
+        if (!QFileInfo(line).isAbsolute())
+            resolved = baseDir.absoluteFilePath(line);
+
+        // Normalize path
+        resolved = QFileInfo(resolved).canonicalFilePath();
+        if (resolved.isEmpty())
+            resolved = QDir::cleanPath(baseDir.absoluteFilePath(line));
+
+        trackPaths.append(resolved);
+    }
+
+    if (trackPaths.isEmpty()) {
+        qWarning() << "[PlaylistManager] No tracks found in m3u:" << filePath;
+        return QString();
+    }
+
+    // Create the playlist
+    QString playlistId = createPlaylist(playlistName);
+    if (playlistId.isEmpty())
+        return QString();
+
+    auto* db = LibraryDatabase::instance();
+    int matched = 0;
+    int skipped = 0;
+
+    for (const QString& path : trackPaths) {
+        auto track = db->trackByPath(path);
+        if (track.has_value()) {
+            db->addTrackToPlaylist(playlistId, track->id);
+            matched++;
+        } else {
+            skipped++;
+            qDebug() << "[PlaylistManager] m3u track not in library:" << path;
+        }
+    }
+
+    qDebug() << "[PlaylistManager] Imported" << playlistName
+             << "— matched:" << matched << "skipped:" << skipped;
+
+    emit playlistUpdated(playlistId);
+    emit playlistsChanged();
+    return playlistId;
 }
 
 // ── Queries ─────────────────────────────────────────────────────────

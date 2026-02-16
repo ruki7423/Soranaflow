@@ -8,6 +8,7 @@
 #include "../../widgets/StyledButton.h"
 #include "../../widgets/StyledScrollArea.h"
 #include "../../core/MusicData.h"
+#include <QFileDialog>
 
 class PlaylistsView : public QWidget {
     Q_OBJECT
@@ -25,6 +26,7 @@ protected:
 
 private slots:
     void onCreatePlaylistClicked();
+    void onImportPlaylistClicked();
     void onPlaylistsChanged();
     void onDeletePlaylistClicked(const QString& playlistId);
 
@@ -46,6 +48,7 @@ private:
     QGridLayout* m_userGridLayout;
     StyledScrollArea* m_scrollArea;
     StyledButton* m_createBtn;
+    StyledButton* m_importBtn;
 
     // View toggle buttons
     StyledButton* m_largeIconBtn;

@@ -17,6 +17,10 @@ public:
     bool renamePlaylist(const QString& id, const QString& newName);
     bool deletePlaylist(const QString& id);
 
+    // ── Import ────────────────────────────────────────────────────────
+    // Import a .m3u/.m3u8 playlist file. Returns playlist ID on success.
+    QString importM3U(const QString& filePath);
+
     // ── Track management ─────────────────────────────────────────────
     bool addTrack(const QString& playlistId, const Track& track);
     bool removeTrack(const QString& playlistId, const QString& trackId);

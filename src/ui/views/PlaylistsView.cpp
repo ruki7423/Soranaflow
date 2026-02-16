@@ -22,6 +22,7 @@ PlaylistsView::PlaylistsView(QWidget* parent)
     , m_userGridLayout(nullptr)
     , m_scrollArea(nullptr)
     , m_createBtn(nullptr)
+    , m_importBtn(nullptr)
     , m_largeIconBtn(nullptr)
     , m_smallIconBtn(nullptr)
     , m_listBtn(nullptr)
@@ -145,6 +146,22 @@ void PlaylistsView::setupUI()
     m_createBtn->setFixedHeight(30);
     headerLayout->addWidget(m_createBtn, 0, Qt::AlignVCenter);
 
+    m_importBtn = new StyledButton(QStringLiteral("Import"),
+                                    QStringLiteral("ghost"),
+                                    this);
+    m_importBtn->setObjectName(QStringLiteral("ImportPlaylistBtn"));
+    m_importBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/download.svg")));
+    m_importBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
+    m_importBtn->setFocusPolicy(Qt::NoFocus);
+    m_importBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_importBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: transparent; border: none; border-radius: 6px;"
+        "  color: %1; padding: 4px 12px; font-size: 13px; min-height: 0px; max-height: 30px; }"
+        "QPushButton:hover { background: %2; }"
+        "QPushButton:pressed { background: %3; }").arg(c.foreground, c.hover, c.pressed));
+    m_importBtn->setFixedHeight(30);
+    headerLayout->addWidget(m_importBtn, 0, Qt::AlignVCenter);
+
     auto* nav = NavigationService::instance();
     auto updateNavBtnStyle = [this, nav]() {
         auto c = ThemeManager::instance()->colors();
@@ -222,6 +239,8 @@ void PlaylistsView::setupUI()
             this, &PlaylistsView::refreshTheme);
     connect(m_createBtn, &QPushButton::clicked,
             this, &PlaylistsView::onCreatePlaylistClicked);
+    connect(m_importBtn, &QPushButton::clicked,
+            this, &PlaylistsView::onImportPlaylistClicked);
     connect(PlaylistManager::instance(), &PlaylistManager::playlistsChanged,
             this, &PlaylistsView::onPlaylistsChanged);
     connect(MusicDataProvider::instance(), &MusicDataProvider::libraryUpdated,
@@ -574,9 +593,11 @@ void PlaylistsView::refreshTheme()
     m_userHeader->setStyleSheet(
         QString("color: %1; font-size: 18px; font-weight: bold;").arg(c.foreground));
 
-    // Update create button
+    // Update create and import buttons
     m_createBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/plus.svg")));
     m_createBtn->setStyleSheet(tm->buttonStyle(ButtonVariant::Ghost));
+    m_importBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/download.svg")));
+    m_importBtn->setStyleSheet(tm->buttonStyle(ButtonVariant::Ghost));
 
     // Update view toggle buttons
     m_largeIconBtn->setIcon(tm->cachedIcon(QStringLiteral(":/icons/grid-2x2.svg")));
@@ -599,6 +620,26 @@ void PlaylistsView::onCreatePlaylistClicked()
         if (!name.isEmpty()) {
             PlaylistManager::instance()->createPlaylist(name);
         }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  onImportPlaylistClicked
+// ═════════════════════════════════════════════════════════════════════
+
+void PlaylistsView::onImportPlaylistClicked()
+{
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("Import Playlist"),
+        QString(),
+        QStringLiteral("Playlist Files (*.m3u *.m3u8);;All Files (*)"));
+
+    if (filePath.isEmpty()) return;
+
+    QString id = PlaylistManager::instance()->importM3U(filePath);
+    if (!id.isEmpty()) {
+        qDebug() << "[PlaylistsView] Imported playlist:" << id;
     }
 }
 
