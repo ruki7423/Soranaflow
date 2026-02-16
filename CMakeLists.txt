@@ -425,6 +425,12 @@ add_library(sorana_ui OBJECT
     src/ui/AppSidebar.cpp
     src/ui/PlaybackBar.h
     src/ui/PlaybackBar.cpp
+    src/ui/playbackbar/NowPlayingInfo.h
+    src/ui/playbackbar/NowPlayingInfo.cpp
+    src/ui/playbackbar/TransportControls.h
+    src/ui/playbackbar/TransportControls.cpp
+    src/ui/playbackbar/DeviceVolumeControl.h
+    src/ui/playbackbar/DeviceVolumeControl.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
     src/ui/views/NowPlayingView.h
