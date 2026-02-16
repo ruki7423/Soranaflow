@@ -25,6 +25,14 @@
 
 ---
 
+## What's New (v1.7.8)
+
+### Bug Fixes
+- **Album sort order now persists across restarts** — your chosen sort mode (Artist, Title, Year, etc.) is saved and restored automatically
+- **"Add to Queue" works correctly** — tracks and albums added via context menu now stay in the queue even when you start playing from a different source (user queue pattern)
+
+---
+
 ## What's New (v1.7.7)
 
 ### Bug Fixes
@@ -176,7 +184,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.7](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.7/SoranaFlow-1.7.7.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.8](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.8/SoranaFlow-1.7.8.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -211,13 +219,18 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 28 (v1.0.0 → v1.7.7) |
+| GitHub Releases | 29 (v1.0.0 → v1.7.8) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.8 — Album Sort Persistence & Queue Fix
+
+- Album sort order now persists across restarts
+- "Add to Queue" and "Play Next" now work correctly — user queue pattern
 
 ### v1.7.7 — VST3 Plugin Activation Fix
 
