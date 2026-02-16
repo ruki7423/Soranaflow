@@ -103,67 +103,6 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setAttribute(Qt::AA_DisableSessionManager);
     QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings, true);
 
-    // TODO: Re-enable when Tidal API is ready
-    // Widevine DRM flags cause V8 OOM crash in QtWebEngine 6.10
-    // Apple Music uses MusicKit JS — no Widevine needed
-#if 0
-    // Enable Widevine DRM for Tidal streaming (must be before QApplication)
-    // CDM path from Google Chrome installation
-    {
-        QString cdmDir;
-        QString cdmLib;
-        QStringList dirPaths = {
-            "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current/Libraries/WidevineCdm",
-            QDir::homePath() + "/Library/Google/Chrome/WidevineCdm",
-            "/Library/Google/Chrome/WidevineCdm"
-        };
-        for (const auto& p : dirPaths) {
-            if (QDir(p).exists()) {
-                cdmDir = p;
-                // Check for architecture-specific dylib
-                QString arm64 = p + "/_platform_specific/mac_arm64/libwidevinecdm.dylib";
-                QString x64 = p + "/_platform_specific/mac_x64/libwidevinecdm.dylib";
-                if (QFile::exists(arm64)) cdmLib = arm64;
-                else if (QFile::exists(x64)) cdmLib = x64;
-                break;
-            }
-        }
-
-        QByteArray existingFlags = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS");
-        QByteArray newFlags = existingFlags;
-        if (!cdmDir.isEmpty()) {
-            // Use directory path (standard Chromium format)
-            newFlags += " --widevine-cdm-path=" + cdmDir.toUtf8();
-            std::cout << "[DRM] Widevine CDM dir: " << cdmDir.toStdString() << std::endl;
-            if (!cdmLib.isEmpty()) {
-                std::cout << "[DRM] Widevine CDM lib: " << cdmLib.toStdString() << std::endl;
-            }
-        } else {
-            std::cout << "[DRM] WARNING: Widevine CDM not found. Tidal playback may fail." << std::endl;
-        }
-
-        // Enable encrypted media and DRM features
-        newFlags += " --enable-features=EncryptedMedia,WidevineCdmManaged";
-        newFlags += " --enable-logging --v=1";
-        qputenv("QTWEBENGINE_CHROMIUM_FLAGS", newFlags.trimmed());
-
-        // Log versions for compatibility check
-        std::cout << "[DRM] Qt version: " << qVersion() << std::endl;
-        std::cout << "[DRM] Chromium flags: " << qgetenv("QTWEBENGINE_CHROMIUM_FLAGS").constData() << std::endl;
-
-        // Read CDM manifest for version info
-        if (!cdmDir.isEmpty()) {
-            QString manifestPath = cdmDir + "/manifest.json";
-            QFile manifest(manifestPath);
-            if (manifest.open(QIODevice::ReadOnly)) {
-                QByteArray data = manifest.readAll();
-                std::cout << "[DRM] CDM manifest: " << data.left(300).constData() << std::endl;
-                manifest.close();
-            }
-        }
-    }
-#endif
-
     QApplication app(argc, argv);
 
     // ── File logging for Finder-launch diagnostics ──────────────────

@@ -785,66 +785,6 @@ void PlaybackBar::updateSignalPath()
     m_formatLabel->setVisible(true);
 }
 
-// ── Helper: find cover art for a track (currently unused) ──────────
-// Kept for potential future use; commented out to silence -Wunused-function.
-#if 0
-static QPixmap findPlaybackCoverArt(const Track& track, int size)
-{
-    QPixmap pix;
-
-    if (!track.coverUrl.isEmpty()) {
-        QString loadPath = track.coverUrl;
-        if (loadPath.startsWith(QStringLiteral("qrc:")))
-            loadPath = loadPath.mid(3);
-        if (QFile::exists(loadPath)) {
-            pix.load(loadPath);
-            if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        }
-    }
-
-    if (!track.filePath.isEmpty()) {
-        QString folder = QFileInfo(track.filePath).absolutePath();
-        static const QStringList names = {
-            QStringLiteral("cover.jpg"),   QStringLiteral("cover.png"),
-            QStringLiteral("Cover.jpg"),   QStringLiteral("Cover.png"),
-            QStringLiteral("folder.jpg"),  QStringLiteral("folder.png"),
-            QStringLiteral("Folder.jpg"),  QStringLiteral("Folder.png"),
-            QStringLiteral("front.jpg"),   QStringLiteral("front.png"),
-            QStringLiteral("Front.jpg"),   QStringLiteral("Front.png"),
-            QStringLiteral("album.jpg"),   QStringLiteral("album.png"),
-            QStringLiteral("Album.jpg"),   QStringLiteral("Album.png"),
-            QStringLiteral("artwork.jpg"), QStringLiteral("artwork.png"),
-            QStringLiteral("Artwork.jpg"), QStringLiteral("Artwork.png"),
-        };
-        for (const QString& n : names) {
-            QString path = folder + QStringLiteral("/") + n;
-            if (QFile::exists(path)) {
-                pix.load(path);
-                if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            }
-        }
-    }
-
-    if (!track.filePath.isEmpty()) {
-        pix = MetadataReader::extractCoverArt(track.filePath);
-        if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    }
-
-    if (!track.filePath.isEmpty()) {
-        QDir dir(QFileInfo(track.filePath).absolutePath());
-        QStringList images = dir.entryList(
-            {QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.png"), QStringLiteral("*.webp")},
-            QDir::Files, QDir::Name);
-        if (!images.isEmpty()) {
-            pix.load(dir.filePath(images.first()));
-            if (!pix.isNull()) return pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        }
-    }
-
-    return pix;
-}
-#endif
-
 // ── Helper: Update Track Info ──────────────────────────────────────
 void PlaybackBar::updateTrackInfo()
 {
