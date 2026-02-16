@@ -53,6 +53,13 @@ add_sorana_test(
 )
 
 add_sorana_test(
+    NAME MusicKitStateMachine
+    SOURCES
+        tst_MusicKitStateMachine.cpp
+        ${CMAKE_SOURCE_DIR}/src/apple/MusicKitStateMachine.cpp
+)
+
+add_sorana_test(
     NAME SignalPathInfo
     SOURCES
         tst_SignalPathInfo.cpp
