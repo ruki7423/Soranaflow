@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QTimer>
 #include "../../core/ThemeManager.h"
+#include "../../core/QueueManager.h"
 #include "../services/CoverArtService.h"
 #include "../../platform/macos/MacUtils.h"
 
@@ -451,8 +452,14 @@ QWidget* QueueView::createQueueItem(const Track& track, int index, bool isCurren
             "}")
             .arg(c.foregroundMuted, c.hover, c.foregroundSecondary, c.pressed, c.foreground));
         const int queueIndex = index;
-        connect(removeBtn, &QPushButton::clicked, this, [queueIndex]() {
-            PlaybackState::instance()->removeFromQueue(queueIndex);
+        connect(removeBtn, &QPushButton::clicked, item, [item, queueIndex]() {
+            bool isUserQ = item->property("isUserQueue").toBool();
+            if (isUserQ) {
+                int uqIdx = item->property("userQueueIndex").toInt();
+                PlaybackState::instance()->removeFromUserQueue(uqIdx);
+            } else {
+                PlaybackState::instance()->removeFromQueue(queueIndex);
+            }
         });
         itemLayout->addWidget(removeBtn);
     }
@@ -577,16 +584,19 @@ void QueueView::updateQueueList()
         delete child;
     }
 
-    const QVector<Track> queue = PlaybackState::instance()->queue();
-    const int currentIdx = PlaybackState::instance()->queueIndex();
+    auto* qm = PlaybackState::instance()->queueManager();
+    const QVector<Track> queue = qm->queue();
+    const QVector<Track> userQueue = qm->userQueue();
+    const int currentIdx = qm->currentIndex();
 
     // ── Up Next section ───────────────────────────────────────────
-    int upNextCount = 0;
+    int mainUpNext = 0;
     if (currentIdx >= 0) {
-        upNextCount = queue.size() - currentIdx - 1;
+        mainUpNext = queue.size() - currentIdx - 1;
     } else {
-        upNextCount = queue.size();
+        mainUpNext = queue.size();
     }
+    int upNextCount = userQueue.size() + mainUpNext;
 
     m_emptyLabel->setVisible(upNextCount == 0);
 
@@ -595,6 +605,15 @@ void QueueView::updateQueueList()
             .arg(upNextCount)
             .arg(upNextCount == 1 ? QStringLiteral("") : QStringLiteral("s")));
 
+    // User-queued tracks first (priority — play before main queue)
+    for (int i = 0; i < userQueue.size(); ++i) {
+        auto* item = createQueueItem(userQueue[i], i, false, false);
+        item->setProperty("isUserQueue", true);
+        item->setProperty("userQueueIndex", i);
+        m_queueListLayout->addWidget(item);
+    }
+
+    // Main queue items after current
     int startIdx = (currentIdx >= 0) ? currentIdx + 1 : 0;
     for (int i = startIdx; i < queue.size(); ++i) {
         auto* item = createQueueItem(queue[i], i, false, false);

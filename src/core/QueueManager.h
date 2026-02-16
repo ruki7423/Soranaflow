@@ -15,18 +15,21 @@ public:
     void insertNext(const Track& track);
     void insertNext(const QVector<Track>& tracks);
     void removeFromQueue(int index);
+    void removeFromUserQueue(int index);
     void moveTo(int fromIndex, int toIndex);
     void clearQueue();
     void clearUpcoming();
 
     // Queue access
     QVector<Track> queue() const { return m_queue; }
+    QVector<Track> userQueue() const { return m_userQueue; }
     QVector<Track> displayQueue() const;
     int currentIndex() const { return m_queueIndex; }
+    int userQueueSize() const { return m_userQueue.size(); }
     Track currentTrack() const;
     Track peekNextTrack() const;
-    bool isEmpty() const { return m_queue.isEmpty(); }
-    int size() const { return m_queue.size(); }
+    bool isEmpty() const { return m_queue.isEmpty() && m_userQueue.isEmpty(); }
+    int size() const { return m_queue.size() + m_userQueue.size(); }
 
     // Navigation — advance/retreat through the queue
     AdvanceResult advance();
@@ -48,12 +51,14 @@ public:
     // Direct state access for restore
     void setCurrentIndex(int idx) { m_queueIndex = idx; }
     void restoreState(const QVector<Track>& tracks, int idx,
-                      bool shuffle, int repeat);
+                      bool shuffle, int repeat,
+                      const QVector<Track>& userQueue = {});
 
 private:
     void rebuildShuffleOrder();
 
     QVector<Track> m_queue;
+    QVector<Track> m_userQueue;    // User-added tracks — survive setQueue(), play first
     QVector<int> m_shuffledIndices;
     int m_queueIndex = -1;
     bool m_shuffle = false;

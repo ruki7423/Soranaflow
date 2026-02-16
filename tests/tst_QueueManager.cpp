@@ -55,24 +55,28 @@ private slots:
         QCOMPARE(qm.size(), 3);
     }
 
-    void insertNext_insertsAfterCurrent()
+    void insertNext_insertsIntoUserQueue()
     {
         QueueManager qm;
-        qm.setQueue(makeTracks(3));  // [1*, 2, 3]
-        qm.insertNext(makeTrack("X"));  // [1*, X, 2, 3]
+        qm.setQueue(makeTracks(3));  // main=[1*, 2, 3]
+        qm.insertNext(makeTrack("X"));  // userQueue=[X]
         QCOMPARE(qm.size(), 4);
-        QCOMPARE(qm.queue().at(1).id, QStringLiteral("X"));
+        QCOMPARE(qm.userQueue().at(0).id, QStringLiteral("X"));
+        // Advance should play X next (from user queue)
+        auto r = qm.advance();
+        QCOMPARE(r, QueueManager::Advanced);
+        QCOMPARE(qm.currentTrack().id, QStringLiteral("X"));
     }
 
     void insertNext_batch()
     {
         QueueManager qm;
-        qm.setQueue(makeTracks(2));  // [1*, 2]
+        qm.setQueue(makeTracks(2));  // main=[1*, 2]
         QVector<Track> batch = {makeTrack("A"), makeTrack("B")};
-        qm.insertNext(batch);  // [1*, A, B, 2]
+        qm.insertNext(batch);  // userQueue=[A, B]
         QCOMPARE(qm.size(), 4);
-        QCOMPARE(qm.queue().at(1).id, QStringLiteral("A"));
-        QCOMPARE(qm.queue().at(2).id, QStringLiteral("B"));
+        QCOMPARE(qm.userQueue().at(0).id, QStringLiteral("A"));
+        QCOMPARE(qm.userQueue().at(1).id, QStringLiteral("B"));
     }
 
     void removeFromQueue_beforeCurrent()
@@ -378,6 +382,121 @@ private slots:
         QCOMPARE(dq.at(0).id, qm.currentTrack().id);
         // Total items = current + shuffled remaining
         QCOMPARE(dq.size(), 5);
+    }
+
+    // ── User Queue ────────────────────────────────────────────────
+    void userQueue_addToQueue_goesToUserQueue()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));
+        qm.addToQueue(makeTrack("U1"));
+        QCOMPARE(qm.userQueueSize(), 1);
+        QCOMPARE(qm.userQueue().at(0).id, QStringLiteral("U1"));
+        // Main queue unchanged
+        QCOMPARE(qm.queue().size(), 3);
+    }
+
+    void userQueue_survivesSetQueue()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));
+        qm.addToQueue(makeTrack("U1"));
+        qm.addToQueue(makeTrack("U2"));
+        QCOMPARE(qm.userQueueSize(), 2);
+
+        // setQueue replaces main queue but keeps user queue
+        qm.setQueue(makeTracks(5));
+        QCOMPARE(qm.queue().size(), 5);
+        QCOMPARE(qm.userQueueSize(), 2);
+        QCOMPARE(qm.userQueue().at(0).id, QStringLiteral("U1"));
+    }
+
+    void userQueue_advancePlaysUserQueueFirst()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));  // main=[1*, 2, 3]
+        qm.addToQueue(makeTrack("U1"));
+        qm.addToQueue(makeTrack("U2"));
+
+        // First advance should play U1 from user queue
+        auto r1 = qm.advance();
+        QCOMPARE(r1, QueueManager::Advanced);
+        QCOMPARE(qm.currentTrack().id, QStringLiteral("U1"));
+
+        // Second advance should play U2
+        auto r2 = qm.advance();
+        QCOMPARE(r2, QueueManager::Advanced);
+        QCOMPARE(qm.currentTrack().id, QStringLiteral("U2"));
+
+        // Third advance should continue main queue (track "2")
+        auto r3 = qm.advance();
+        QCOMPARE(r3, QueueManager::Advanced);
+        QCOMPARE(qm.currentTrack().id, QStringLiteral("2"));
+    }
+
+    void userQueue_peekNextReturnsUserQueueFirst()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));
+        qm.addToQueue(makeTrack("U1"));
+        QCOMPARE(qm.peekNextTrack().id, QStringLiteral("U1"));
+    }
+
+    void userQueue_displayQueueShowsUserItemsFirst()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));  // main=[1*, 2, 3]
+        qm.addToQueue(makeTrack("U1"));
+
+        auto dq = qm.displayQueue();
+        // current + userQueue + remaining main
+        QCOMPARE(dq.size(), 4);  // 1(current) + 1(user) + 2(remaining)
+        QCOMPARE(dq.at(0).id, QStringLiteral("1"));   // current
+        QCOMPARE(dq.at(1).id, QStringLiteral("U1"));  // user queue
+        QCOMPARE(dq.at(2).id, QStringLiteral("2"));   // main queue
+    }
+
+    void userQueue_clearQueueClearsBoth()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(3));
+        qm.addToQueue(makeTrack("U1"));
+        qm.clearQueue();
+        QVERIFY(qm.isEmpty());
+        QCOMPARE(qm.userQueueSize(), 0);
+    }
+
+    void userQueue_clearUpcomingClearsBoth()
+    {
+        QueueManager qm;
+        qm.setQueue(makeTracks(5));
+        qm.setCurrentIndex(2);
+        qm.addToQueue(makeTrack("U1"));
+        qm.clearUpcoming();
+        QCOMPARE(qm.queue().size(), 3);  // tracks 1, 2, 3
+        QCOMPARE(qm.userQueueSize(), 0);
+    }
+
+    void userQueue_removeFromUserQueue()
+    {
+        QueueManager qm;
+        qm.addToQueue(makeTrack("U1"));
+        qm.addToQueue(makeTrack("U2"));
+        qm.addToQueue(makeTrack("U3"));
+        qm.removeFromUserQueue(1);  // remove U2
+        QCOMPARE(qm.userQueueSize(), 2);
+        QCOMPARE(qm.userQueue().at(0).id, QStringLiteral("U1"));
+        QCOMPARE(qm.userQueue().at(1).id, QStringLiteral("U3"));
+    }
+
+    void userQueue_restoreWithUserQueue()
+    {
+        QueueManager qm;
+        QVector<Track> userTracks = {makeTrack("U1"), makeTrack("U2")};
+        qm.restoreState(makeTracks(3), 1, false, 0, userTracks);
+        QCOMPARE(qm.queue().size(), 3);
+        QCOMPARE(qm.userQueueSize(), 2);
+        QCOMPARE(qm.currentIndex(), 1);
     }
 };
 

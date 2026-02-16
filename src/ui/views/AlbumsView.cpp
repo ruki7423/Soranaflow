@@ -16,6 +16,7 @@
 
 #include "../../core/ThemeManager.h"
 #include "../../core/PlaybackState.h"
+#include "../../core/Settings.h"
 #include "../../core/audio/MetadataReader.h"
 #include "../../core/library/LibraryDatabase.h"
 #include "../../metadata/CoverArtProvider.h"
@@ -118,8 +119,19 @@ void AlbumsView::setupUI()
     connect(m_sortCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
                 m_sortMode = static_cast<AlbumSortMode>(m_sortCombo->itemData(idx).toInt());
+                Settings::instance()->setValue(QStringLiteral("appearance/albumsSortMode"),
+                                               static_cast<int>(m_sortMode));
                 reloadAlbums();
             });
+    // Restore saved sort mode
+    int savedSort = Settings::instance()->value(
+        QStringLiteral("appearance/albumsSortMode"),
+        static_cast<int>(SortArtist)).toInt();
+    if (savedSort >= SortArtist && savedSort <= SortDateAdded) {
+        int comboIdx = m_sortCombo->findData(savedSort);
+        if (comboIdx >= 0)
+            m_sortCombo->setCurrentIndex(comboIdx);
+    }
     headerRow->addWidget(m_sortCombo);
     headerRow->addSpacing(8);
 

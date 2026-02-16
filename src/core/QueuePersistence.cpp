@@ -29,11 +29,12 @@ void QueuePersistence::doSave()
 {
     // Snapshot queue data (fast — just copies QVector of value types)
     QVector<Track> snapshot = m_mgr->queue();
+    QVector<Track> userSnapshot = m_mgr->userQueue();
     int idx = m_mgr->currentIndex();
     bool shuffle = m_mgr->shuffleEnabled();
     int repeat = m_mgr->repeatMode();
 
-    (void)QtConcurrent::run([snapshot, idx, shuffle, repeat]() {
+    (void)QtConcurrent::run([snapshot, userSnapshot, idx, shuffle, repeat]() {
         static QMutex mutex;
         QMutexLocker lock(&mutex);
 
@@ -62,11 +63,33 @@ void QueuePersistence::doSave()
         }
         settings.endArray();
 
+        // Save user queue separately
+        settings.beginWriteArray(QStringLiteral("queue/userTracks"), userSnapshot.size());
+        for (int i = 0; i < userSnapshot.size(); ++i) {
+            settings.setArrayIndex(i);
+            const Track& t = userSnapshot[i];
+            settings.setValue(QStringLiteral("id"), t.id);
+            settings.setValue(QStringLiteral("title"), t.title);
+            settings.setValue(QStringLiteral("artist"), t.artist);
+            settings.setValue(QStringLiteral("album"), t.album);
+            settings.setValue(QStringLiteral("albumId"), t.albumId);
+            settings.setValue(QStringLiteral("duration"), t.duration);
+            settings.setValue(QStringLiteral("filePath"), t.filePath);
+            settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
+            settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
+            settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
+            settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
+            settings.setValue(QStringLiteral("bitrate"), t.bitrate);
+            settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
+        }
+        settings.endArray();
+
         settings.setValue(QStringLiteral("queue/currentIndex"), idx);
         settings.setValue(QStringLiteral("queue/shuffle"), shuffle);
         settings.setValue(QStringLiteral("queue/repeat"), repeat);
 
-        qDebug() << "[Queue] Saved" << snapshot.size() << "tracks in"
+        qDebug() << "[Queue] Saved" << snapshot.size() << "tracks +"
+                 << userSnapshot.size() << "user-queued in"
                  << timer.elapsed() << "ms (async, index:" << idx << ")";
     });
 }
@@ -76,6 +99,7 @@ void QueuePersistence::saveImmediate()
     QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
 
     const auto queue = m_mgr->queue();
+    const auto userQueue = m_mgr->userQueue();
 
     settings.beginWriteArray(QStringLiteral("queue/tracks"), queue.size());
     for (int i = 0; i < queue.size(); ++i) {
@@ -97,11 +121,32 @@ void QueuePersistence::saveImmediate()
     }
     settings.endArray();
 
+    settings.beginWriteArray(QStringLiteral("queue/userTracks"), userQueue.size());
+    for (int i = 0; i < userQueue.size(); ++i) {
+        settings.setArrayIndex(i);
+        const Track& t = userQueue[i];
+        settings.setValue(QStringLiteral("id"), t.id);
+        settings.setValue(QStringLiteral("title"), t.title);
+        settings.setValue(QStringLiteral("artist"), t.artist);
+        settings.setValue(QStringLiteral("album"), t.album);
+        settings.setValue(QStringLiteral("albumId"), t.albumId);
+        settings.setValue(QStringLiteral("duration"), t.duration);
+        settings.setValue(QStringLiteral("filePath"), t.filePath);
+        settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
+        settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
+        settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
+        settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
+        settings.setValue(QStringLiteral("bitrate"), t.bitrate);
+        settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
+    }
+    settings.endArray();
+
     settings.setValue(QStringLiteral("queue/currentIndex"), m_mgr->currentIndex());
     settings.setValue(QStringLiteral("queue/shuffle"), m_mgr->shuffleEnabled());
     settings.setValue(QStringLiteral("queue/repeat"), m_mgr->repeatMode());
 
-    qDebug() << "[Queue] Saved" << queue.size() << "tracks, index:" << m_mgr->currentIndex();
+    qDebug() << "[Queue] Saved" << queue.size() << "tracks +"
+             << userQueue.size() << "user-queued, index:" << m_mgr->currentIndex();
 }
 
 void QueuePersistence::restore()
@@ -133,13 +178,38 @@ void QueuePersistence::restore()
     }
     settings.endArray();
 
+    // Restore user queue
+    int userCount = settings.beginReadArray(QStringLiteral("queue/userTracks"));
+    QVector<Track> userTracks;
+    userTracks.reserve(userCount);
+    for (int i = 0; i < userCount; ++i) {
+        settings.setArrayIndex(i);
+        Track t;
+        t.id = settings.value(QStringLiteral("id")).toString();
+        t.title = settings.value(QStringLiteral("title")).toString();
+        t.artist = settings.value(QStringLiteral("artist")).toString();
+        t.album = settings.value(QStringLiteral("album")).toString();
+        t.albumId = settings.value(QStringLiteral("albumId")).toString();
+        t.duration = settings.value(QStringLiteral("duration")).toInt();
+        t.filePath = settings.value(QStringLiteral("filePath")).toString();
+        t.trackNumber = settings.value(QStringLiteral("trackNumber")).toInt();
+        t.format = static_cast<AudioFormat>(settings.value(QStringLiteral("format")).toInt());
+        t.sampleRate = settings.value(QStringLiteral("sampleRate")).toString();
+        t.bitDepth = settings.value(QStringLiteral("bitDepth")).toString();
+        t.bitrate = settings.value(QStringLiteral("bitrate")).toString();
+        t.coverUrl = settings.value(QStringLiteral("coverUrl")).toString();
+        userTracks.append(t);
+    }
+    settings.endArray();
+
     int idx = settings.value(QStringLiteral("queue/currentIndex"), -1).toInt();
     bool shuffle = settings.value(QStringLiteral("queue/shuffle"), false).toBool();
     int repeat = settings.value(QStringLiteral("queue/repeat"), 0).toInt();
 
-    m_mgr->restoreState(tracks, idx, shuffle, repeat);
+    m_mgr->restoreState(tracks, idx, shuffle, repeat, userTracks);
 
-    qDebug() << "[Queue] Restored" << tracks.size() << "tracks, index:" << idx;
+    qDebug() << "[Queue] Restored" << tracks.size() << "tracks +"
+             << userTracks.size() << "user-queued, index:" << idx;
 
     m_restoring = false;
 }

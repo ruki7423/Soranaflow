@@ -409,6 +409,13 @@ void PlaybackState::removeFromQueue(int index)
     emitQueueChangedDebounced();
 }
 
+void PlaybackState::removeFromUserQueue(int index)
+{
+    m_queueMgr->removeFromUserQueue(index);
+    m_queuePersist->scheduleSave();
+    emitQueueChangedDebounced();
+}
+
 void PlaybackState::moveTo(int fromIndex, int toIndex)
 {
     m_queueMgr->moveTo(fromIndex, toIndex);

@@ -1,40 +1,40 @@
 #include "QueueManager.h"
 #include <QRandomGenerator>
+#include <QDebug>
 #include <algorithm>
 
 void QueueManager::setQueue(const QVector<Track>& tracks)
 {
     m_queue = tracks;
     m_queueIndex = tracks.isEmpty() ? -1 : 0;
+    // m_userQueue intentionally NOT cleared — user-added tracks persist
     if (m_shuffle && !tracks.isEmpty())
         rebuildShuffleOrder();
 }
 
 void QueueManager::addToQueue(const Track& track)
 {
-    m_queue.append(track);
+    m_userQueue.append(track);
+    qDebug() << "[Queue] Added to user queue:" << track.title
+             << "(" << m_userQueue.size() << "pending)";
 }
 
 void QueueManager::addToQueue(const QVector<Track>& tracks)
 {
-    m_queue.append(tracks);
+    m_userQueue.append(tracks);
+    qDebug() << "[Queue] Added" << tracks.size() << "tracks to user queue"
+             << "(" << m_userQueue.size() << "pending)";
 }
 
 void QueueManager::insertNext(const Track& track)
 {
-    int pos = m_queueIndex + 1;
-    if (pos < 0) pos = 0;
-    if (pos > m_queue.size()) pos = m_queue.size();
-    m_queue.insert(pos, track);
+    m_userQueue.prepend(track);
 }
 
 void QueueManager::insertNext(const QVector<Track>& tracks)
 {
-    int pos = m_queueIndex + 1;
-    if (pos < 0) pos = 0;
-    if (pos > m_queue.size()) pos = m_queue.size();
-    for (int i = 0; i < tracks.size(); ++i)
-        m_queue.insert(pos + i, tracks[i]);
+    for (int i = tracks.size() - 1; i >= 0; --i)
+        m_userQueue.prepend(tracks[i]);
 }
 
 void QueueManager::removeFromQueue(int index)
@@ -51,6 +51,12 @@ void QueueManager::removeFromQueue(int index)
         if (m_queueIndex >= m_queue.size())
             m_queueIndex = m_queue.size() - 1;
     }
+}
+
+void QueueManager::removeFromUserQueue(int index)
+{
+    if (index < 0 || index >= m_userQueue.size()) return;
+    m_userQueue.removeAt(index);
 }
 
 void QueueManager::moveTo(int fromIndex, int toIndex)
@@ -77,11 +83,13 @@ void QueueManager::moveTo(int fromIndex, int toIndex)
 void QueueManager::clearQueue()
 {
     m_queue.clear();
+    m_userQueue.clear();
     m_queueIndex = -1;
 }
 
 void QueueManager::clearUpcoming()
 {
+    m_userQueue.clear();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
         m_queue.resize(m_queueIndex + 1);
 }
@@ -95,23 +103,38 @@ Track QueueManager::currentTrack() const
 
 QVector<Track> QueueManager::displayQueue() const
 {
-    if (!m_shuffle || m_shuffledIndices.isEmpty())
-        return m_queue;
-
     QVector<Track> result;
+
+    // Current track
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
         result.append(m_queue.at(m_queueIndex));
-    for (int idx : m_shuffledIndices) {
-        if (idx >= 0 && idx < m_queue.size())
-            result.append(m_queue.at(idx));
+
+    // User queue items play next (priority)
+    result.append(m_userQueue);
+
+    // Remaining main queue
+    if (!m_shuffle || m_shuffledIndices.isEmpty()) {
+        int startIdx = (m_queueIndex >= 0) ? m_queueIndex + 1 : 0;
+        for (int i = startIdx; i < m_queue.size(); ++i)
+            result.append(m_queue.at(i));
+    } else {
+        for (int idx : m_shuffledIndices) {
+            if (idx >= 0 && idx < m_queue.size())
+                result.append(m_queue.at(idx));
+        }
     }
+
     return result;
 }
 
 Track QueueManager::peekNextTrack() const
 {
-    if (m_queue.isEmpty()) return Track();
+    if (m_queue.isEmpty() && m_userQueue.isEmpty()) return Track();
     if (m_repeat == 2) return currentTrack();  // One
+
+    // User queue takes priority
+    if (!m_userQueue.isEmpty())
+        return m_userQueue.first();
 
     int nextIdx = -1;
     if (m_shuffle) {
@@ -136,8 +159,21 @@ Track QueueManager::peekNextTrack() const
 
 QueueManager::AdvanceResult QueueManager::advance()
 {
-    if (m_queue.isEmpty()) return EndOfQueue;
+    if (m_queue.isEmpty() && m_userQueue.isEmpty()) return EndOfQueue;
     if (m_repeat == 2) return RepeatOne;  // One
+
+    // User queue takes priority — consume next user-queued track
+    if (!m_userQueue.isEmpty()) {
+        Track next = m_userQueue.takeFirst();
+        int insertPos = (m_queueIndex >= 0) ? m_queueIndex + 1 : 0;
+        if (insertPos > m_queue.size()) insertPos = m_queue.size();
+        m_queue.insert(insertPos, next);
+        m_queueIndex = insertPos;
+        if (m_shuffle) rebuildShuffleOrder();
+        qDebug() << "[Queue] Playing user-queued track:" << next.title
+                 << "at index" << m_queueIndex;
+        return Advanced;
+    }
 
     if (m_shuffle) {
         if (m_shuffledIndices.isEmpty())
@@ -222,12 +258,14 @@ void QueueManager::cycleRepeat()
 }
 
 void QueueManager::restoreState(const QVector<Track>& tracks, int idx,
-                                bool shuffle, int repeat)
+                                bool shuffle, int repeat,
+                                const QVector<Track>& userQueue)
 {
     m_queue = tracks;
     m_queueIndex = idx;
     m_shuffle = shuffle;
     m_repeat = repeat;
+    m_userQueue = userQueue;
     if (m_shuffle && !m_queue.isEmpty())
         rebuildShuffleOrder();
 }

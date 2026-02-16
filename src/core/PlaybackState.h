@@ -54,6 +54,7 @@ public slots:
     void insertNext(const Track& track);
     void insertNext(const QVector<Track>& tracks);
     void removeFromQueue(int index);
+    void removeFromUserQueue(int index);
     void moveTo(int fromIndex, int toIndex);
     void clearQueue();
     void clearUpcoming();
