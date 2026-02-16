@@ -25,6 +25,15 @@
 
 ---
 
+## What's New (v1.7.6)
+
+### Internal Quality
+- Unit test framework: 7 suites, ~190 tests (Qt Test + CTest)
+- God class decomposition: PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
+- No user-facing behavior changes — pure internal quality improvement
+
+---
+
 ## What's New (v1.7.5)
 
 ### Bug Fixes
@@ -160,7 +169,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.5](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.5/SoranaFlow-1.7.5.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.6](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.6/SoranaFlow-1.7.6.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -195,13 +204,19 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 26 (v1.0.0 → v1.7.5) |
+| GitHub Releases | 27 (v1.0.0 → v1.7.6) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.6 — Internal Quality & Test Infrastructure
+
+- Unit test framework: 7 suites, ~190 tests (Qt Test + CTest)
+- God class decomposition: PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
+- No user-facing behavior changes
 
 ### v1.7.5 — VST3 Compatibility + Playlists
 
