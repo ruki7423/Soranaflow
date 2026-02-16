@@ -66,6 +66,13 @@ add_sorana_test(
 )
 
 add_sorana_test(
+    NAME SignalPathBuilder
+    SOURCES
+        tst_SignalPathBuilder.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/audio/SignalPathBuilder.cpp
+)
+
+add_sorana_test(
     NAME ServiceLocator
     SOURCES
         tst_ServiceLocator.cpp
