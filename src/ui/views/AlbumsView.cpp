@@ -112,6 +112,7 @@ void AlbumsView::setupUI()
     m_sortCombo->addItem(QStringLiteral("Album Artist \u2192 Year"), SortAlbumArtistYear);
     m_sortCombo->addItem(QStringLiteral("Year"), SortYear);
     m_sortCombo->addItem(QStringLiteral("Title"), SortTitle);
+    m_sortCombo->addItem(QStringLiteral("Recently Added"), SortDateAdded);
     m_sortCombo->setFixedWidth(180);
     m_sortCombo->setToolTip(QStringLiteral("Sort albums"));
     connect(m_sortCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -375,6 +376,13 @@ void AlbumsView::reloadAlbums()
     case SortTitle:
         std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
             return a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+        });
+        break;
+    case SortDateAdded:
+        std::sort(albums.begin(), albums.end(), [](const Album& a, const Album& b) {
+            // Newest first — descending by dateAdded, then title ascending
+            int cmp = b.dateAdded.compare(a.dateAdded);
+            return cmp != 0 ? cmp < 0 : a.title.compare(b.title, Qt::CaseInsensitive) < 0;
         });
         break;
     }

@@ -55,7 +55,10 @@ QVector<Album> AlbumRepository::allAlbums() const
     QElapsedTimer t; t.start();
     QVector<Album> result;
     QSqlQuery q(*m_ctx->readDb);
-    q.exec(QStringLiteral("SELECT * FROM albums ORDER BY artist, title"));
+    q.exec(QStringLiteral(
+        "SELECT a.*, "
+        "(SELECT MAX(t.added_at) FROM tracks t WHERE t.album_id = a.id) AS date_added "
+        "FROM albums a ORDER BY a.artist, a.title"));
 
     if (q.lastError().isValid()) {
         qWarning() << "AlbumRepository::allAlbums query error:" << q.lastError().text();
@@ -81,6 +84,11 @@ QVector<Album> AlbumRepository::allAlbums() const
         QString genresStr = q.value(QStringLiteral("genres")).toString();
         if (!genresStr.isEmpty())
             a.genres = genresStr.split(QStringLiteral(","));
+
+        // date_added from subquery (max added_at of tracks in this album)
+        int daIdx = q.record().indexOf(QStringLiteral("date_added"));
+        if (daIdx >= 0)
+            a.dateAdded = q.value(daIdx).toString();
 
         // Tracks loaded on demand via albumById() — avoids N+1 query problem
         result.append(a);

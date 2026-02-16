@@ -25,7 +25,7 @@ public:
     explicit AlbumsView(QWidget* parent = nullptr);
 
     enum ViewMode { LargeIcons, SmallIcons, ListView };
-    enum AlbumSortMode { SortArtist, SortAlbumArtist, SortAlbumArtistYear, SortYear, SortTitle };
+    enum AlbumSortMode { SortArtist, SortAlbumArtist, SortAlbumArtistYear, SortYear, SortTitle, SortDateAdded };
 
 signals:
     void albumSelected(const QString& albumId);

@@ -139,6 +139,7 @@ struct Album {
     int             duration = 0;   // total seconds
     QVector<Track>  tracks;
     QStringList     genres;
+    QString         dateAdded;   // max(added_at) from tracks — for "Recently Added" sort
 };
 
 struct Artist {
