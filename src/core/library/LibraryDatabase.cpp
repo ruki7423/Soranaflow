@@ -43,6 +43,22 @@ LibraryDatabase::LibraryDatabase(QObject* parent)
     m_playlistRepo = new PlaylistRepository(&m_ctx);
 }
 
+LibraryDatabase::LibraryDatabase(const QString& dbPath, QObject* parent)
+    : QObject(parent)
+{
+    m_dbPath = dbPath;
+
+    m_ctx.writeDb = &m_db;
+    m_ctx.readDb = &m_readDb;
+    m_ctx.writeMutex = &m_writeMutex;
+    m_ctx.readMutex = &m_readMutex;
+
+    m_trackRepo = new TrackRepository(&m_ctx);
+    m_albumRepo = new AlbumRepository(&m_ctx);
+    m_artistRepo = new ArtistRepository(&m_ctx);
+    m_playlistRepo = new PlaylistRepository(&m_ctx);
+}
+
 LibraryDatabase::~LibraryDatabase()
 {
     close();

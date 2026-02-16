@@ -22,6 +22,7 @@ class LibraryDatabase : public QObject {
 
 public:
     static LibraryDatabase* instance();
+    explicit LibraryDatabase(const QString& dbPath, QObject* parent = nullptr);
     ~LibraryDatabase() override;
 
     bool open();

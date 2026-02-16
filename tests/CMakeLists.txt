@@ -84,6 +84,19 @@ add_sorana_test(
 )
 
 add_sorana_test(
+    NAME LibraryDatabase
+    SOURCES
+        tst_LibraryDatabase.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/LibraryDatabase.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/DatabaseContext.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/TrackRepository.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/AlbumRepository.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/ArtistRepository.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/PlaylistRepository.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/MusicData.cpp
+)
+
+add_sorana_test(
     NAME ServiceLocator
     SOURCES
         tst_ServiceLocator.cpp
