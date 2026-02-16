@@ -478,6 +478,14 @@ add_library(sorana_ui OBJECT
     src/ui/views/settings/AboutSettingsTab.cpp
     src/ui/views/AppleMusicView.h
     src/ui/views/AppleMusicView.cpp
+    src/ui/amview/AMContentPanel.h
+    src/ui/amview/AMContentPanel.cpp
+    src/ui/amview/AMSearchPanel.h
+    src/ui/amview/AMSearchPanel.cpp
+    src/ui/amview/AMArtistPanel.h
+    src/ui/amview/AMArtistPanel.cpp
+    src/ui/amview/AMAlbumPanel.h
+    src/ui/amview/AMAlbumPanel.cpp
     src/ui/views/FolderBrowserView.h
     src/ui/views/FolderBrowserView.cpp
     # src/ui/views/TidalView.h      # TODO: restore when Tidal API available

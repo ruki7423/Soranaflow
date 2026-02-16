@@ -1,28 +1,23 @@
 #pragma once
 
 #include <QWidget>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QGridLayout>
 #include <QLabel>
-#include <QScrollArea>
+#include <QPushButton>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QNetworkAccessManager>
-#include <QPushButton>
 #include <QStack>
-#include <QFontMetrics>
+#include <QStackedWidget>
 
 class StyledInput;
 class StyledButton;
+class AMSearchPanel;
+class AMArtistPanel;
+class AMAlbumPanel;
 
 class AppleMusicView : public QWidget {
     Q_OBJECT
 public:
     explicit AppleMusicView(QWidget* parent = nullptr);
-
-protected:
-    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
     void onSearch();
@@ -44,7 +39,7 @@ private:
         QJsonArray artists;
         QString detailId;
         QString detailName;
-        QString detailSubName;  // artist name for album views
+        QString detailSubName;
     };
 
     void pushNavState();
@@ -68,21 +63,13 @@ private:
 
     // ── UI Setup ─────────────────────────────────────────────────────
     void setupUI();
-    void clearResults();
-    void buildSongsSection(const QJsonArray& songs);
-    void buildAlbumsSection(const QJsonArray& albums);
-    void buildArtistsSection(const QJsonArray& artists);
-    QWidget* createSongRow(const QJsonObject& song);
-    QWidget* createAlbumCard(const QJsonObject& album, int cardWidth);
-    QWidget* createArtistCard(const QJsonObject& artist, int cardWidth);
-    QWidget* createSectionHeader(const QString& title);
-    void loadArtwork(const QString& url, QLabel* target, int size, bool circular = false);
     void updateAuthStatus();
     void showArtistDiscography(const QString& artistId, const QString& artistName);
     void showAlbumTracks(const QString& albumId, const QString& albumName, const QString& artistName);
     void playSong(const QJsonObject& song);
-    void showSongContextMenu(QWidget* songRow, const QPoint& globalPos);
+    void showSongContextMenu(const QPoint& globalPos, const QJsonObject& song);
     void refreshTheme();
+    void wirePanelSignals(QWidget* panel);
 
     // Header
     QLabel* m_titleLabel = nullptr;
@@ -102,17 +89,13 @@ private:
     // Loading / results
     QLabel* m_loadingLabel = nullptr;
     QLabel* m_noResultsLabel = nullptr;
-    QScrollArea* m_scrollArea = nullptr;
-    QWidget* m_resultsContainer = nullptr;
-    QVBoxLayout* m_resultsLayout = nullptr;
 
-    QNetworkAccessManager* m_networkManager = nullptr;
+    // Content panels
+    QStackedWidget* m_stackedWidget = nullptr;
+    AMSearchPanel* m_searchPanel = nullptr;
+    AMArtistPanel* m_artistPanel = nullptr;
+    AMAlbumPanel* m_albumPanel = nullptr;
 
     // Music User Token
     QString m_musicUserToken;
-
-    // Custom double-click detection (immune to macOS activation timing)
-    QObject* m_lastClickedRow = nullptr;
-    qint64 m_lastClickTime = 0;
-    qint64 m_lastPlayTime = 0;
 };

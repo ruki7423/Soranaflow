@@ -1,36 +1,31 @@
 #include "AppleMusicView.h"
+#include "../amview/AMSearchPanel.h"
+#include "../amview/AMArtistPanel.h"
+#include "../amview/AMAlbumPanel.h"
+#include "../amview/AMContentPanel.h"
 #include "../../apple/AppleMusicManager.h"
 #include "../../apple/MusicKitPlayer.h"
 #include "../../core/PlaybackState.h"
 #include "../../core/ThemeManager.h"
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledButton.h"
-#include "../../platform/macos/MacUtils.h"
-#include <QLineEdit>
-#include <QPushButton>
-#include <QJsonObject>
-#include <QDebug>
-#include <QNetworkReply>
-#include <QPixmap>
-#include <QPainter>
-#include <QPainterPath>
-#include <QPointer>
-#include <QScrollBar>
-#include <QTimer>
-#include <QEvent>
-#include <QDateTime>
-#include <QMenu>
-#include <QContextMenuEvent>
 #include "../services/NavigationService.h"
 #include "../../core/library/PlaylistManager.h"
 #include "../../ui/dialogs/NewPlaylistDialog.h"
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QDebug>
+#include <QMenu>
 
-// ── Constructor ─────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+//  Constructor — signal wiring + token flow
+// ═════════════════════════════════════════════════════════════════════
+
 AppleMusicView::AppleMusicView(QWidget* parent)
     : QWidget(parent)
-    , m_networkManager(new QNetworkAccessManager(this))
 {
-    m_networkManager->setTransferTimeout(15000);  // 15s timeout
     setObjectName(QStringLiteral("AppleMusicView"));
     setupUI();
 
@@ -48,7 +43,6 @@ AppleMusicView::AppleMusicView(QWidget* parent)
     connect(am, &AppleMusicManager::authorizationStatusChanged,
             this, [this](AppleMusicManager::AuthStatus status) {
                 updateAuthStatus();
-                // On disconnect, clear cached token so reconnect uses fresh one
                 if (status == AppleMusicManager::NotDetermined) {
                     qDebug() << "[AppleMusicView] Auth revoked — clearing cached Music User Token";
                     m_musicUserToken.clear();
@@ -60,7 +54,6 @@ AppleMusicView::AppleMusicView(QWidget* parent)
     // ── Music User Token flow ────────────────────────────────────────
     auto* player = MusicKitPlayer::instance();
 
-    // Token obtained from native MusicKit -> inject into JS
     connect(am, &AppleMusicManager::musicUserTokenReady,
         this, [this, player](const QString& token) {
             qDebug() << "[AppleMusicView] Music User Token received, length:" << token.length();
@@ -68,14 +61,12 @@ AppleMusicView::AppleMusicView(QWidget* parent)
             player->injectMusicUserToken(token);
         });
 
-    // Token request failed -> continue with previews
     connect(am, &AppleMusicManager::musicUserTokenFailed,
         this, [](const QString& error) {
             qDebug() << "[AppleMusicView] Music User Token FAILED:" << error;
             qDebug() << "[AppleMusicView] Continuing with 30-second previews";
         });
 
-    // MusicKit JS ready -> inject cached token if available
     connect(player, &MusicKitPlayer::musicKitReady,
         this, [this, player]() {
             qDebug() << "[AppleMusicView] MusicKit JS is ready";
@@ -85,28 +76,19 @@ AppleMusicView::AppleMusicView(QWidget* parent)
             } else {
                 qDebug() << "[AppleMusicView] No cached token yet, will inject when available";
             }
-            // NOTE: Do NOT pre-create ProcessTap here.
-            // CATapMuted intercepts ALL app audio (including local playback).
-            // Pre-creating on musicKitReady causes local audio to go silent
-            // after Apple Music disconnect/reconnect cycles.
-            // ProcessTap is created on-demand when Apple Music actually plays
-            // (PlaybackState::playTrack → activate → start).
         });
 
-    // Full playback confirmed — also refresh auth status label
     connect(player, &MusicKitPlayer::fullPlaybackAvailable,
         this, [this]() {
             qDebug() << "[AppleMusicView] Full playback mode confirmed!";
             updateAuthStatus();
         });
 
-    // Preview only (no subscription)
     connect(player, &MusicKitPlayer::previewOnlyMode,
         this, []() {
             qDebug() << "[AppleMusicView] Preview only mode (check Apple Music subscription)";
         });
 
-    // Token expired -> re-request from native
     connect(player, &MusicKitPlayer::tokenExpired,
         this, [this, am]() {
             qDebug() << "[AppleMusicView] Token expired, re-requesting...";
@@ -114,14 +96,16 @@ AppleMusicView::AppleMusicView(QWidget* parent)
             am->requestMusicUserToken();
         });
 
-    // Do NOT request Music User Token at startup — wait for user to Connect
     qDebug() << "[AppleMusicView] Waiting for manual Connect (no auto-token request)";
 
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &AppleMusicView::refreshTheme);
 }
 
-// ── setupUI ─────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+//  setupUI — header, search, nav bar, stacked panels
+// ═════════════════════════════════════════════════════════════════════
+
 void AppleMusicView::setupUI()
 {
     auto c = ThemeManager::instance()->colors();
@@ -137,7 +121,6 @@ void AppleMusicView::setupUI()
         auto* headerRow = new QHBoxLayout();
         headerRow->setSpacing(8);
 
-        // ── Navigation ← → (left side) ──────────────────────────────
         m_backBtn = new QPushButton(this);
         m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
         m_backBtn->setIconSize(QSize(UISizes::buttonIconSize, UISizes::buttonIconSize));
@@ -182,7 +165,6 @@ void AppleMusicView::setupUI()
         });
         headerRow->addWidget(m_connectBtn);
 
-        // Back: internal nav first, then global
         connect(m_backBtn, &QPushButton::clicked, this, [this]() {
             if (!m_backStack.isEmpty()) {
                 navigateBack();
@@ -190,7 +172,6 @@ void AppleMusicView::setupUI()
                 NavigationService::instance()->navigateBack();
             }
         });
-        // Forward: internal nav first, then global
         connect(m_forwardBtn, &QPushButton::clicked, this, [this]() {
             if (!m_forwardStack.isEmpty()) {
                 navigateForward();
@@ -228,7 +209,7 @@ void AppleMusicView::setupUI()
         mainLayout->addLayout(searchRow);
     }
 
-    // ── Context title (shows current sub-view info) ─────────────────
+    // ── Context title bar ────────────────────────────────────────────
     {
         m_navBar = new QWidget(this);
         m_navBar->setFixedHeight(28);
@@ -245,14 +226,13 @@ void AppleMusicView::setupUI()
         mainLayout->addWidget(m_navBar);
     }
 
-    // ── Loading indicator ───────────────────────────────────────────
+    // ── Loading / no-results labels ──────────────────────────────────
     m_loadingLabel = new QLabel(QStringLiteral("Searching..."), this);
     m_loadingLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 13px;").arg(c.foregroundMuted));
     m_loadingLabel->setVisible(false);
     mainLayout->addWidget(m_loadingLabel);
 
-    // ── No results label ────────────────────────────────────────────
     m_noResultsLabel = new QLabel(QStringLiteral("No results found"), this);
     m_noResultsLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;").arg(c.foregroundMuted));
@@ -260,32 +240,40 @@ void AppleMusicView::setupUI()
     m_noResultsLabel->setVisible(false);
     mainLayout->addWidget(m_noResultsLabel);
 
-    // ── Results scroll area ─────────────────────────────────────────
-    m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setFocusPolicy(Qt::NoFocus);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setStyleSheet(
-        QStringLiteral("QScrollArea { background: transparent; border: none; }") +
-        ThemeManager::instance()->scrollbarStyle());
+    // ── Content panels (stacked) ─────────────────────────────────────
+    m_stackedWidget = new QStackedWidget(this);
+    m_searchPanel = new AMSearchPanel(m_stackedWidget);
+    m_artistPanel = new AMArtistPanel(m_stackedWidget);
+    m_albumPanel = new AMAlbumPanel(m_stackedWidget);
 
-    m_resultsContainer = new QWidget(m_scrollArea);
-    m_resultsContainer->setStyleSheet(QStringLiteral("background: transparent;"));
-    m_resultsContainer->setFocusPolicy(Qt::NoFocus);
-    m_resultsContainer->setAttribute(Qt::WA_MacShowFocusRect, false);
-    m_resultsLayout = new QVBoxLayout(m_resultsContainer);
-    m_resultsLayout->setContentsMargins(0, 0, 0, 0);
-    m_resultsLayout->setSpacing(16);
-    m_resultsLayout->addStretch();
+    m_stackedWidget->addWidget(m_searchPanel);
+    m_stackedWidget->addWidget(m_artistPanel);
+    m_stackedWidget->addWidget(m_albumPanel);
 
-    m_scrollArea->setWidget(m_resultsContainer);
-    mainLayout->addWidget(m_scrollArea, 1);
+    wirePanelSignals(m_searchPanel);
+    wirePanelSignals(m_artistPanel);
+    wirePanelSignals(m_albumPanel);
 
-    // macOS: allow clicks on inactive window to pass through to song rows
-    QTimer::singleShot(0, this, [this]() {
-        enableAcceptsFirstMouse(m_scrollArea);
-    });
+    mainLayout->addWidget(m_stackedWidget, 1);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  Wire panel signals → coordinator handlers
+// ═════════════════════════════════════════════════════════════════════
+
+void AppleMusicView::wirePanelSignals(QWidget* panel)
+{
+    auto* p = qobject_cast<AMContentPanel*>(panel);
+    if (!p) return;
+
+    connect(p, &AMContentPanel::songPlayRequested,
+            this, &AppleMusicView::playSong);
+    connect(p, &AMContentPanel::artistNavigationRequested,
+            this, &AppleMusicView::showArtistDiscography);
+    connect(p, &AMContentPanel::albumNavigationRequested,
+            this, &AppleMusicView::showAlbumTracks);
+    connect(p, &AMContentPanel::songContextMenuRequested,
+            this, &AppleMusicView::showSongContextMenu);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -304,7 +292,7 @@ void AppleMusicView::pushNavState()
     entry.detailName = m_currentDetailName;
     entry.detailSubName = m_currentDetailSubName;
     m_backStack.push(entry);
-    m_forwardStack.clear();  // new action invalidates forward
+    m_forwardStack.clear();
     updateNavBar();
 }
 
@@ -312,7 +300,6 @@ void AppleMusicView::navigateBack()
 {
     if (m_backStack.isEmpty()) return;
 
-    // Save current state to forward stack
     NavEntry fwd;
     fwd.state = m_currentState;
     fwd.searchTerm = m_lastSearchTerm;
@@ -331,7 +318,6 @@ void AppleMusicView::navigateForward()
 {
     if (m_forwardStack.isEmpty()) return;
 
-    // Save current state to back stack
     NavEntry back;
     back.state = m_currentState;
     back.searchTerm = m_lastSearchTerm;
@@ -357,46 +343,32 @@ void AppleMusicView::restoreNavEntry(const NavEntry& entry)
     m_currentDetailName = entry.detailName;
     m_currentDetailSubName = entry.detailSubName;
 
-    clearResults();
     m_loadingLabel->setVisible(false);
     m_noResultsLabel->setVisible(false);
 
     switch (m_currentState) {
     case AMViewState::Search:
-        if (!m_lastSongs.isEmpty())
-            buildSongsSection(m_lastSongs);
-        if (!m_lastAlbums.isEmpty())
-            buildAlbumsSection(m_lastAlbums);
-        if (!m_lastArtists.isEmpty())
-            buildArtistsSection(m_lastArtists);
-        if (m_lastSongs.isEmpty() && m_lastAlbums.isEmpty() && m_lastArtists.isEmpty())
+        if (m_lastSongs.isEmpty() && m_lastAlbums.isEmpty() && m_lastArtists.isEmpty()) {
             m_noResultsLabel->setVisible(true);
+        } else {
+            m_searchPanel->setResults(m_lastSongs, m_lastAlbums, m_lastArtists);
+        }
+        m_stackedWidget->setCurrentWidget(m_searchPanel);
         break;
 
     case AMViewState::ArtistDetail:
-        if (!m_lastSongs.isEmpty()) {
-            m_resultsLayout->addWidget(createSectionHeader(
-                QStringLiteral("Songs by %1 (%2)").arg(m_currentDetailName).arg(m_lastSongs.size())));
-            for (const auto& val : m_lastSongs)
-                m_resultsLayout->addWidget(createSongRow(val.toObject()));
-        }
+        m_artistPanel->setSongs(m_currentDetailName, m_lastSongs);
         if (!m_lastAlbums.isEmpty())
-            buildAlbumsSection(m_lastAlbums);
+            m_artistPanel->setAlbums(m_lastAlbums);
+        m_stackedWidget->setCurrentWidget(m_artistPanel);
         break;
 
     case AMViewState::AlbumDetail:
-        if (!m_lastSongs.isEmpty()) {
-            m_resultsLayout->addWidget(createSectionHeader(
-                QStringLiteral("%1 \u2014 %2 (%3)")
-                    .arg(m_currentDetailName, m_currentDetailSubName)
-                    .arg(m_lastSongs.size())));
-            for (const auto& val : m_lastSongs)
-                m_resultsLayout->addWidget(createSongRow(val.toObject()));
-        }
+        m_albumPanel->setTracks(m_currentDetailName, m_currentDetailSubName, m_lastSongs);
+        m_stackedWidget->setCurrentWidget(m_albumPanel);
         break;
     }
 
-    m_resultsLayout->addStretch();
     updateNavBar();
 }
 
@@ -404,11 +376,9 @@ void AppleMusicView::updateNavBar()
 {
     auto c = ThemeManager::instance()->colors();
 
-    // Show context title bar when in a sub-view
     bool showNav = m_currentState != AMViewState::Search;
     m_navBar->setVisible(showNav);
 
-    // Back: enabled if internal stack has entries OR global can go back
     auto* nav = NavigationService::instance();
     bool canBack = !m_backStack.isEmpty() || nav->canGoBack();
     bool canFwd = !m_forwardStack.isEmpty() || nav->canGoForward();
@@ -418,8 +388,7 @@ void AppleMusicView::updateNavBar()
     m_backBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-left.svg")));
     m_forwardBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/chevron-right.svg")));
 
-    auto navStyle = [&c](bool enabled) {
-        Q_UNUSED(enabled)
+    auto navStyle = [&c](bool /*enabled*/) {
         return QStringLiteral(
             "QPushButton { background: transparent; border: none; border-radius: 4px; }"
             "QPushButton:hover { background: %1; }"
@@ -442,7 +411,10 @@ void AppleMusicView::updateNavBar()
     }
 }
 
-// ── updateAuthStatus ────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+//  Auth status
+// ═════════════════════════════════════════════════════════════════════
+
 void AppleMusicView::updateAuthStatus()
 {
     auto* am = AppleMusicManager::instance();
@@ -461,13 +433,15 @@ void AppleMusicView::updateAuthStatus()
     }
 }
 
-// ── onSearch ────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+//  Search
+// ═════════════════════════════════════════════════════════════════════
+
 void AppleMusicView::onSearch()
 {
     QString term = m_searchInput->lineEdit()->text().trimmed();
     if (term.isEmpty()) return;
 
-    // Push current state before navigating
     if (!m_lastSongs.isEmpty() || !m_lastAlbums.isEmpty() || !m_lastArtists.isEmpty()
         || m_currentState != AMViewState::Search)
         pushNavState();
@@ -481,7 +455,8 @@ void AppleMusicView::onSearch()
     m_currentDetailName.clear();
     m_currentDetailSubName.clear();
 
-    clearResults();
+    m_searchPanel->clear();
+    m_stackedWidget->setCurrentWidget(m_searchPanel);
     m_loadingLabel->setText(QStringLiteral("Searching..."));
     m_loadingLabel->setVisible(true);
     m_noResultsLabel->setVisible(false);
@@ -490,15 +465,12 @@ void AppleMusicView::onSearch()
     AppleMusicManager::instance()->searchCatalog(term);
 }
 
-// ── onSearchResults ─────────────────────────────────────────────────
 void AppleMusicView::onSearchResults(const QJsonArray& songs,
                                       const QJsonArray& albums,
                                       const QJsonArray& artists)
 {
     m_loadingLabel->setVisible(false);
-    clearResults();
 
-    // Cache results for back navigation
     m_lastSongs = songs;
     m_lastAlbums = albums;
     m_lastArtists = artists;
@@ -510,19 +482,11 @@ void AppleMusicView::onSearchResults(const QJsonArray& songs,
     }
 
     m_noResultsLabel->setVisible(false);
-
-    if (!songs.isEmpty())
-        buildSongsSection(songs);
-    if (!albums.isEmpty())
-        buildAlbumsSection(albums);
-    if (!artists.isEmpty())
-        buildArtistsSection(artists);
-
-    m_resultsLayout->addStretch();
+    m_searchPanel->setResults(songs, albums, artists);
+    m_stackedWidget->setCurrentWidget(m_searchPanel);
     updateNavBar();
 }
 
-// ── onError ─────────────────────────────────────────────────────────
 void AppleMusicView::onError(const QString& error)
 {
     m_loadingLabel->setVisible(false);
@@ -530,46 +494,110 @@ void AppleMusicView::onError(const QString& error)
     m_noResultsLabel->setVisible(true);
 }
 
-// ── clearResults ────────────────────────────────────────────────────
-void AppleMusicView::clearResults()
+// ═════════════════════════════════════════════════════════════════════
+//  Artist discography
+// ═════════════════════════════════════════════════════════════════════
+
+void AppleMusicView::showArtistDiscography(const QString& artistId, const QString& artistName)
 {
-    QLayoutItem* item;
-    while ((item = m_resultsLayout->takeAt(0)) != nullptr) {
-        if (item->widget())
-            item->widget()->deleteLater();
-        delete item;
+    pushNavState();
+
+    m_currentState = AMViewState::ArtistDetail;
+    m_currentDetailId = artistId;
+    m_currentDetailName = artistName;
+    m_currentDetailSubName.clear();
+    m_lastSongs = QJsonArray();
+    m_lastAlbums = QJsonArray();
+    m_lastArtists = QJsonArray();
+
+    m_artistPanel->setSongs(artistName, QJsonArray());
+    m_stackedWidget->setCurrentWidget(m_artistPanel);
+    m_loadingLabel->setText(QStringLiteral("Loading songs by %1...").arg(artistName));
+    m_loadingLabel->setVisible(true);
+    m_noResultsLabel->setVisible(false);
+    updateNavBar();
+
+    auto* am = AppleMusicManager::instance();
+    am->fetchArtistSongs(artistId);
+    am->fetchArtistAlbums(artistId);
+}
+
+void AppleMusicView::onArtistSongs(const QString& /*artistId*/, const QJsonArray& songs)
+{
+    if (m_currentState != AMViewState::ArtistDetail) return;
+
+    m_loadingLabel->setVisible(false);
+    m_lastSongs = songs;
+
+    if (songs.isEmpty()) {
+        m_noResultsLabel->setText(QStringLiteral("No songs found for %1").arg(m_currentDetailName));
+        m_noResultsLabel->setVisible(true);
+        return;
     }
+
+    m_noResultsLabel->setVisible(false);
+    m_artistPanel->setSongs(m_currentDetailName, songs);
 }
 
-// ── createSectionHeader ─────────────────────────────────────────────
-QWidget* AppleMusicView::createSectionHeader(const QString& title)
+void AppleMusicView::onArtistAlbums(const QString& /*artistId*/, const QJsonArray& albums)
 {
-    auto c = ThemeManager::instance()->colors();
-    auto* label = new QLabel(title, m_resultsContainer);
-    QFont f = label->font();
-    f.setPixelSize(16);
-    f.setBold(true);
-    label->setFont(f);
-    label->setStyleSheet(QStringLiteral("color: %1; padding: 4px 0;").arg(c.foreground));
-    return label;
+    if (m_currentState != AMViewState::ArtistDetail) return;
+    if (albums.isEmpty()) return;
+
+    m_lastAlbums = albums;
+    m_artistPanel->setAlbums(albums);
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  Songs Section — list rows with fixed column widths
+//  Album tracks
 // ═════════════════════════════════════════════════════════════════════
 
-// Column width constants for consistent alignment
-static const int COL_PLAY_WIDTH   = 36;
-static const int COL_ART_WIDTH    = 40;
-static const int COL_ARTIST_WIDTH = 150;
-static const int COL_ALBUM_WIDTH  = 200;
-static const int COL_DUR_WIDTH    = 50;
+void AppleMusicView::showAlbumTracks(const QString& albumId, const QString& albumName,
+                                      const QString& artistName)
+{
+    pushNavState();
+
+    m_currentState = AMViewState::AlbumDetail;
+    m_currentDetailId = albumId;
+    m_currentDetailName = albumName;
+    m_currentDetailSubName = artistName;
+    m_lastSongs = QJsonArray();
+    m_lastAlbums = QJsonArray();
+    m_lastArtists = QJsonArray();
+
+    m_albumPanel->clear();
+    m_stackedWidget->setCurrentWidget(m_albumPanel);
+    m_loadingLabel->setText(QStringLiteral("Loading tracks..."));
+    m_loadingLabel->setVisible(true);
+    m_noResultsLabel->setVisible(false);
+    updateNavBar();
+
+    AppleMusicManager::instance()->fetchAlbumTracks(albumId);
+}
+
+void AppleMusicView::onAlbumTracks(const QString& /*albumId*/, const QJsonArray& tracks)
+{
+    if (m_currentState != AMViewState::AlbumDetail) return;
+
+    m_loadingLabel->setVisible(false);
+    m_lastSongs = tracks;
+
+    if (tracks.isEmpty()) {
+        m_noResultsLabel->setText(QStringLiteral("No tracks found"));
+        m_noResultsLabel->setVisible(true);
+        return;
+    }
+
+    m_noResultsLabel->setVisible(false);
+    m_albumPanel->setTracks(m_currentDetailName, m_currentDetailSubName, tracks);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  playSong — builds queue from m_lastSongs (singleton access)
+// ═════════════════════════════════════════════════════════════════════
 
 void AppleMusicView::playSong(const QJsonObject& song)
 {
-    // No debounce needed — MusicKitPlayer state machine handles duplicates
-
-    // Build a queue from all currently displayed songs so next/prev works
     QJsonArray songsArray = m_lastSongs;
     QVector<Track> queue;
     int playIndex = -1;
@@ -585,7 +613,7 @@ void AppleMusicView::playSong(const QJsonObject& song)
         t.album = s[QStringLiteral("album")].toString();
         t.duration = static_cast<int>(s[QStringLiteral("duration")].toDouble());
         t.coverUrl = s[QStringLiteral("artworkUrl")].toString();
-        t.filePath = QString(); // empty = Apple Music source
+        t.filePath = QString();
         t.format = AudioFormat::AAC;
         t.sampleRate = QStringLiteral("44.1 kHz");
         t.bitDepth = QStringLiteral("16-bit");
@@ -596,7 +624,6 @@ void AppleMusicView::playSong(const QJsonObject& song)
     }
 
     if (playIndex < 0 || queue.isEmpty()) {
-        // Fallback: play single track if not found in current songs list
         Track t;
         t.id = targetId;
         t.title = song[QStringLiteral("title")].toString();
@@ -621,473 +648,12 @@ void AppleMusicView::playSong(const QJsonObject& song)
     ps->playTrack(queue[playIndex]);
 }
 
-void AppleMusicView::buildSongsSection(const QJsonArray& songs)
-{
-    m_resultsLayout->addWidget(createSectionHeader(
-        QStringLiteral("Songs (%1)").arg(songs.size())));
-
-    for (const auto& val : songs) {
-        auto obj = val.toObject();
-        m_resultsLayout->addWidget(createSongRow(obj));
-    }
-}
-
-QWidget* AppleMusicView::createSongRow(const QJsonObject& song)
-{
-    auto c = ThemeManager::instance()->colors();
-
-    auto* row = new QWidget(m_resultsContainer);
-    row->setObjectName(QStringLiteral("songRow"));
-    row->setFixedHeight(48);
-    row->setFocusPolicy(Qt::NoFocus);
-    row->setAttribute(Qt::WA_MacShowFocusRect, false);
-    row->setStyleSheet(QStringLiteral(
-        "#songRow, #songRow * { border: none; outline: none; }"
-        "#songRow { background: transparent; border-radius: 6px; }"
-        "#songRow:hover { background: %1; }"
-        "#songRow QLabel { background: transparent; }"
-        "#songRow QPushButton { background: transparent; }").arg(c.hover));
-
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(8, 4, 8, 4);
-    layout->setSpacing(10);
-
-    // Play button — fixed width
-    auto* playBtn = new QPushButton(row);
-    playBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/play.svg")));
-    playBtn->setIconSize(QSize(16, 16));
-    playBtn->setFixedSize(COL_PLAY_WIDTH, COL_PLAY_WIDTH);
-    playBtn->setFlat(true);
-    playBtn->setCursor(Qt::PointingHandCursor);
-    playBtn->setFocusPolicy(Qt::NoFocus);
-    playBtn->setAttribute(Qt::WA_MacShowFocusRect, false);
-    playBtn->setAttribute(Qt::WA_NoMousePropagation);
-    playBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { background: transparent; border: none; border-radius: %1px; outline: none; }"
-        "QPushButton:hover { background: %2; }"
-        "QPushButton:focus { outline: none; border: none; }"
-        "QPushButton:active { outline: none; border: none; }"
-        "QPushButton:pressed { outline: none; border: none; }").arg(COL_PLAY_WIDTH / 2).arg(c.accentMuted));
-    layout->addWidget(playBtn);
-
-    // Artwork thumbnail — fixed width
-    auto* artLabel = new QLabel(row);
-    artLabel->setFixedSize(COL_ART_WIDTH, COL_ART_WIDTH);
-    artLabel->setFocusPolicy(Qt::NoFocus);
-    artLabel->setAttribute(Qt::WA_MacShowFocusRect, false);
-    artLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    artLabel->setStyleSheet(QStringLiteral(
-        "background: %1; border-radius: 4px;").arg(c.backgroundSecondary));
-    artLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(artLabel);
-
-    QString artworkUrl = song[QStringLiteral("artworkUrl")].toString();
-    if (!artworkUrl.isEmpty())
-        loadArtwork(artworkUrl, artLabel, COL_ART_WIDTH);
-
-    // Title — stretches to fill remaining space
-    auto* titleLabel = new QLabel(row);
-    titleLabel->setFocusPolicy(Qt::NoFocus);
-    titleLabel->setAttribute(Qt::WA_MacShowFocusRect, false);
-    titleLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    titleLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 13px;").arg(c.foreground));
-    titleLabel->setText(song[QStringLiteral("title")].toString());
-    titleLabel->setMinimumWidth(100);
-    titleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    titleLabel->setTextFormat(Qt::PlainText);
-    layout->addWidget(titleLabel, 1);
-
-    // Artist — fixed width, elided, CLICKABLE
-    auto* artistLabel = new QLabel(row);
-    artistLabel->setFocusPolicy(Qt::NoFocus);
-    artistLabel->setAttribute(Qt::WA_MacShowFocusRect, false);
-    artistLabel->setFixedWidth(COL_ARTIST_WIDTH);
-    {
-        QString artistName = song[QStringLiteral("artist")].toString();
-        QFontMetrics fm(artistLabel->font());
-        artistLabel->setText(fm.elidedText(artistName, Qt::ElideRight, COL_ARTIST_WIDTH));
-    }
-    // Clickable styling: underline on hover with accent color
-    artistLabel->setStyleSheet(QStringLiteral(
-        "QLabel { color: %1; font-size: 12px; }"
-        "QLabel:hover { color: %2; text-decoration: underline; }")
-        .arg(c.foregroundSecondary, c.accent));
-    QString songArtistId = song[QStringLiteral("artistId")].toString();
-    if (!songArtistId.isEmpty()) {
-        artistLabel->setCursor(Qt::PointingHandCursor);
-        artistLabel->setProperty("artistId", songArtistId);
-        artistLabel->setProperty("artistName", song[QStringLiteral("artist")].toString());
-        artistLabel->installEventFilter(this);
-    }
-    layout->addWidget(artistLabel);
-
-    // Album — fixed width, elided, CLICKABLE
-    auto* albumLabel = new QLabel(row);
-    albumLabel->setFocusPolicy(Qt::NoFocus);
-    albumLabel->setAttribute(Qt::WA_MacShowFocusRect, false);
-    albumLabel->setFixedWidth(COL_ALBUM_WIDTH);
-    {
-        QString albumName = song[QStringLiteral("album")].toString();
-        QFontMetrics fm(albumLabel->font());
-        albumLabel->setText(fm.elidedText(albumName, Qt::ElideRight, COL_ALBUM_WIDTH));
-    }
-    albumLabel->setStyleSheet(QStringLiteral(
-        "QLabel { color: %1; font-size: 12px; }"
-        "QLabel:hover { color: %2; text-decoration: underline; }")
-        .arg(c.foregroundMuted, c.accent));
-    QString songAlbumId = song[QStringLiteral("albumId")].toString();
-    if (!songAlbumId.isEmpty()) {
-        albumLabel->setCursor(Qt::PointingHandCursor);
-        albumLabel->setProperty("albumId", songAlbumId);
-        albumLabel->setProperty("albumName", song[QStringLiteral("album")].toString());
-        albumLabel->setProperty("albumArtist", song[QStringLiteral("artist")].toString());
-        albumLabel->installEventFilter(this);
-    }
-    layout->addWidget(albumLabel);
-
-    // Duration — fixed width, right-aligned
-    int secs = static_cast<int>(song[QStringLiteral("duration")].toDouble());
-    auto* durLabel = new QLabel(
-        QStringLiteral("%1:%2").arg(secs / 60).arg(secs % 60, 2, 10, QLatin1Char('0')), row);
-    durLabel->setFocusPolicy(Qt::NoFocus);
-    durLabel->setAttribute(Qt::WA_MacShowFocusRect, false);
-    durLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    durLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 12px;").arg(c.foregroundMuted));
-    durLabel->setFixedWidth(COL_DUR_WIDTH);
-    durLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    layout->addWidget(durLabel);
-
-    // Connect play button
-    QJsonObject songCopy = song;
-    connect(playBtn, &QPushButton::clicked, this, [this, songCopy]() {
-        playSong(songCopy);
-    });
-
-    // Store song data as individual properties for double-click handling
-    row->setProperty("songId", song[QStringLiteral("id")].toString());
-    row->setProperty("songTitle", song[QStringLiteral("title")].toString());
-    row->setProperty("songArtist", song[QStringLiteral("artist")].toString());
-    row->setProperty("songAlbum", song[QStringLiteral("album")].toString());
-    row->setProperty("songDuration", song[QStringLiteral("duration")].toDouble());
-    row->setProperty("songArtwork", song[QStringLiteral("artworkUrl")].toString());
-    row->installEventFilter(this);
-
-    return row;
-}
-
 // ═════════════════════════════════════════════════════════════════════
-//  Albums Section — responsive grid
+//  Context menu (singleton access: PlaylistManager)
 // ═════════════════════════════════════════════════════════════════════
 
-void AppleMusicView::buildAlbumsSection(const QJsonArray& albums)
+void AppleMusicView::showSongContextMenu(const QPoint& globalPos, const QJsonObject& songData)
 {
-    m_resultsLayout->addWidget(createSectionHeader(
-        QStringLiteral("Albums (%1)").arg(albums.size())));
-
-    auto* flowContainer = new QWidget(m_resultsContainer);
-    auto* flowLayout = new QGridLayout(flowContainer);
-    flowLayout->setContentsMargins(0, 0, 0, 0);
-    flowLayout->setSpacing(12);
-
-    int cols = qMax(2, (m_scrollArea->viewport()->width() - 24) / 172);
-    int cardWidth = 160;
-
-    for (int i = 0; i < albums.size(); ++i) {
-        auto obj = albums[i].toObject();
-        auto* card = createAlbumCard(obj, cardWidth);
-        flowLayout->addWidget(card, i / cols, i % cols);
-    }
-
-    m_resultsLayout->addWidget(flowContainer);
-}
-
-QWidget* AppleMusicView::createAlbumCard(const QJsonObject& album, int cardWidth)
-{
-    auto c = ThemeManager::instance()->colors();
-    int textWidth = cardWidth - 16; // account for card padding
-
-    auto* card = new QWidget(m_resultsContainer);
-    card->setObjectName(QStringLiteral("albumCard"));
-    card->setFixedWidth(cardWidth);
-    card->setCursor(Qt::PointingHandCursor);
-    card->setStyleSheet(QStringLiteral(
-        "#albumCard { background: transparent; border-radius: 8px; }"
-        "#albumCard:hover { background: %1; }").arg(c.hover));
-
-    auto* layout = new QVBoxLayout(card);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(6);
-
-    // Artwork
-    int artSize = cardWidth - 16;
-    auto* artLabel = new QLabel(card);
-    artLabel->setFixedSize(artSize, artSize);
-    artLabel->setStyleSheet(QStringLiteral(
-        "background: %1; border-radius: 8px;").arg(c.backgroundSecondary));
-    artLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(artLabel, 0, Qt::AlignCenter);
-
-    QString artworkUrl = album[QStringLiteral("artworkUrl")].toString();
-    if (!artworkUrl.isEmpty())
-        loadArtwork(artworkUrl, artLabel, artSize);
-
-    // Title — max 2 lines with proper elision
-    QString titleText = album[QStringLiteral("title")].toString();
-    auto* titleLabel = new QLabel(card);
-    titleLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: bold;").arg(c.foreground));
-    titleLabel->setFixedWidth(textWidth);
-    titleLabel->setWordWrap(true);
-    {
-        QFontMetrics fm(titleLabel->font());
-        int lineHeight = fm.height();
-        titleLabel->setFixedHeight(lineHeight * 2 + 2);
-        // Elide text to fit within ~2 lines worth of width
-        QString elided = fm.elidedText(titleText, Qt::ElideRight, textWidth * 2 - fm.averageCharWidth());
-        titleLabel->setText(elided);
-    }
-    layout->addWidget(titleLabel);
-
-    // Artist — single line, elided
-    QString artistText = album[QStringLiteral("artist")].toString();
-    auto* artistLabel = new QLabel(card);
-    artistLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;").arg(c.foregroundMuted));
-    artistLabel->setFixedWidth(textWidth);
-    QFontMetrics fm(artistLabel->font());
-    artistLabel->setText(fm.elidedText(artistText, Qt::ElideRight, textWidth));
-    layout->addWidget(artistLabel);
-
-    // Click handler — stored as properties, handled in eventFilter
-    QString albumId = album[QStringLiteral("id")].toString();
-    card->installEventFilter(this);
-    card->setProperty("albumId", albumId);
-    card->setProperty("albumName", titleText);
-    card->setProperty("albumArtist", artistText);
-
-    return card;
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  Artists Section — responsive grid with circular art
-// ═════════════════════════════════════════════════════════════════════
-
-void AppleMusicView::buildArtistsSection(const QJsonArray& artists)
-{
-    m_resultsLayout->addWidget(createSectionHeader(
-        QStringLiteral("Artists (%1)").arg(artists.size())));
-
-    auto* flowContainer = new QWidget(m_resultsContainer);
-    auto* flowLayout = new QGridLayout(flowContainer);
-    flowLayout->setContentsMargins(0, 0, 0, 0);
-    flowLayout->setSpacing(12);
-
-    int cols = qMax(2, (m_scrollArea->viewport()->width() - 24) / 142);
-    int cardWidth = 130;
-
-    for (int i = 0; i < artists.size(); ++i) {
-        auto obj = artists[i].toObject();
-        auto* card = createArtistCard(obj, cardWidth);
-        flowLayout->addWidget(card, i / cols, i % cols);
-    }
-
-    m_resultsLayout->addWidget(flowContainer);
-}
-
-QWidget* AppleMusicView::createArtistCard(const QJsonObject& artist, int cardWidth)
-{
-    auto c = ThemeManager::instance()->colors();
-
-    auto* card = new QWidget(m_resultsContainer);
-    card->setObjectName(QStringLiteral("artistCard"));
-    card->setFixedWidth(cardWidth);
-    card->setCursor(Qt::PointingHandCursor);
-    card->setStyleSheet(QStringLiteral(
-        "#artistCard { background: transparent; border-radius: 8px; }"
-        "#artistCard:hover { background: %1; }").arg(c.hover));
-
-    auto* layout = new QVBoxLayout(card);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(6);
-    layout->setAlignment(Qt::AlignHCenter);
-
-    // Circular artwork
-    int artSize = cardWidth - 24;
-    auto* artLabel = new QLabel(card);
-    artLabel->setFixedSize(artSize, artSize);
-    artLabel->setStyleSheet(QStringLiteral(
-        "background: %1; border-radius: %2px;")
-            .arg(c.backgroundSecondary).arg(artSize / 2));
-    artLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(artLabel, 0, Qt::AlignCenter);
-
-    QString artworkUrl = artist[QStringLiteral("artworkUrl")].toString();
-    if (!artworkUrl.isEmpty())
-        loadArtwork(artworkUrl, artLabel, artSize, true);
-
-    // Name
-    auto* nameLabel = new QLabel(artist[QStringLiteral("name")].toString(), card);
-    nameLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: bold;").arg(c.foreground));
-    nameLabel->setAlignment(Qt::AlignCenter);
-    nameLabel->setWordWrap(true);
-    nameLabel->setMaximumHeight(32);
-    layout->addWidget(nameLabel);
-
-    // Click to view discography
-    QString artistId = artist[QStringLiteral("id")].toString();
-    QString artistName = artist[QStringLiteral("name")].toString();
-    card->installEventFilter(this);
-    card->setProperty("artistId", artistId);
-    card->setProperty("artistName", artistName);
-
-    return card;
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  Event filter for card clicks (artist + album)
-// ═════════════════════════════════════════════════════════════════════
-
-bool AppleMusicView::eventFilter(QObject* obj, QEvent* event)
-{
-    // ── Helper: resolve the song row for an object ──────────────────
-    // If obj is a child label (artist/album) inside a song row, return the parent row.
-    // If obj IS the song row, return obj. Otherwise nullptr.
-    auto findSongRow = [](QObject* o) -> QObject* {
-        if (!o->property("songId").toString().isEmpty())
-            return o;
-        // Check parent (artist/album label inside a song row)
-        QObject* p = o->parent();
-        if (p && !p->property("songId").toString().isEmpty())
-            return p;
-        return nullptr;
-    };
-
-    // ── Double-click detection (MouseButtonPress) ───────────────────
-    // macOS window activation can break Qt's native MouseButtonDblClick
-    // timing. We detect rapid press pairs manually (500ms threshold)
-    // and keep the native DblClick as backup.
-    // This runs BEFORE artist/album release handling so double-clicks
-    // on artist/album labels inside song rows trigger play, not navigation.
-    if (event->type() == QEvent::MouseButtonPress) {
-        QObject* songRow = findSongRow(obj);
-        if (songRow) {
-            QString songId = songRow->property("songId").toString();
-            qint64 now = QDateTime::currentMSecsSinceEpoch();
-            if (m_lastClickedRow == songRow && (now - m_lastClickTime) < 500) {
-                // Second press on same row within 500ms → play
-                m_lastClickedRow = nullptr;
-                m_lastClickTime = 0;
-                // Debounce: prevent double-fire with native DblClick
-                if (now - m_lastPlayTime > 1000) {
-                    m_lastPlayTime = now;
-                    qDebug() << "[AMView] Double-click play:" << songId;
-                    QJsonObject songData;
-                    songData[QStringLiteral("id")] = songId;
-                    songData[QStringLiteral("title")] = songRow->property("songTitle").toString();
-                    songData[QStringLiteral("artist")] = songRow->property("songArtist").toString();
-                    songData[QStringLiteral("album")] = songRow->property("songAlbum").toString();
-                    songData[QStringLiteral("duration")] = songRow->property("songDuration").toDouble();
-                    songData[QStringLiteral("artworkUrl")] = songRow->property("songArtwork").toString();
-                    playSong(songData);
-                    return true;
-                }
-            } else {
-                // First press — record
-                m_lastClickedRow = songRow;
-                m_lastClickTime = now;
-            }
-        }
-    }
-
-    // ── Artist/album label single-click navigation ──────────────────
-    // Only navigate on MouseButtonRelease if it's NOT part of a double-click
-    if (event->type() == QEvent::MouseButtonRelease) {
-        // Check if this release is part of a recent double-click → skip navigation
-        qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (now - m_lastPlayTime < 500) {
-            // Just played via double-click — don't navigate
-            return QWidget::eventFilter(obj, event);
-        }
-
-        // Artist card or artist label click → navigate to discography
-        QString artistId = obj->property("artistId").toString();
-        if (!artistId.isEmpty()) {
-            // If inside a song row, only navigate if NOT a rapid second click
-            QObject* songRow = findSongRow(obj);
-            if (songRow && m_lastClickedRow == songRow) {
-                // First click was recorded — wait for potential double-click
-                // Don't navigate yet; the next press will decide
-                return QWidget::eventFilter(obj, event);
-            }
-            QString artistName = obj->property("artistName").toString();
-            showArtistDiscography(artistId, artistName);
-            return true;
-        }
-
-        // Album card or album label click → navigate to album tracks
-        QString albumId = obj->property("albumId").toString();
-        if (!albumId.isEmpty()) {
-            QObject* songRow = findSongRow(obj);
-            if (songRow && m_lastClickedRow == songRow) {
-                return QWidget::eventFilter(obj, event);
-            }
-            QString albumName = obj->property("albumName").toString();
-            QString albumArtist = obj->property("albumArtist").toString();
-            showAlbumTracks(albumId, albumName, albumArtist);
-            return true;
-        }
-    }
-
-    // Native double-click backup (works when app is already active)
-    if (event->type() == QEvent::MouseButtonDblClick) {
-        QObject* songRow = findSongRow(obj);
-        if (songRow) {
-            QString songId = songRow->property("songId").toString();
-            qint64 now = QDateTime::currentMSecsSinceEpoch();
-            if (now - m_lastPlayTime > 1000) {
-                m_lastPlayTime = now;
-                qDebug() << "[AMView] Native DblClick play:" << songId;
-                QJsonObject songData;
-                songData[QStringLiteral("id")] = songId;
-                songData[QStringLiteral("title")] = songRow->property("songTitle").toString();
-                songData[QStringLiteral("artist")] = songRow->property("songArtist").toString();
-                songData[QStringLiteral("album")] = songRow->property("songAlbum").toString();
-                songData[QStringLiteral("duration")] = songRow->property("songDuration").toDouble();
-                songData[QStringLiteral("artworkUrl")] = songRow->property("songArtwork").toString();
-                playSong(songData);
-            }
-            return true;
-        }
-    }
-
-    // Right-click on song row → context menu
-    if (event->type() == QEvent::ContextMenu) {
-        QObject* songRow = findSongRow(obj);
-        if (songRow) {
-            auto* cmEvent = static_cast<QContextMenuEvent*>(event);
-            showSongContextMenu(qobject_cast<QWidget*>(songRow), cmEvent->globalPos());
-            return true;
-        }
-    }
-
-    return QWidget::eventFilter(obj, event);
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  Song row context menu (right-click)
-// ═════════════════════════════════════════════════════════════════════
-
-void AppleMusicView::showSongContextMenu(QWidget* songRow, const QPoint& globalPos)
-{
-    if (!songRow) return;
-
-    // Reconstruct song JSON from row properties
-    QJsonObject songData;
-    songData[QStringLiteral("id")] = songRow->property("songId").toString();
-    songData[QStringLiteral("title")] = songRow->property("songTitle").toString();
-    songData[QStringLiteral("artist")] = songRow->property("songArtist").toString();
-    songData[QStringLiteral("album")] = songRow->property("songAlbum").toString();
-    songData[QStringLiteral("duration")] = songRow->property("songDuration").toDouble();
-    songData[QStringLiteral("artworkUrl")] = songRow->property("songArtwork").toString();
-
     QMenu menu(this);
     menu.setStyleSheet(ThemeManager::instance()->menuStyle());
 
@@ -1101,7 +667,6 @@ void AppleMusicView::showSongContextMenu(QWidget* songRow, const QPoint& globalP
     auto* pm = PlaylistManager::instance();
     QVector<Playlist> playlists = pm->allPlaylists();
 
-    // Build a Track from the Apple Music data
     Track track;
     track.id = songData[QStringLiteral("id")].toString();
     track.title = songData[QStringLiteral("title")].toString();
@@ -1109,7 +674,7 @@ void AppleMusicView::showSongContextMenu(QWidget* songRow, const QPoint& globalP
     track.album = songData[QStringLiteral("album")].toString();
     track.duration = static_cast<int>(songData[QStringLiteral("duration")].toDouble());
     track.coverUrl = songData[QStringLiteral("artworkUrl")].toString();
-    track.filePath = QString();  // empty = Apple Music source
+    track.filePath = QString();
 
     for (const Playlist& pl : playlists) {
         if (pl.isSmartPlaylist) continue;
@@ -1145,130 +710,13 @@ void AppleMusicView::showSongContextMenu(QWidget* songRow, const QPoint& globalP
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  Artist discography navigation
-// ═════════════════════════════════════════════════════════════════════
-
-void AppleMusicView::showArtistDiscography(const QString& artistId, const QString& artistName)
-{
-    pushNavState();
-
-    m_currentState = AMViewState::ArtistDetail;
-    m_currentDetailId = artistId;
-    m_currentDetailName = artistName;
-    m_currentDetailSubName.clear();
-    m_lastSongs = QJsonArray();
-    m_lastAlbums = QJsonArray();
-    m_lastArtists = QJsonArray();
-
-    clearResults();
-    m_loadingLabel->setText(QStringLiteral("Loading songs by %1...").arg(artistName));
-    m_loadingLabel->setVisible(true);
-    m_noResultsLabel->setVisible(false);
-    updateNavBar();
-
-    auto* am = AppleMusicManager::instance();
-    am->fetchArtistSongs(artistId);
-    am->fetchArtistAlbums(artistId);
-}
-
-void AppleMusicView::onArtistSongs(const QString& /*artistId*/, const QJsonArray& songs)
-{
-    if (m_currentState != AMViewState::ArtistDetail) return;
-
-    m_loadingLabel->setVisible(false);
-    m_lastSongs = songs;  // cache for back navigation
-
-    if (songs.isEmpty()) {
-        m_noResultsLabel->setText(QStringLiteral("No songs found for %1").arg(m_currentDetailName));
-        m_noResultsLabel->setVisible(true);
-        return;
-    }
-
-    m_noResultsLabel->setVisible(false);
-
-    m_resultsLayout->insertWidget(0, createSectionHeader(
-        QStringLiteral("Songs by %1 (%2)").arg(m_currentDetailName).arg(songs.size())));
-
-    for (int i = 0; i < songs.size(); ++i) {
-        auto obj = songs[i].toObject();
-        m_resultsLayout->insertWidget(i + 1, createSongRow(obj));
-    }
-
-    m_resultsLayout->addStretch();
-}
-
-void AppleMusicView::onArtistAlbums(const QString& /*artistId*/, const QJsonArray& albums)
-{
-    if (m_currentState != AMViewState::ArtistDetail) return;
-    if (albums.isEmpty()) return;
-
-    m_lastAlbums = albums;  // cache for back navigation
-    buildAlbumsSection(albums);
-    m_resultsLayout->addStretch();
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  Album tracks navigation
-// ═════════════════════════════════════════════════════════════════════
-
-void AppleMusicView::showAlbumTracks(const QString& albumId, const QString& albumName,
-                                      const QString& artistName)
-{
-    pushNavState();
-
-    m_currentState = AMViewState::AlbumDetail;
-    m_currentDetailId = albumId;
-    m_currentDetailName = albumName;
-    m_currentDetailSubName = artistName;
-    m_lastSongs = QJsonArray();
-    m_lastAlbums = QJsonArray();
-    m_lastArtists = QJsonArray();
-
-    clearResults();
-    m_loadingLabel->setText(QStringLiteral("Loading tracks..."));
-    m_loadingLabel->setVisible(true);
-    m_noResultsLabel->setVisible(false);
-    updateNavBar();
-
-    AppleMusicManager::instance()->fetchAlbumTracks(albumId);
-}
-
-void AppleMusicView::onAlbumTracks(const QString& /*albumId*/, const QJsonArray& tracks)
-{
-    if (m_currentState != AMViewState::AlbumDetail) return;
-
-    m_loadingLabel->setVisible(false);
-    m_lastSongs = tracks;  // cache for back navigation
-
-    if (tracks.isEmpty()) {
-        m_noResultsLabel->setText(QStringLiteral("No tracks found"));
-        m_noResultsLabel->setVisible(true);
-        return;
-    }
-
-    m_noResultsLabel->setVisible(false);
-    clearResults();
-
-    m_resultsLayout->addWidget(createSectionHeader(
-        QStringLiteral("%1 \u2014 %2 (%3)")
-            .arg(m_currentDetailName, m_currentDetailSubName)
-            .arg(tracks.size())));
-
-    for (const auto& val : tracks)
-        m_resultsLayout->addWidget(createSongRow(val.toObject()));
-
-    m_resultsLayout->addStretch();
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  refreshTheme — called when theme changes (light/dark switch)
+//  refreshTheme
 // ═════════════════════════════════════════════════════════════════════
 
 void AppleMusicView::refreshTheme()
 {
     auto c = ThemeManager::instance()->colors();
 
-    // Persistent header widgets
     m_titleLabel->setStyleSheet(
         QStringLiteral("color: %1;").arg(c.foreground));
     m_navTitleLabel->setStyleSheet(
@@ -1278,75 +726,16 @@ void AppleMusicView::refreshTheme()
     m_noResultsLabel->setStyleSheet(
         QStringLiteral("color: %1; font-size: 14px;").arg(c.foregroundMuted));
 
-    m_scrollArea->setStyleSheet(
-        QStringLiteral("QScrollArea { background: transparent; border: none; }") +
-        ThemeManager::instance()->scrollbarStyle());
+    m_searchPanel->refreshScrollStyle();
+    m_artistPanel->refreshScrollStyle();
+    m_albumPanel->refreshScrollStyle();
 
-    // Update auth status colors
     updateAuthStatus();
-
-    // Update nav button colors
     updateNavBar();
 
-    // Rebuild current results with new theme colors
-    // (dynamic content picks up current theme from ThemeManager::instance()->colors())
+    // Rebuild current content with new theme
     if (!m_lastSongs.isEmpty() || !m_lastAlbums.isEmpty() || !m_lastArtists.isEmpty()) {
-        clearResults();
         restoreNavEntry({m_currentState, m_lastSearchTerm, m_lastSongs, m_lastAlbums,
                          m_lastArtists, m_currentDetailId, m_currentDetailName, m_currentDetailSubName});
     }
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  loadArtwork — async network fetch
-// ═════════════════════════════════════════════════════════════════════
-
-void AppleMusicView::loadArtwork(const QString& url, QLabel* target, int size, bool circular)
-{
-    // Replace {w}x{h} placeholders in Apple Music artwork URLs
-    QString resolvedUrl = url;
-    resolvedUrl.replace(QStringLiteral("{w}"), QString::number(size * 2));
-    resolvedUrl.replace(QStringLiteral("{h}"), QString::number(size * 2));
-
-    QNetworkRequest req{QUrl(resolvedUrl)};
-    QNetworkReply* reply = m_networkManager->get(req);
-
-    QPointer<QLabel> safeTarget = target;
-    connect(reply, &QNetworkReply::finished, this, [reply, safeTarget, size, circular]() {
-        reply->deleteLater();
-        if (!safeTarget) return;
-        if (reply->error() != QNetworkReply::NoError) return;
-
-        QPixmap pm;
-        pm.loadFromData(reply->readAll());
-        if (pm.isNull()) return;
-
-        pm = pm.scaled(size * 2, size * 2, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-
-        if (circular) {
-            QPixmap circPm(size * 2, size * 2);
-            circPm.fill(Qt::transparent);
-            QPainter painter(&circPm);
-            painter.setRenderHint(QPainter::Antialiasing);
-            QPainterPath path;
-            path.addEllipse(0, 0, size * 2, size * 2);
-            painter.setClipPath(path);
-            painter.drawPixmap(0, 0, pm);
-            painter.end();
-            safeTarget->setPixmap(circPm.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        } else {
-            // Rounded corners
-            int radius = 8;
-            QPixmap rounded(size * 2, size * 2);
-            rounded.fill(Qt::transparent);
-            QPainter painter(&rounded);
-            painter.setRenderHint(QPainter::Antialiasing);
-            QPainterPath path;
-            path.addRoundedRect(0, 0, size * 2, size * 2, radius * 2, radius * 2);
-            painter.setClipPath(path);
-            painter.drawPixmap(0, 0, pm);
-            painter.end();
-            safeTarget->setPixmap(rounded.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        }
-    });
 }
