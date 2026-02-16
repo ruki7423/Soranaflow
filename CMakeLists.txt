@@ -454,6 +454,12 @@ add_library(sorana_ui OBJECT
     src/ui/views/settings/OutputSettingsWidget.cpp
     src/ui/views/settings/DSPSettingsWidget.h
     src/ui/views/settings/DSPSettingsWidget.cpp
+    src/ui/views/settings/ProcessingSettingsWidget.h
+    src/ui/views/settings/ProcessingSettingsWidget.cpp
+    src/ui/views/settings/SpatialSettingsWidget.h
+    src/ui/views/settings/SpatialSettingsWidget.cpp
+    src/ui/views/settings/EQSettingsWidget.h
+    src/ui/views/settings/EQSettingsWidget.cpp
     src/ui/views/settings/VSTSettingsWidget.h
     src/ui/views/settings/VSTSettingsWidget.cpp
     src/ui/views/settings/LibrarySettingsTab.h
