@@ -25,6 +25,18 @@
 
 ---
 
+## What's New (v1.7.5)
+
+### Bug Fixes
+- Improved VST3 plugin compatibility (Crave EQ, PSP Audioware) — parameter changes now forwarded to plugins
+- Signal Path now only shows EQ when bands have audible effect
+
+### Features
+- "Recently Added" sort option in Albums view
+- m3u/m3u8 playlist import
+
+---
+
 ## What's New (v1.7.4)
 
 ### Apple Music Playback Fixes
@@ -148,7 +160,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.4](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.4/SoranaFlow-1.7.4.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.5](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.5/SoranaFlow-1.7.5.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -183,13 +195,19 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 25 (v1.0.0 → v1.7.4) |
+| GitHub Releases | 26 (v1.0.0 → v1.7.5) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.5 — VST3 Compatibility + Playlists
+
+- VST3 parameter forwarding for Crave EQ, PSP Audioware compatibility
+- Signal Path only shows active DSP components
+- "Recently Added" album sort, m3u/m3u8 playlist import
 
 ### v1.7.4 — Apple Music Playback Fixes
 
