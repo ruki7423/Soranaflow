@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "MenuBarManager.h"
 #include "../core/PlaybackState.h"
 #include "../core/Settings.h"
 #include "../core/audio/AudioEngine.h"
@@ -100,119 +101,20 @@ MainWindow::MainWindow(QWidget* parent)
     resize(1400, 900);
     setMinimumSize(900, 600);
 
-    // Global keyboard shortcuts — skip when a text input has focus
-    auto* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
-    spaceShortcut->setContext(Qt::ApplicationShortcut);
-    connect(spaceShortcut, &QShortcut::activated, this, []() {
-        if (isTextInputFocused()) return;
-        // Check playback SOURCE (not view) to decide which player to control
-        auto* ps = PlaybackState::instance();
-        if (ps->currentSource() == PlaybackState::AppleMusic) {
-            MusicKitPlayer::instance()->togglePlayPause();
-        } else {
-            ps->playPause();
-        }
-    });
-
-    // Ctrl+Left / Ctrl+Right for prev/next
-    auto* ctrlLeft = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Left), this);
-    ctrlLeft->setContext(Qt::ApplicationShortcut);
-    connect(ctrlLeft, &QShortcut::activated, this, []() {
-        PlaybackState::instance()->previous();
-    });
-
-    auto* ctrlRight = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Right), this);
-    ctrlRight->setContext(Qt::ApplicationShortcut);
-    connect(ctrlRight, &QShortcut::activated, this, []() {
-        PlaybackState::instance()->next();
-    });
-
-    // Media key shortcuts (unconditional)
-    auto* mediaPlay = new QShortcut(Qt::Key_MediaPlay, this);
-    mediaPlay->setContext(Qt::ApplicationShortcut);
-    connect(mediaPlay, &QShortcut::activated, this, []() {
-        PlaybackState::instance()->playPause();
-    });
-
-    auto* mediaNext = new QShortcut(Qt::Key_MediaNext, this);
-    mediaNext->setContext(Qt::ApplicationShortcut);
-    connect(mediaNext, &QShortcut::activated, this, []() {
-        PlaybackState::instance()->next();
-    });
-
-    auto* mediaPrev = new QShortcut(Qt::Key_MediaPrevious, this);
-    mediaPrev->setContext(Qt::ApplicationShortcut);
-    connect(mediaPrev, &QShortcut::activated, this, []() {
-        PlaybackState::instance()->previous();
-    });
-
-    // Cmd+F / Ctrl+F → focus search
-    auto* searchShortcutF = new QShortcut(QKeySequence::Find, this);
-    searchShortcutF->setContext(Qt::ApplicationShortcut);
-    connect(searchShortcutF, &QShortcut::activated, this, [this]() {
-        m_sidebar->focusSearch();
-    });
-
-    // Cmd+Q / Ctrl+Q → real quit (not just hide)
-    QMenu* fileMenu = menuBar()->addMenu(tr("File"));
-    QAction* quitAction = fileMenu->addAction(tr("Quit Sorana Flow"));
-    quitAction->setShortcut(QKeySequence::Quit);
-    connect(quitAction, &QAction::triggered, this, [this]() {
+    // Menu bar, keyboard shortcuts, macOS media integration
+    auto* menuMgr = new MenuBarManager(this);
+    connect(menuMgr, &MenuBarManager::quitRequested, this, [this]() {
         qDebug() << "[MainWindow] Cmd+Q — real quit requested";
         m_reallyQuit = true;
         close();
+    });
+    connect(menuMgr, &MenuBarManager::focusSearchRequested, this, [this]() {
+        m_sidebar->focusSearch();
     });
 
     // Global Escape: install app-level event filter to catch Escape
     // before child widgets (QTableView, QScrollArea) consume it
     qApp->installEventFilter(this);
-
-#ifdef Q_OS_MAC
-    // ── macOS Now Playing + Media Keys ──────────────────────────────
-    auto& macMedia = MacMediaIntegration::instance();
-    macMedia.initialize();
-
-    connect(&macMedia, &MacMediaIntegration::playPauseRequested, this, []() {
-        PlaybackState::instance()->playPause();
-    });
-    connect(&macMedia, &MacMediaIntegration::nextRequested, this, []() {
-        PlaybackState::instance()->next();
-    });
-    connect(&macMedia, &MacMediaIntegration::previousRequested, this, []() {
-        PlaybackState::instance()->previous();
-    });
-    connect(&macMedia, &MacMediaIntegration::seekRequested, this, [](double pos) {
-        PlaybackState::instance()->seek(static_cast<int>(pos));
-    });
-
-    auto* ps = PlaybackState::instance();
-
-    // Track changed → update Now Playing metadata
-    connect(ps, &PlaybackState::trackChanged, this, [](const Track& track) {
-        MacMediaIntegration::instance().updateNowPlaying(
-            track.title, track.artist, track.album,
-            static_cast<double>(track.duration), 0.0, true);
-    });
-
-    // Play/pause state changed → update playback rate
-    connect(ps, &PlaybackState::playStateChanged, this, [ps](bool playing) {
-        const Track& t = ps->currentTrack();
-        if (t.title.isEmpty()) return;
-        MacMediaIntegration::instance().updateNowPlaying(
-            t.title, t.artist, t.album,
-            static_cast<double>(t.duration),
-            static_cast<double>(ps->currentTime()), playing);
-    });
-
-    // Cover art loaded → update Now Playing artwork
-    connect(CoverArtLoader::instance(), &CoverArtLoader::coverArtReady,
-            this, [ps](const QString& trackPath, const QPixmap& pixmap) {
-        // Only update artwork for the currently playing track
-        if (ps->currentTrack().filePath == trackPath && !pixmap.isNull()) {
-            MacMediaIntegration::instance().updateArtwork(pixmap.toImage());
-        }
-    });
-#endif
 
     // macOS: reopen window when Dock icon clicked
     connect(qApp, &QApplication::applicationStateChanged,
