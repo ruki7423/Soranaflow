@@ -125,8 +125,8 @@ Album AlbumRepository::albumById(const QString& id) const
         if (!genresStr.isEmpty())
             a.genres = genresStr.split(QStringLiteral(","));
 
-        // Load tracks
-        QSqlQuery tq(*m_ctx->writeDb);
+        // Load tracks (use readDb — we already hold readMutex)
+        QSqlQuery tq(*m_ctx->readDb);
         tq.prepare(QStringLiteral("SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number"));
         tq.addBindValue(a.id);
         if (tq.exec()) {

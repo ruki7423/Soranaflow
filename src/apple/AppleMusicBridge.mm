@@ -309,21 +309,21 @@ void AppleMusicManager::requestMusicUserToken()
                 QString tokenStr = QString::fromNSString(token);
                 qDebug() << "[AppleMusicManager] Music User Token obtained, length:" << tokenStr.length();
 
-                m_musicUserToken = tokenStr;
-
-                // Persist token so reconnect is instant on next launch
-                Settings::instance()->setValue(QStringLiteral("appleMusic/userToken"), tokenStr);
-                qDebug() << "[AppleMusicManager] Token persisted to Settings";
-
-                // Token success implies authorized — update status so UI shows "Connected"
-                if (d->authStatus != Authorized) {
-                    d->authStatus = Authorized;
-                    QMetaObject::invokeMethod(this, [this]() {
-                        emit authorizationStatusChanged(d->authStatus);
-                    }, Qt::QueuedConnection);
-                }
-
+                // All state mutations must happen on the main thread —
+                // this Swift callback may arrive on an arbitrary queue.
                 QMetaObject::invokeMethod(this, [this, tokenStr]() {
+                    m_musicUserToken = tokenStr;
+
+                    // Persist token so reconnect is instant on next launch
+                    Settings::instance()->setValue(QStringLiteral("appleMusic/userToken"), tokenStr);
+                    qDebug() << "[AppleMusicManager] Token persisted to Settings";
+
+                    // Token success implies authorized — update status so UI shows "Connected"
+                    if (d->authStatus != Authorized) {
+                        d->authStatus = Authorized;
+                        emit authorizationStatusChanged(d->authStatus);
+                    }
+
                     emit musicUserTokenReady(tokenStr);
                 }, Qt::QueuedConnection);
             }];

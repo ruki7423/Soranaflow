@@ -30,6 +30,7 @@ AppleMusicView::AppleMusicView(QWidget* parent)
     : QWidget(parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
+    m_networkManager->setTransferTimeout(15000);  // 15s timeout
     setObjectName(QStringLiteral("AppleMusicView"));
     setupUI();
 

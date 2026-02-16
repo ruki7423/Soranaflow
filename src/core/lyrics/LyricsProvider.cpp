@@ -31,6 +31,7 @@ LyricsProvider::LyricsProvider(QObject* parent)
     : QObject(parent)
     , m_nam(new QNetworkAccessManager(this))
 {
+    m_nam->setTransferTimeout(15000);  // 15s timeout
 }
 
 // ═════════════════════════════════════════════════════════════════════
