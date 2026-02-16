@@ -25,11 +25,15 @@
 
 ---
 
-## What's New (v1.7.8)
+## What's New (v1.7.9)
 
 ### Bug Fixes
 - **Album sort order now persists across restarts** — your chosen sort mode (Artist, Title, Year, etc.) is saved and restored automatically
-- **"Add to Queue" works correctly** — tracks and albums added via context menu now stay in the queue even when you start playing from a different source (user queue pattern)
+- **"Add to Queue" updates UI immediately** — tracks added via context menu now appear in the queue panel in real time
+- **VST2/VST3 plugin settings saved across restart** — uses VST2 chunk API and VST3 IComponent/IEditController state serialization
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ---
 
@@ -184,7 +188,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.8](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.8/SoranaFlow-1.7.8.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.9](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.9/SoranaFlow-1.7.9.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -219,7 +223,7 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 29 (v1.0.0 → v1.7.8) |
+| GitHub Releases | 30 (v1.0.0 → v1.7.9) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
@@ -227,10 +231,11 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## Changelog
 
-### v1.7.8 — Album Sort Persistence & Queue Fix
+### v1.7.9 — Bug Fixes & VST State Persistence
 
 - Album sort order now persists across restarts
-- "Add to Queue" and "Play Next" now work correctly — user queue pattern
+- "Add to Queue" updates queue panel immediately
+- VST2/VST3 plugin settings saved and restored across restart
 
 ### v1.7.7 — VST3 Plugin Activation Fix
 
