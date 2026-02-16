@@ -371,6 +371,8 @@ if(APPLE)
     add_library(sorana_apple_music OBJECT
         src/apple/AppleMusicManager.h
         src/apple/AppleMusicBridge.mm
+        src/apple/MusicKitStateMachine.h
+        src/apple/MusicKitStateMachine.cpp
         src/apple/MusicKitPlayer.h
         src/apple/MusicKitPlayer.mm
     )

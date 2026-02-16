@@ -2,9 +2,8 @@
 
 #include <QObject>
 #include <QString>
-#include <QTimer>
 #include <QElapsedTimer>
-#include <optional>
+#include "MusicKitStateMachine.h"
 
 // Opaque pointer for Objective-C++ WKWebView implementation
 struct MusicKitWebViewPrivate;
@@ -22,20 +21,11 @@ public:
     // Pre-warm WebView at startup (call from main.cpp after window shown)
     void preInitialize();
 
-    // State machine states
-    enum class AMState { Idle, Loading, Playing, Stalled, Stopping };
-    AMState amState() const { return m_amState; }
-
-    // Async play state tracking (for cross-source cancellation)
-    enum class AMPlayState {
-        Idle,       // No play in progress
-        Pending,    // playSong called, waiting for MusicKit
-        Buffering,  // MusicKit started loading
-        Playing,    // Actually playing audio
-        Error,      // Play failed
-        Cancelled   // User switched source before play completed
-    };
-    AMPlayState amPlayState() const { return m_amPlayState; }
+    // State machine states (aliases — enums live in MusicKitStateMachine)
+    using AMState = MusicKitStateMachine::AMState;
+    using AMPlayState = MusicKitStateMachine::AMPlayState;
+    AMState amState() const { return m_stateMachine->amState(); }
+    AMPlayState amPlayState() const { return m_stateMachine->amPlayState(); }
     void cancelPendingPlay();
 
     // Playback controls
@@ -94,23 +84,8 @@ private:
     void runJS(const QString& js);
     Q_INVOKABLE void webViewDidFinishLoad();
 
-    // State machine
-    AMState m_amState = AMState::Idle;
-    void setAMState(AMState newState);
-    void processStateTransition(int musicKitState);
-    void processPendingPlay();
-
-    // Command queue (last-wins, max 1)
-    struct PendingPlay { QString songId; };
-    std::optional<PendingPlay> m_pendingPlay;
-
-    // Internal play execution (separated from public play)
-    void executePlay(const QString& songId);
-
-    // Timeout timer
-    QTimer* m_stateTimeoutTimer = nullptr;
-    void startStateTimeout(int ms);
-    void onStateTimeout();
+    // State machine (extracted)
+    MusicKitStateMachine* m_stateMachine = nullptr;
 
     MusicKitWebViewPrivate* m_wk = nullptr;
     bool m_ready = false;
@@ -120,9 +95,4 @@ private:
     QString m_pendingSongId;
     QString m_pendingUserToken;
     QElapsedTimer m_loadTimer;
-
-    // Async play state
-    AMPlayState m_amPlayState = AMPlayState::Idle;
-    QString m_pendingPlaySongId;
-    QElapsedTimer m_playRequestTimer;
 };

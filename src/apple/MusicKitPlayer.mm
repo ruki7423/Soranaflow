@@ -269,11 +269,27 @@ MusicKitPlayer* MusicKitPlayer::instance()
 MusicKitPlayer::MusicKitPlayer(QObject* parent)
     : QObject(parent)
 {
-    m_stateTimeoutTimer = new QTimer(this);
-    m_stateTimeoutTimer->setSingleShot(true);
-    connect(m_stateTimeoutTimer, &QTimer::timeout, this, [this]() {
-        onStateTimeout();
-    });
+    m_stateMachine = new MusicKitStateMachine(this);
+
+    // Forward state machine signals
+    connect(m_stateMachine, &MusicKitStateMachine::amStateChanged,
+            this, &MusicKitPlayer::amStateChanged);
+    connect(m_stateMachine, &MusicKitStateMachine::amPlayStateChanged,
+            this, &MusicKitPlayer::amPlayStateChanged);
+    connect(m_stateMachine, &MusicKitStateMachine::playbackActiveChanged,
+            this, &MusicKitPlayer::playbackStateChanged);
+
+    // Action requests → JS execution
+    connect(m_stateMachine, &MusicKitStateMachine::executePlayRequested,
+            this, [this](const QString& songId) {
+                qDebug() << "[MusicKitPlayer] Calling JS playSong()...";
+                runJS(QStringLiteral("playSong('%1')").arg(songId));
+            });
+    connect(m_stateMachine, &MusicKitStateMachine::stopPlaybackRequested,
+            this, [this]() {
+                if (m_ready)
+                    runJS(QStringLiteral("stopPlayback()"));
+            });
 }
 
 // ── cleanup — explicit shutdown before app exit ─────────────────────
@@ -301,11 +317,7 @@ void MusicKitPlayer::cleanup()
     m_ready = false;
     m_initialized = false;
     m_webViewReady = false;
-    m_amState = AMState::Idle;
-    m_amPlayState = AMPlayState::Idle;
-    m_pendingPlay.reset();
-    m_pendingPlaySongId.clear();
-    if (m_stateTimeoutTimer) m_stateTimeoutTimer->stop();
+    m_stateMachine->reset();
     qDebug() << "[MusicKitPlayer] cleanup DONE";
 }
 
@@ -444,46 +456,8 @@ void MusicKitPlayer::play(const QString& songId)
         return;
     }
 
-    switch (m_amState) {
-    case AMState::Idle:
-        // Ready — execute immediately
-        executePlay(songId);
-        break;
-
-    case AMState::Loading:
-    case AMState::Playing:
-    case AMState::Stalled:
-        // Busy — queue and stop current
-        m_pendingPlay = PendingPlay{songId};
-        qDebug() << "[MusicKit] Queued:" << songId << "— stopping current";
-        stop();
-        break;
-
-    case AMState::Stopping:
-        // Already stopping — just update queue
-        m_pendingPlay = PendingPlay{songId};
-        qDebug() << "[MusicKit] Queued:" << songId << "— already stopping";
-        break;
-    }
-}
-
-// ── executePlay — internal, does the actual JS work ─────────────────
-void MusicKitPlayer::executePlay(const QString& songId)
-{
-    // Track async play state for cross-source cancellation
-    if (m_amPlayState == AMPlayState::Pending ||
-        m_amPlayState == AMPlayState::Buffering) {
-        qDebug() << "[MusicKitPlayer] Cancelling previous pending play:"
-                 << m_pendingPlaySongId;
-    }
-    m_amPlayState = AMPlayState::Pending;
-    m_pendingPlaySongId = songId;
-    m_playRequestTimer.start();
-    emit amPlayStateChanged(m_amPlayState);
-
-    setAMState(AMState::Loading);
-    qDebug() << "[MusicKitPlayer] Calling JS playSong()...";
-    runJS(QStringLiteral("playSong('%1')").arg(songId));
+    // Delegate to state machine (handles routing, queueing, stop-before-play)
+    m_stateMachine->requestPlay(songId);
 }
 
 // ── pause ───────────────────────────────────────────────────────────
@@ -510,35 +484,13 @@ void MusicKitPlayer::togglePlayPause()
 // ── stop ────────────────────────────────────────────────────────────
 void MusicKitPlayer::stop()
 {
-    if (m_amState == AMState::Idle || m_amState == AMState::Stopping) {
-        if (m_ready)
-            runJS(QStringLiteral("stopPlayback()"));
-        return;
-    }
-
-    setAMState(AMState::Stopping);
-    if (m_ready)
-        runJS(QStringLiteral("stopPlayback()"));
+    m_stateMachine->requestStop();
 }
 
 // ── cancelPendingPlay — abort async play before it starts ───────────
 void MusicKitPlayer::cancelPendingPlay()
 {
-    if (m_amPlayState == AMPlayState::Idle ||
-        m_amPlayState == AMPlayState::Cancelled) {
-        return;  // Nothing to cancel
-    }
-
-    qDebug() << "[MusicKitPlayer] CANCELLING play:" << m_pendingPlaySongId
-             << "after" << m_playRequestTimer.elapsed() << "ms"
-             << "(was" << static_cast<int>(m_amPlayState) << ")";
-
-    m_amPlayState = AMPlayState::Cancelled;
-    m_pendingPlaySongId.clear();
-    emit amPlayStateChanged(m_amPlayState);
-
-    // Tell MusicKit to stop — handles both queued and in-progress plays
-    stop();
+    m_stateMachine->cancelPendingPlay();
 }
 
 // ── seek ────────────────────────────────────────────────────────────
@@ -623,185 +575,7 @@ void MusicKitPlayer::onMusicKitStateChanged(int state)
                            "ended","seeking","waiting","stalled","completed"};
     const char* name = (state >= 0 && state <= 9) ? names[state] : "unknown";
     qDebug() << "[MusicKitPlayer] MusicKit state:" << state << "(" << name << ")";
-    processStateTransition(state);
-}
-
-// ═════════════════════════════════════════════════════════════════════
-//  State machine
-// ═════════════════════════════════════════════════════════════════════
-
-void MusicKitPlayer::setAMState(AMState newState)
-{
-    if (m_amState == newState) return;
-
-    AMState oldState = m_amState;
-    m_amState = newState;
-
-    const char* stateNames[] = {"Idle", "Loading", "Playing", "Stalled", "Stopping"};
-    qDebug() << "[MusicKit] State:" << stateNames[static_cast<int>(oldState)]
-             << "→" << stateNames[static_cast<int>(newState)];
-
-    emit amStateChanged(static_cast<int>(newState));
-
-    switch (newState) {
-    case AMState::Playing:
-        // Sync AMPlayState
-        if (m_amPlayState == AMPlayState::Pending ||
-            m_amPlayState == AMPlayState::Buffering) {
-            m_amPlayState = AMPlayState::Playing;
-            qDebug() << "[MusicKitPlayer] Now playing, took"
-                     << m_playRequestTimer.elapsed() << "ms";
-            emit amPlayStateChanged(m_amPlayState);
-        }
-        emit playbackStateChanged(true);
-        m_stateTimeoutTimer->stop();
-        break;
-    case AMState::Idle:
-        // Sync AMPlayState
-        if (m_amPlayState == AMPlayState::Playing ||
-            m_amPlayState == AMPlayState::Pending ||
-            m_amPlayState == AMPlayState::Buffering) {
-            m_amPlayState = AMPlayState::Idle;
-            emit amPlayStateChanged(m_amPlayState);
-        }
-        m_stateTimeoutTimer->stop();
-        if (m_pendingPlay) {
-            // Don't emit false — about to play next song
-            processPendingPlay();
-        } else {
-            emit playbackStateChanged(false);
-        }
-        break;
-    case AMState::Loading:
-        // Sync AMPlayState to Buffering if transitioning from Pending
-        if (m_amPlayState == AMPlayState::Pending) {
-            m_amPlayState = AMPlayState::Buffering;
-            emit amPlayStateChanged(m_amPlayState);
-        }
-        startStateTimeout(30000);  // MusicKit DRM + CDN can take 15-20s
-        break;
-    case AMState::Stalled:
-        startStateTimeout(30000);  // Buffering can be slow
-        break;
-    case AMState::Stopping:
-        startStateTimeout(5000);
-        break;
-    }
-}
-
-void MusicKitPlayer::processStateTransition(int mkState)
-{
-    // MusicKit states:
-    // 0=none, 1=loading, 2=playing, 3=paused, 4=stopped,
-    // 5=ended, 6=seeking, 7=waiting, 8=stalled, 9=completed
-
-    // ── Cross-source cancellation guard ─────────────────────────────
-    // If play was cancelled (user switched to local), reject any late
-    // MusicKit state transitions that would start playback
-    if (m_amPlayState == AMPlayState::Cancelled && mkState == 2) {
-        qDebug() << "[MusicKitPlayer] Play arrived but was CANCELLED — stopping immediately";
-        runJS(QStringLiteral("stopPlayback()"));
-        m_amPlayState = AMPlayState::Idle;
-        emit amPlayStateChanged(m_amPlayState);
-        return;
-    }
-
-    switch (m_amState) {
-
-    case AMState::Idle:
-        if (mkState == 2) {
-            // Playing while Idle — e.g. resume() bypassed state machine
-            setAMState(AMState::Playing);
-        }
-        break;
-
-    case AMState::Loading:
-        if (mkState == 2) {
-            setAMState(AMState::Playing);
-        } else if (mkState == 8 || mkState == 1) {
-            // stalled or loading — MusicKit is buffering, stay in Loading
-            startStateTimeout(30000);  // reset timeout — still actively loading
-        } else if (mkState == 4 || mkState == 0) {
-            qDebug() << "[MusicKit] Loading: stopped unexpectedly";
-            setAMState(AMState::Idle);
-        } else if (mkState == 3) {
-            qDebug() << "[MusicKit] Loading: paused unexpectedly";
-            setAMState(AMState::Idle);
-        }
-        break;
-
-    case AMState::Playing:
-        if (mkState == 8 || mkState == 1) {
-            setAMState(AMState::Stalled);
-        } else if (mkState == 3) {
-            setAMState(AMState::Idle);
-        } else if (mkState == 4 || mkState == 0 || mkState == 9 || mkState == 5) {
-            // stopped, none, completed, ended
-            setAMState(AMState::Idle);
-        }
-        // mkState == 2 while Playing → ignore (no change)
-        break;
-
-    case AMState::Stalled:
-        if (mkState == 2) {
-            // Recovered!
-            setAMState(AMState::Playing);
-        } else if (mkState == 4 || mkState == 0 || mkState == 3) {
-            setAMState(AMState::Idle);
-        } else if (mkState == 1 || mkState == 8) {
-            // loading or re-stalled — MusicKit is actively buffering
-            startStateTimeout(30000);  // reset timeout
-        }
-        break;
-
-    case AMState::Stopping:
-        if (mkState == 4 || mkState == 0 || mkState == 3) {
-            // stopped, none, paused — stop confirmed
-            setAMState(AMState::Idle);
-        }
-        // Any other state while Stopping → keep waiting
-        break;
-    }
-}
-
-void MusicKitPlayer::processPendingPlay()
-{
-    if (!m_pendingPlay) return;
-
-    auto next = *m_pendingPlay;
-    m_pendingPlay.reset();
-
-    qDebug() << "[MusicKit] Processing queued:" << next.songId;
-    executePlay(next.songId);
-}
-
-void MusicKitPlayer::startStateTimeout(int ms)
-{
-    m_stateTimeoutTimer->start(ms);
-}
-
-void MusicKitPlayer::onStateTimeout()
-{
-    const char* stateNames[] = {"Idle", "Loading", "Playing", "Stalled", "Stopping"};
-    qDebug() << "[MusicKit] State timeout in"
-             << stateNames[static_cast<int>(m_amState)] << "— forcing Idle";
-    m_amState = AMState::Idle;  // bypass setAMState to avoid re-entrant timeout
-    m_stateTimeoutTimer->stop();
-
-    // Reset AMPlayState on timeout
-    if (m_amPlayState != AMPlayState::Idle &&
-        m_amPlayState != AMPlayState::Cancelled) {
-        m_amPlayState = AMPlayState::Error;
-        emit amPlayStateChanged(m_amPlayState);
-        m_amPlayState = AMPlayState::Idle;
-        emit amPlayStateChanged(m_amPlayState);
-    }
-
-    if (m_pendingPlay) {
-        processPendingPlay();
-    } else {
-        emit playbackStateChanged(false);
-    }
+    m_stateMachine->onMusicKitStateChanged(state);
 }
 
 void MusicKitPlayer::onPlaybackEnded()
@@ -815,10 +589,11 @@ void MusicKitPlayer::onNowPlayingChanged(const QString& songId, const QString& t
                                            double duration)
 {
     // Filter stale nowPlaying from a previous/cancelled play
-    if (!m_pendingPlaySongId.isEmpty() && !songId.isEmpty()
-        && songId != m_pendingPlaySongId) {
+    QString pendingSongId = m_stateMachine->pendingPlaySongId();
+    if (!pendingSongId.isEmpty() && !songId.isEmpty()
+        && songId != pendingSongId) {
         qDebug() << "[MusicKitPlayer] STALE nowPlaying: got" << songId
-                 << "but requested" << m_pendingPlaySongId << "— ignoring";
+                 << "but requested" << pendingSongId << "— ignoring";
         return;
     }
 
@@ -835,14 +610,7 @@ void MusicKitPlayer::onPlaybackTimeChanged(double currentTime, double totalTime)
 void MusicKitPlayer::onError(const QString& error)
 {
     qDebug() << "[MusicKitPlayer] Error:" << error;
-
-    // If a play is pending/buffering and we get an error, mark it
-    if (m_amPlayState == AMPlayState::Pending ||
-        m_amPlayState == AMPlayState::Buffering) {
-        m_amPlayState = AMPlayState::Error;
-        emit amPlayStateChanged(m_amPlayState);
-    }
-
+    m_stateMachine->onPlayError();
     emit errorOccurred(error);
 }
 
