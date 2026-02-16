@@ -73,6 +73,17 @@ add_sorana_test(
 )
 
 add_sorana_test(
+    NAME VolumeLevelingManager
+    SOURCES
+        tst_VolumeLevelingManager.cpp
+        stubs_VolumeLeveling.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/audio/VolumeLevelingManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/Settings.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/MusicData.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/library/LibraryDatabase.h
+)
+
+add_sorana_test(
     NAME ServiceLocator
     SOURCES
         tst_ServiceLocator.cpp
