@@ -5,11 +5,13 @@
 #include "../core/library/PlaylistManager.h"
 #include "../core/library/LibraryDatabase.h"
 #include "../ui/dialogs/NewPlaylistDialog.h"
+#include "../platform/macos/MacUtils.h"
 
 #include <QMenu>
 #include <QSettings>
 #include <QScrollBar>
 #include <QContextMenuEvent>
+#include <QTimer>
 #include <QSet>
 #include <algorithm>
 
@@ -522,6 +524,11 @@ TrackTableView::TrackTableView(const TrackTableConfig& config, QWidget* parent)
 
     connect(ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &TrackTableView::refreshTheme);
+
+    // macOS: allow clicks on inactive window to pass through
+    QTimer::singleShot(0, this, [this]() {
+        enableAcceptsFirstMouse(this);
+    });
 }
 
 void TrackTableView::setupHeader()

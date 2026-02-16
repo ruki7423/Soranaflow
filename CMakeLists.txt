@@ -335,6 +335,8 @@ add_library(sorana_platform OBJECT
     src/platform/macos/SparkleUpdater.mm
     src/platform/macos/AudioProcessTap.h
     src/platform/macos/AudioProcessTap.mm
+    src/platform/macos/MacUtils.h
+    src/platform/macos/MacUtils.mm
 )
 sorana_module_setup(sorana_platform)
 target_link_libraries(sorana_platform PRIVATE Qt6::Core Qt6::Widgets)
@@ -357,6 +359,9 @@ if(APPLE)
         COMPILE_FLAGS "-fobjc-arc"
     )
     set_source_files_properties(src/platform/macos/AudioProcessTap.mm PROPERTIES
+        COMPILE_FLAGS "-fobjc-arc"
+    )
+    set_source_files_properties(src/platform/macos/MacUtils.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
     )
 endif()

@@ -5,6 +5,7 @@
 #include "../../core/ThemeManager.h"
 #include "../../widgets/StyledInput.h"
 #include "../../widgets/StyledButton.h"
+#include "../../platform/macos/MacUtils.h"
 #include <QLineEdit>
 #include <QPushButton>
 #include <QJsonObject>
@@ -17,6 +18,7 @@
 #include <QScrollBar>
 #include <QTimer>
 #include <QEvent>
+#include <QDateTime>
 #include <QMenu>
 #include <QContextMenuEvent>
 #include "../services/NavigationService.h"
@@ -279,6 +281,10 @@ void AppleMusicView::setupUI()
     m_scrollArea->setWidget(m_resultsContainer);
     mainLayout->addWidget(m_scrollArea, 1);
 
+    // macOS: allow clicks on inactive window to pass through to song rows
+    QTimer::singleShot(0, this, [this]() {
+        enableAcceptsFirstMouse(m_scrollArea);
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -940,11 +946,76 @@ QWidget* AppleMusicView::createArtistCard(const QJsonObject& artist, int cardWid
 
 bool AppleMusicView::eventFilter(QObject* obj, QEvent* event)
 {
+    // ── Helper: resolve the song row for an object ──────────────────
+    // If obj is a child label (artist/album) inside a song row, return the parent row.
+    // If obj IS the song row, return obj. Otherwise nullptr.
+    auto findSongRow = [](QObject* o) -> QObject* {
+        if (!o->property("songId").toString().isEmpty())
+            return o;
+        // Check parent (artist/album label inside a song row)
+        QObject* p = o->parent();
+        if (p && !p->property("songId").toString().isEmpty())
+            return p;
+        return nullptr;
+    };
+
+    // ── Double-click detection (MouseButtonPress) ───────────────────
+    // macOS window activation can break Qt's native MouseButtonDblClick
+    // timing. We detect rapid press pairs manually (500ms threshold)
+    // and keep the native DblClick as backup.
+    // This runs BEFORE artist/album release handling so double-clicks
+    // on artist/album labels inside song rows trigger play, not navigation.
+    if (event->type() == QEvent::MouseButtonPress) {
+        QObject* songRow = findSongRow(obj);
+        if (songRow) {
+            QString songId = songRow->property("songId").toString();
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            if (m_lastClickedRow == songRow && (now - m_lastClickTime) < 500) {
+                // Second press on same row within 500ms → play
+                m_lastClickedRow = nullptr;
+                m_lastClickTime = 0;
+                // Debounce: prevent double-fire with native DblClick
+                if (now - m_lastPlayTime > 1000) {
+                    m_lastPlayTime = now;
+                    qDebug() << "[AMView] Double-click play:" << songId;
+                    QJsonObject songData;
+                    songData[QStringLiteral("id")] = songId;
+                    songData[QStringLiteral("title")] = songRow->property("songTitle").toString();
+                    songData[QStringLiteral("artist")] = songRow->property("songArtist").toString();
+                    songData[QStringLiteral("album")] = songRow->property("songAlbum").toString();
+                    songData[QStringLiteral("duration")] = songRow->property("songDuration").toDouble();
+                    songData[QStringLiteral("artworkUrl")] = songRow->property("songArtwork").toString();
+                    playSong(songData);
+                    return true;
+                }
+            } else {
+                // First press — record
+                m_lastClickedRow = songRow;
+                m_lastClickTime = now;
+            }
+        }
+    }
+
+    // ── Artist/album label single-click navigation ──────────────────
+    // Only navigate on MouseButtonRelease if it's NOT part of a double-click
     if (event->type() == QEvent::MouseButtonRelease) {
+        // Check if this release is part of a recent double-click → skip navigation
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - m_lastPlayTime < 500) {
+            // Just played via double-click — don't navigate
+            return QWidget::eventFilter(obj, event);
+        }
+
         // Artist card or artist label click → navigate to discography
-        // (Labels in song rows have artistId but NOT songId)
         QString artistId = obj->property("artistId").toString();
         if (!artistId.isEmpty()) {
+            // If inside a song row, only navigate if NOT a rapid second click
+            QObject* songRow = findSongRow(obj);
+            if (songRow && m_lastClickedRow == songRow) {
+                // First click was recorded — wait for potential double-click
+                // Don't navigate yet; the next press will decide
+                return QWidget::eventFilter(obj, event);
+            }
             QString artistName = obj->property("artistName").toString();
             showArtistDiscography(artistId, artistName);
             return true;
@@ -953,6 +1024,10 @@ bool AppleMusicView::eventFilter(QObject* obj, QEvent* event)
         // Album card or album label click → navigate to album tracks
         QString albumId = obj->property("albumId").toString();
         if (!albumId.isEmpty()) {
+            QObject* songRow = findSongRow(obj);
+            if (songRow && m_lastClickedRow == songRow) {
+                return QWidget::eventFilter(obj, event);
+            }
             QString albumName = obj->property("albumName").toString();
             QString albumArtist = obj->property("albumArtist").toString();
             showAlbumTracks(albumId, albumName, albumArtist);
@@ -960,28 +1035,34 @@ bool AppleMusicView::eventFilter(QObject* obj, QEvent* event)
         }
     }
 
-    // Double-click on song row → play
+    // Native double-click backup (works when app is already active)
     if (event->type() == QEvent::MouseButtonDblClick) {
-        QString songId = obj->property("songId").toString();
-        if (!songId.isEmpty()) {
-            QJsonObject songData;
-            songData[QStringLiteral("id")] = songId;
-            songData[QStringLiteral("title")] = obj->property("songTitle").toString();
-            songData[QStringLiteral("artist")] = obj->property("songArtist").toString();
-            songData[QStringLiteral("album")] = obj->property("songAlbum").toString();
-            songData[QStringLiteral("duration")] = obj->property("songDuration").toDouble();
-            songData[QStringLiteral("artworkUrl")] = obj->property("songArtwork").toString();
-            playSong(songData);
+        QObject* songRow = findSongRow(obj);
+        if (songRow) {
+            QString songId = songRow->property("songId").toString();
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            if (now - m_lastPlayTime > 1000) {
+                m_lastPlayTime = now;
+                qDebug() << "[AMView] Native DblClick play:" << songId;
+                QJsonObject songData;
+                songData[QStringLiteral("id")] = songId;
+                songData[QStringLiteral("title")] = songRow->property("songTitle").toString();
+                songData[QStringLiteral("artist")] = songRow->property("songArtist").toString();
+                songData[QStringLiteral("album")] = songRow->property("songAlbum").toString();
+                songData[QStringLiteral("duration")] = songRow->property("songDuration").toDouble();
+                songData[QStringLiteral("artworkUrl")] = songRow->property("songArtwork").toString();
+                playSong(songData);
+            }
             return true;
         }
     }
 
     // Right-click on song row → context menu
     if (event->type() == QEvent::ContextMenu) {
-        QString songId = obj->property("songId").toString();
-        if (!songId.isEmpty()) {
+        QObject* songRow = findSongRow(obj);
+        if (songRow) {
             auto* cmEvent = static_cast<QContextMenuEvent*>(event);
-            showSongContextMenu(qobject_cast<QWidget*>(obj), cmEvent->globalPos());
+            showSongContextMenu(qobject_cast<QWidget*>(songRow), cmEvent->globalPos());
             return true;
         }
     }

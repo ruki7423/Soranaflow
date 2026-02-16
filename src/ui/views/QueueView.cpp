@@ -13,8 +13,10 @@
 #include <QGraphicsOpacityEffect>
 #include <QMimeData>
 #include <QApplication>
+#include <QTimer>
 #include "../../core/ThemeManager.h"
 #include "../services/CoverArtService.h"
+#include "../../platform/macos/MacUtils.h"
 
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
@@ -255,6 +257,11 @@ void QueueView::setupUI()
     // ── Finalize scroll area ───────────────────────────────────────
     m_scrollArea->setWidget(scrollContent);
     mainLayout->addWidget(m_scrollArea, 1);
+
+    // macOS: allow clicks on inactive window to pass through
+    QTimer::singleShot(0, this, [this]() {
+        enableAcceptsFirstMouse(m_scrollArea);
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════════

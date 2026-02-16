@@ -47,12 +47,13 @@
     }
     else if ([name isEqualToString:@"nowPlaying"]) {
         NSDictionary* dict = (NSDictionary*)body;
+        QString songId  = QString::fromNSString(dict[@"songId"] ?: @"");
         QString title   = QString::fromNSString(dict[@"title"] ?: @"");
         QString artist  = QString::fromNSString(dict[@"artist"] ?: @"");
         QString album   = QString::fromNSString(dict[@"album"] ?: @"");
         double duration = [dict[@"duration"] doubleValue];
-        QMetaObject::invokeMethod(p, [p, title, artist, album, duration]() {
-            p->onNowPlayingChanged(title, artist, album, duration);
+        QMetaObject::invokeMethod(p, [p, songId, title, artist, album, duration]() {
+            p->onNowPlayingChanged(songId, title, artist, album, duration);
         }, Qt::QueuedConnection);
     }
     else if ([name isEqualToString:@"playbackTime"]) {
@@ -95,6 +96,23 @@
         // Handled via evaluateJavaScript completion — log only
         QString result = QString::fromNSString([body description]);
         qDebug() << "[MusicKit JS] tokenInjectionResult:" << result;
+    }
+    else if ([name isEqualToString:@"playProgress"]) {
+        NSDictionary* dict = (NSDictionary*)body;
+        QString stage = QString::fromNSString(dict[@"stage"] ?: @"");
+        QString songId = QString::fromNSString(dict[@"songId"] ?: @"");
+        QMetaObject::invokeMethod(p, [p, stage, songId]() {
+            qDebug() << "[MusicKitPlayer] Play progress:" << stage << "songId:" << songId;
+        }, Qt::QueuedConnection);
+    }
+    else if ([name isEqualToString:@"playError"]) {
+        NSDictionary* dict = (NSDictionary*)body;
+        QString errMsg = QString::fromNSString(dict[@"message"] ?: @"");
+        QString songId = QString::fromNSString(dict[@"songId"] ?: @"");
+        QMetaObject::invokeMethod(p, [p, errMsg, songId]() {
+            qDebug() << "[MusicKitPlayer] Play error:" << errMsg << "songId:" << songId;
+            p->onError(QStringLiteral("Play error: ") + errMsg);
+        }, Qt::QueuedConnection);
     }
     else if ([name isEqualToString:@"authWillPrompt"]) {
         qDebug() << "[MusicKitPlayer] Auth prompt incoming — bringing app to front";
@@ -284,7 +302,9 @@ void MusicKitPlayer::cleanup()
     m_initialized = false;
     m_webViewReady = false;
     m_amState = AMState::Idle;
+    m_amPlayState = AMPlayState::Idle;
     m_pendingPlay.reset();
+    m_pendingPlaySongId.clear();
     if (m_stateTimeoutTimer) m_stateTimeoutTimer->stop();
     qDebug() << "[MusicKitPlayer] cleanup DONE";
 }
@@ -303,6 +323,17 @@ void MusicKitPlayer::webViewDidFinishLoad()
     qDebug() << "[MusicKitPlayer] WKWebView ready (token embedded in HTML:"
              << !m_pendingUserToken.isEmpty() << ") elapsed:"
              << m_loadTimer.elapsed() << "ms";
+}
+
+// ── preInitialize — eager startup from main.cpp ─────────────────────
+void MusicKitPlayer::preInitialize()
+{
+    if (m_initialized) {
+        qDebug() << "[MusicKitPlayer] preInitialize: already initialized";
+        return;
+    }
+    qDebug() << "[MusicKitPlayer] preInitialize: pre-warming WebView";
+    ensureWebView();
 }
 
 // ── ensureWebView — lazy initialization ─────────────────────────────
@@ -335,7 +366,7 @@ void MusicKitPlayer::ensureWebView()
             @"musicKitReady", @"playbackState", @"nowPlaying",
             @"playbackTime", @"error", @"authStatus", @"playbackStarted",
             @"tokenExpired", @"playbackEnded", @"log", @"tokenInjectionResult",
-            @"authWillPrompt"
+            @"authWillPrompt", @"playProgress", @"playError"
         ];
         for (NSString* name in handlerNames) {
             [ucc addScriptMessageHandler:m_wk->handler name:name];
@@ -439,6 +470,17 @@ void MusicKitPlayer::play(const QString& songId)
 // ── executePlay — internal, does the actual JS work ─────────────────
 void MusicKitPlayer::executePlay(const QString& songId)
 {
+    // Track async play state for cross-source cancellation
+    if (m_amPlayState == AMPlayState::Pending ||
+        m_amPlayState == AMPlayState::Buffering) {
+        qDebug() << "[MusicKitPlayer] Cancelling previous pending play:"
+                 << m_pendingPlaySongId;
+    }
+    m_amPlayState = AMPlayState::Pending;
+    m_pendingPlaySongId = songId;
+    m_playRequestTimer.start();
+    emit amPlayStateChanged(m_amPlayState);
+
     setAMState(AMState::Loading);
     qDebug() << "[MusicKitPlayer] Calling JS playSong()...";
     runJS(QStringLiteral("playSong('%1')").arg(songId));
@@ -477,6 +519,26 @@ void MusicKitPlayer::stop()
     setAMState(AMState::Stopping);
     if (m_ready)
         runJS(QStringLiteral("stopPlayback()"));
+}
+
+// ── cancelPendingPlay — abort async play before it starts ───────────
+void MusicKitPlayer::cancelPendingPlay()
+{
+    if (m_amPlayState == AMPlayState::Idle ||
+        m_amPlayState == AMPlayState::Cancelled) {
+        return;  // Nothing to cancel
+    }
+
+    qDebug() << "[MusicKitPlayer] CANCELLING play:" << m_pendingPlaySongId
+             << "after" << m_playRequestTimer.elapsed() << "ms"
+             << "(was" << static_cast<int>(m_amPlayState) << ")";
+
+    m_amPlayState = AMPlayState::Cancelled;
+    m_pendingPlaySongId.clear();
+    emit amPlayStateChanged(m_amPlayState);
+
+    // Tell MusicKit to stop — handles both queued and in-progress plays
+    stop();
 }
 
 // ── seek ────────────────────────────────────────────────────────────
@@ -583,10 +645,25 @@ void MusicKitPlayer::setAMState(AMState newState)
 
     switch (newState) {
     case AMState::Playing:
+        // Sync AMPlayState
+        if (m_amPlayState == AMPlayState::Pending ||
+            m_amPlayState == AMPlayState::Buffering) {
+            m_amPlayState = AMPlayState::Playing;
+            qDebug() << "[MusicKitPlayer] Now playing, took"
+                     << m_playRequestTimer.elapsed() << "ms";
+            emit amPlayStateChanged(m_amPlayState);
+        }
         emit playbackStateChanged(true);
         m_stateTimeoutTimer->stop();
         break;
     case AMState::Idle:
+        // Sync AMPlayState
+        if (m_amPlayState == AMPlayState::Playing ||
+            m_amPlayState == AMPlayState::Pending ||
+            m_amPlayState == AMPlayState::Buffering) {
+            m_amPlayState = AMPlayState::Idle;
+            emit amPlayStateChanged(m_amPlayState);
+        }
         m_stateTimeoutTimer->stop();
         if (m_pendingPlay) {
             // Don't emit false — about to play next song
@@ -596,6 +673,11 @@ void MusicKitPlayer::setAMState(AMState newState)
         }
         break;
     case AMState::Loading:
+        // Sync AMPlayState to Buffering if transitioning from Pending
+        if (m_amPlayState == AMPlayState::Pending) {
+            m_amPlayState = AMPlayState::Buffering;
+            emit amPlayStateChanged(m_amPlayState);
+        }
         startStateTimeout(30000);  // MusicKit DRM + CDN can take 15-20s
         break;
     case AMState::Stalled:
@@ -612,6 +694,17 @@ void MusicKitPlayer::processStateTransition(int mkState)
     // MusicKit states:
     // 0=none, 1=loading, 2=playing, 3=paused, 4=stopped,
     // 5=ended, 6=seeking, 7=waiting, 8=stalled, 9=completed
+
+    // ── Cross-source cancellation guard ─────────────────────────────
+    // If play was cancelled (user switched to local), reject any late
+    // MusicKit state transitions that would start playback
+    if (m_amPlayState == AMPlayState::Cancelled && mkState == 2) {
+        qDebug() << "[MusicKitPlayer] Play arrived but was CANCELLED — stopping immediately";
+        runJS(QStringLiteral("stopPlayback()"));
+        m_amPlayState = AMPlayState::Idle;
+        emit amPlayStateChanged(m_amPlayState);
+        return;
+    }
 
     switch (m_amState) {
 
@@ -694,6 +787,16 @@ void MusicKitPlayer::onStateTimeout()
              << stateNames[static_cast<int>(m_amState)] << "— forcing Idle";
     m_amState = AMState::Idle;  // bypass setAMState to avoid re-entrant timeout
     m_stateTimeoutTimer->stop();
+
+    // Reset AMPlayState on timeout
+    if (m_amPlayState != AMPlayState::Idle &&
+        m_amPlayState != AMPlayState::Cancelled) {
+        m_amPlayState = AMPlayState::Error;
+        emit amPlayStateChanged(m_amPlayState);
+        m_amPlayState = AMPlayState::Idle;
+        emit amPlayStateChanged(m_amPlayState);
+    }
+
     if (m_pendingPlay) {
         processPendingPlay();
     } else {
@@ -707,10 +810,20 @@ void MusicKitPlayer::onPlaybackEnded()
     emit playbackEnded();
 }
 
-void MusicKitPlayer::onNowPlayingChanged(const QString& title, const QString& artist,
-                                           const QString& album, double duration)
+void MusicKitPlayer::onNowPlayingChanged(const QString& songId, const QString& title,
+                                           const QString& artist, const QString& album,
+                                           double duration)
 {
-    qDebug() << "[MusicKitPlayer] Now playing:" << title << "-" << artist;
+    // Filter stale nowPlaying from a previous/cancelled play
+    if (!m_pendingPlaySongId.isEmpty() && !songId.isEmpty()
+        && songId != m_pendingPlaySongId) {
+        qDebug() << "[MusicKitPlayer] STALE nowPlaying: got" << songId
+                 << "but requested" << m_pendingPlaySongId << "— ignoring";
+        return;
+    }
+
+    qDebug() << "[MusicKitPlayer] Now playing:" << title << "-" << artist
+             << "(id:" << songId << ")";
     emit nowPlayingChanged(title, artist, album, duration);
 }
 
@@ -722,6 +835,14 @@ void MusicKitPlayer::onPlaybackTimeChanged(double currentTime, double totalTime)
 void MusicKitPlayer::onError(const QString& error)
 {
     qDebug() << "[MusicKitPlayer] Error:" << error;
+
+    // If a play is pending/buffering and we get an error, mark it
+    if (m_amPlayState == AMPlayState::Pending ||
+        m_amPlayState == AMPlayState::Buffering) {
+        m_amPlayState = AMPlayState::Error;
+        emit amPlayStateChanged(m_amPlayState);
+    }
+
     emit errorOccurred(error);
 }
 
@@ -1147,8 +1268,9 @@ async function configureMusicKit() {
         music.addEventListener('nowPlayingItemDidChange', function(event) {
             var item = music.nowPlayingItem;
             if (item) {
-                log('[MusicKit] nowPlayingItemDidChange: ' + item.title);
+                log('[MusicKit] nowPlayingItemDidChange: ' + item.title + ' (id=' + (item.id || 'none') + ')');
                 msg('nowPlaying', {
+                    songId: item.id || '',
                     title: item.title || '',
                     artist: item.artistName || '',
                     album: item.albumName || '',
@@ -1235,39 +1357,73 @@ function getAuthStatus() {
 }
 
 // ── Playback controls ──────────────────────────────────────────
+var __currentPlayId = 0;  // monotonic play request ID for cancellation
+
 async function playSong(songId) {
+    var playId = ++__currentPlayId;
+
     try {
         playbackStartedEmitted = false;
 
         log('[MusicKit] ========================================');
-        log('[MusicKit] playSong called with: ' + songId);
+        log('[MusicKit] playSong called with: ' + songId + ' (playId=' + playId + ')');
         log('[MusicKit] Pre-play diagnostics:');
-        log('[MusicKit]   isAuthorized: ' + music.isAuthorized);
-        log('[MusicKit]   previewOnly: ' + (music.previewOnly || false));
+        log('[MusicKit]   isAuthorized: ' + (music ? music.isAuthorized : 'N/A'));
         log('[MusicKit]   musicUserToken: ' +
-            (music.musicUserToken ? 'present (len=' + music.musicUserToken.length + ')' : 'ABSENT'));
+            (music && music.musicUserToken ? 'present (len=' + music.musicUserToken.length + ')' : 'ABSENT'));
 
         if (!music) {
             log('[MusicKit] music instance is null!');
-            msg('error', 'MusicKit not initialized');
+            msg('playError', { message: 'MusicKit not initialized', songId: songId });
             return;
         }
 
+        // Stop current playback to ensure clean queue state
+        var curState = music.playbackState;
+        if (curState === MusicKit.PlaybackStates.playing ||
+            curState === MusicKit.PlaybackStates.loading ||
+            curState === MusicKit.PlaybackStates.stalled) {
+            log('[MusicKit] Stopping current playback (state=' + curState + ') before new queue');
+            try { await music.stop(); } catch(e) { log('[MusicKit] stop() error (benign): ' + e); }
+        }
+
+        if (playId !== __currentPlayId) {
+            log('[MusicKit] playSong superseded (playId=' + playId + ' current=' + __currentPlayId + ')');
+            return;
+        }
+
+        msg('playProgress', { stage: 'settingQueue', songId: songId });
         log('[MusicKit] Setting queue...');
         await music.setQueue({ song: songId });
+
+        if (playId !== __currentPlayId) {
+            log('[MusicKit] playSong superseded after setQueue (playId=' + playId + ')');
+            return;
+        }
+
+        msg('playProgress', { stage: 'queueSet', songId: songId });
         log('[MusicKit] Calling music.play()...');
         try {
             await music.play();
         } catch (playErr) {
             log('[MusicKit] play() failed: ' + playErr + ' — retrying in 1s...');
             await new Promise(function(r) { setTimeout(r, 1000); });
+            if (playId !== __currentPlayId) return;
             await music.play();
         }
+
+        if (playId !== __currentPlayId) {
+            log('[MusicKit] playSong superseded after play (playId=' + playId + ')');
+            return;
+        }
+
+        msg('playProgress', { stage: 'playResolved', songId: songId });
         log('[MusicKit] music.play() returned, state: ' + music.playbackState);
 
         // Stall recovery: if stuck in loading/stalled after 5s, retry play
+        var stallPlayId = playId;
         setTimeout(function() {
-            if (!music) return;
+            if (!music || stallPlayId !== __currentPlayId) return;
             var st = music.playbackState;
             if (st === MusicKit.PlaybackStates.stalled ||
                 st === MusicKit.PlaybackStates.loading) {
@@ -1280,7 +1436,7 @@ async function playSong(songId) {
 
     } catch (err) {
         log('[MusicKit] PLAY ERROR: ' + err.name + ': ' + err.message);
-        msg('error', 'Play error: ' + err.name + ': ' + err.message);
+        msg('playError', { message: err.name + ': ' + err.message, songId: songId });
     }
 }
 

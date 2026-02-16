@@ -121,6 +121,12 @@ void PlaybackState::connectToMusicKitPlayer()
 
     connect(mkp, &MusicKitPlayer::playbackStateChanged, this, [this](bool playing) {
         if (m_currentSource != AppleMusic) return;
+        // Ignore stale "playing" from a cancelled AM play
+        auto* mkp = MusicKitPlayer::instance();
+        if (playing && mkp->amPlayState() == MusicKitPlayer::AMPlayState::Cancelled) {
+            qDebug() << "[PlaybackState] Ignoring stale AM playbackStateChanged(true) — was cancelled";
+            return;
+        }
         if (playing != m_playing) {
             m_playing = playing;
             emit playStateChanged(m_playing);
@@ -328,9 +334,15 @@ void PlaybackState::playTrack(const Track& track)
         return;
     }
 
-    // Local playback
+    // Local playback — cancel any pending/active Apple Music play
     if (m_currentSource == AppleMusic) {
-        MusicKitPlayer::instance()->stop();
+        auto* mkp = MusicKitPlayer::instance();
+        if (mkp->amPlayState() != MusicKitPlayer::AMPlayState::Idle) {
+            qDebug() << "[PlaybackState] Cancelling Apple Music play — switching to local";
+            mkp->cancelPendingPlay();
+        } else {
+            mkp->stop();
+        }
     }
     m_currentSource = Local;
 

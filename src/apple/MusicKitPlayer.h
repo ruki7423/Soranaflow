@@ -19,9 +19,24 @@ public:
 
     bool isReady() const { return m_ready; }
 
+    // Pre-warm WebView at startup (call from main.cpp after window shown)
+    void preInitialize();
+
     // State machine states
     enum class AMState { Idle, Loading, Playing, Stalled, Stopping };
     AMState amState() const { return m_amState; }
+
+    // Async play state tracking (for cross-source cancellation)
+    enum class AMPlayState {
+        Idle,       // No play in progress
+        Pending,    // playSong called, waiting for MusicKit
+        Buffering,  // MusicKit started loading
+        Playing,    // Actually playing audio
+        Error,      // Play failed
+        Cancelled   // User switched source before play completed
+    };
+    AMPlayState amPlayState() const { return m_amPlayState; }
+    void cancelPendingPlay();
 
     // Playback controls
     Q_INVOKABLE void play(const QString& songId);
@@ -46,8 +61,9 @@ public:
     // Called from JS via WKScriptMessageHandler
     void onMusicKitReady();
     void onMusicKitStateChanged(int state);
-    void onNowPlayingChanged(const QString& title, const QString& artist,
-                              const QString& album, double duration);
+    void onNowPlayingChanged(const QString& songId, const QString& title,
+                              const QString& artist, const QString& album,
+                              double duration);
     void onPlaybackTimeChanged(double currentTime, double totalTime);
     void onError(const QString& error);
     void onAuthStatusChanged(const QString& statusJson);
@@ -69,6 +85,7 @@ signals:
     void playbackEnded();
     void authorizationPending();   // system "Allow Access" dialog is about to appear
     void amStateChanged(int state);  // 0=Idle,1=Loading,2=Playing,3=Stalled,4=Stopping
+    void amPlayStateChanged(AMPlayState state);
 
 private:
     explicit MusicKitPlayer(QObject* parent = nullptr);
@@ -103,4 +120,9 @@ private:
     QString m_pendingSongId;
     QString m_pendingUserToken;
     QElapsedTimer m_loadTimer;
+
+    // Async play state
+    AMPlayState m_amPlayState = AMPlayState::Idle;
+    QString m_pendingPlaySongId;
+    QElapsedTimer m_playRequestTimer;
 };

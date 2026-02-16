@@ -9,6 +9,9 @@
 #include <QTimer>
 #include <QTranslator>
 #include <QLocale>
+#include <QStandardPaths>
+#include <QDateTime>
+#include <QMutex>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -162,10 +165,43 @@ int main(int argc, char* argv[]) {
 #endif
 
     QApplication app(argc, argv);
+
+    // ── File logging for Finder-launch diagnostics ──────────────────
+    static QFile s_logFile;
+    {
+        QString logPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                          + QStringLiteral("/soranaflow-debug.log");
+        s_logFile.setFileName(logPath);
+        s_logFile.open(QIODevice::WriteOnly | QIODevice::Truncate);
+
+        qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& msg) {
+            static QMutex mtx;
+            QMutexLocker lock(&mtx);
+            QString line = QStringLiteral("[%1] %2\n")
+                .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")), msg);
+            QByteArray utf8 = line.toUtf8();
+            s_logFile.write(utf8);
+            s_logFile.flush();
+            fprintf(stderr, "%s", utf8.constData());
+        });
+
+        qDebug() << "=== SoranaFlow launched ==="
+                 << "Log:" << logPath
+                 << "PID:" << QCoreApplication::applicationPid();
+    }
+
     app.setOrganizationDomain("soranaflow.com");
     app.setOrganizationName("SoranaFlow");
     app.setApplicationName("Sorana Flow");
     app.setApplicationVersion(APP_VERSION);
+
+    // Track app activation state (crucial for Finder launch diagnosis)
+    QObject::connect(&app, &QApplication::applicationStateChanged,
+        [](Qt::ApplicationState state) {
+        qDebug() << "[App] State changed:" << static_cast<int>(state)
+                 << (state == Qt::ApplicationActive ? "ACTIVE" :
+                     state == Qt::ApplicationInactive ? "INACTIVE" : "HIDDEN");
+    });
 
     // Single-instance guard — prevent duplicate launches
     QLockFile lockFile(QDir::tempPath() + QStringLiteral("/soranaflow.lock"));
@@ -273,7 +309,8 @@ int main(int argc, char* argv[]) {
     window.show();
     app.processEvents();   // Force first paint
 
-    std::cout << "[STARTUP] MainWindow shown" << std::endl;
+    qDebug() << "[STARTUP] MainWindow shown, isActiveWindow=" << window.isActiveWindow()
+             << "appState=" << static_cast<int>(app.applicationState());
 
     // ── Phase 1: Audio engine (deferred, after window visible) ───────
     QTimer::singleShot(0, [&window]() {

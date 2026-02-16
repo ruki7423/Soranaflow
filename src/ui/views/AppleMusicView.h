@@ -110,4 +110,9 @@ private:
 
     // Music User Token
     QString m_musicUserToken;
+
+    // Custom double-click detection (immune to macOS activation timing)
+    QObject* m_lastClickedRow = nullptr;
+    qint64 m_lastClickTime = 0;
+    qint64 m_lastPlayTime = 0;
 };
