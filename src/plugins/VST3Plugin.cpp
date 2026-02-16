@@ -1,6 +1,7 @@
 #include "VST3Plugin.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/base/ibstream.h"
 
 #include <QWidget>
@@ -81,6 +82,77 @@ private:
 
 // Single host context for all VST3 plugin instances
 static Steinberg::Vst::HostApplication g_hostApp;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ComponentHandlerAdapter::restartComponent
+// ═══════════════════════════════════════════════════════════════════════
+
+tresult PLUGIN_API ComponentHandlerAdapter::restartComponent(int32 flags)
+{
+    qDebug() << "VST3: restartComponent requested, flags:" << flags;
+    restartRequested.store(true, std::memory_order_release);
+    return kResultOk;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Lightweight IParameterChanges for feeding GUI edits into process()
+//  Stack-allocated, no ref-counting — lives only during one process() call
+// ═══════════════════════════════════════════════════════════════════════
+
+class SingleParamValueQueue : public IParamValueQueue
+{
+public:
+    tresult PLUGIN_API queryInterface(const TUID, void** obj) override
+    { if (obj) *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    ParamID PLUGIN_API getParameterId() override { return m_id; }
+    int32 PLUGIN_API getPointCount() override { return 1; }
+    tresult PLUGIN_API getPoint(int32 index, int32& sampleOffset, ParamValue& value) override
+    {
+        if (index != 0) return kResultFalse;
+        sampleOffset = 0;
+        value = m_value;
+        return kResultOk;
+    }
+    tresult PLUGIN_API addPoint(int32, ParamValue, int32&) override
+    { return kResultFalse; }
+
+    ParamID m_id = 0;
+    ParamValue m_value = 0.0;
+};
+
+class HostParameterChanges : public IParameterChanges
+{
+public:
+    tresult PLUGIN_API queryInterface(const TUID, void** obj) override
+    { if (obj) *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    int32 PLUGIN_API getParameterCount() override { return m_count; }
+    IParamValueQueue* PLUGIN_API getParameterData(int32 index) override
+    {
+        if (index < 0 || index >= m_count) return nullptr;
+        return &m_queues[index];
+    }
+    IParamValueQueue* PLUGIN_API addParameterData(const ParamID&, int32&) override
+    { return nullptr; }
+
+    static constexpr int MAX_PARAMS = 64;
+    SingleParamValueQueue m_queues[MAX_PARAMS];
+    int32 m_count = 0;
+
+    void reset() { m_count = 0; }
+    void add(ParamID id, ParamValue value) {
+        if (m_count < MAX_PARAMS) {
+            m_queues[m_count].m_id = id;
+            m_queues[m_count].m_value = value;
+            m_count++;
+        }
+    }
+};
 
 // ═══════════════════════════════════════════════════════════════════════
 //  PlugFrameAdapter — resize callback for plugin editor
@@ -576,12 +648,25 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     outputBus.silenceFlags = 0;
     outputBus.channelBuffers32 = m_outputPtrs.data();
 
-    // Provide ProcessContext — many plugins (e.g. iZotope Ozone) require it
+    // Provide ProcessContext — many plugins (e.g. iZotope Ozone, Crave EQ) require it
     ProcessContext processContext{};
-    processContext.state = ProcessContext::kPlaying;
+    processContext.state = ProcessContext::kPlaying
+                         | ProcessContext::kTempoValid
+                         | ProcessContext::kTimeSigValid;
     processContext.sampleRate = m_sampleRate;
     processContext.projectTimeSamples = m_transportPos;
+    processContext.tempo = 120.0;
+    processContext.timeSigNumerator = 4;
+    processContext.timeSigDenominator = 4;
     m_transportPos += frames;
+
+    // Drain pending parameter changes from the component handler (GUI edits)
+    HostParameterChanges inputParamChanges;
+    ComponentHandlerAdapter::ParamChange changes[ComponentHandlerAdapter::MAX_CHANGES];
+    int nChanges = m_componentHandler.drainChanges(changes, ComponentHandlerAdapter::MAX_CHANGES);
+    for (int i = 0; i < nChanges; ++i) {
+        inputParamChanges.add(changes[i].id, changes[i].value);
+    }
 
     ProcessData data;
     data.processMode = kRealtime;
@@ -591,7 +676,7 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     data.numOutputs = 1;
     data.inputs = &inputBus;
     data.outputs = &outputBus;
-    data.inputParameterChanges = nullptr;
+    data.inputParameterChanges = (inputParamChanges.m_count > 0) ? &inputParamChanges : nullptr;
     data.outputParameterChanges = nullptr;
     data.inputEvents = nullptr;
     data.outputEvents = nullptr;

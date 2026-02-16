@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <atomic>
+#include <array>
 
 class QWidget;
 
@@ -31,19 +33,49 @@ private:
     QWidget* m_window = nullptr;
 };
 
-// IComponentHandler stub so the controller can report parameter changes.
+// IComponentHandler — receives parameter edits from the plugin controller.
+// Stores pending parameter changes for the next process() call.
 class ComponentHandlerAdapter : public Steinberg::U::ImplementsNonDestroyable<
     Steinberg::U::Directly<Steinberg::Vst::IComponentHandler>>
 {
 public:
     Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override
         { return Steinberg::kResultOk; }
-    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID, Steinberg::Vst::ParamValue) override
-        { return Steinberg::kResultOk; }
+
+    Steinberg::tresult PLUGIN_API performEdit(
+        Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) override
+    {
+        // Store the change for the audio thread to pick up
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_changeCount < MAX_CHANGES) {
+            m_changes[m_changeCount++] = {id, value};
+        }
+        return Steinberg::kResultOk;
+    }
+
     Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override
         { return Steinberg::kResultOk; }
-    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override
-        { return Steinberg::kResultOk; }
+
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override;
+
+    // Drain pending changes (called from audio thread)
+    struct ParamChange { Steinberg::Vst::ParamID id; Steinberg::Vst::ParamValue value; };
+    static constexpr int MAX_CHANGES = 64;
+
+    int drainChanges(ParamChange* out, int maxCount) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        int n = (m_changeCount < maxCount) ? m_changeCount : maxCount;
+        for (int i = 0; i < n; ++i) out[i] = m_changes[i];
+        m_changeCount = 0;
+        return n;
+    }
+
+    std::atomic<bool> restartRequested{false};
+
+private:
+    std::mutex m_mutex;
+    std::array<ParamChange, MAX_CHANGES> m_changes;
+    int m_changeCount = 0;
 };
 
 // Real VST3 plugin loaded via the Steinberg VST3 SDK.
