@@ -511,3 +511,53 @@ float VST2Plugin::getParameter(int index) const
     if (!m_effect || index < 0 || index >= m_effect->num_params) return 0.0f;
     return m_effect->get_parameter(m_effect, index);
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  State Persistence (chunk-based)
+// ═══════════════════════════════════════════════════════════════════════
+
+QByteArray VST2Plugin::saveState() const
+{
+    if (!m_effect) return {};
+
+    // Check if plugin supports chunks
+    if (!(m_effect->flags & VST_EFFECT_FLAG_CHUNKS)) {
+        qDebug() << "[VST2] Plugin does not support chunks:"
+                 << QString::fromStdString(m_name);
+        return {};
+    }
+
+    void* chunk = nullptr;
+    // isPreset=0 → full bank (all programs + params)
+    intptr_t size = const_cast<VST2Plugin*>(this)->dispatcher(
+        VST_EFFECT_OPCODE_GET_CHUNK_DATA, 0, 0, &chunk);
+
+    if (size > 0 && chunk) {
+        qDebug() << "[VST2] Saved state for" << QString::fromStdString(m_name)
+                 << "(" << size << "bytes)";
+        return QByteArray(static_cast<const char*>(chunk), static_cast<int>(size));
+    }
+
+    qWarning() << "[VST2] getChunk returned 0 for" << QString::fromStdString(m_name);
+    return {};
+}
+
+bool VST2Plugin::restoreState(const QByteArray& data)
+{
+    if (!m_effect || data.isEmpty()) return false;
+
+    if (!(m_effect->flags & VST_EFFECT_FLAG_CHUNKS)) {
+        qWarning() << "[VST2] Plugin does not support chunks:"
+                   << QString::fromStdString(m_name);
+        return false;
+    }
+
+    // isPreset=0 → full bank
+    dispatcher(VST_EFFECT_OPCODE_SET_CHUNK_DATA, 0,
+               static_cast<intptr_t>(data.size()),
+               const_cast<char*>(data.constData()));
+
+    qDebug() << "[VST2] Restored state for" << QString::fromStdString(m_name)
+             << "(" << data.size() << "bytes)";
+    return true;
+}

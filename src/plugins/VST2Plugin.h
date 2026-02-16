@@ -46,6 +46,12 @@ public:
     void setParameter(int index, float value) override;
     float getParameter(int index) const override;
 
+    // State persistence (chunk-based)
+    QByteArray saveState() const override;
+    bool restoreState(const QByteArray& data) override;
+
+    std::string getPluginPath() const override { return m_path; }
+
 private:
     static intptr_t hostCallbackStatic(
         vst_effect_t* effect, int32_t opcode,

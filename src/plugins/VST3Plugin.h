@@ -107,6 +107,12 @@ public:
     QWidget* openEditor(QWidget* parent = nullptr);
     void closeEditor();
 
+    // State persistence
+    QByteArray saveState() const override;
+    bool restoreState(const QByteArray& data) override;
+
+    std::string getPluginPath() const override { return m_pluginPath; }
+
     // --- IDSPProcessor interface ---
     void process(float* buf, int frames, int channels) override;
     std::string getName() const override { return m_pluginName; }

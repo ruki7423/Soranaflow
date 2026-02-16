@@ -353,6 +353,37 @@ void MainWindow::initializeDeferred()
             qDebug() << "[STARTUP] VST plugins loaded:" << loaded
                      << "of" << paths.size();
 
+            // Restore saved plugin states
+            if (loaded > 0 && pipeline) {
+                auto* settings = Settings::instance();
+                for (int i = 0; i < pipeline->processorCount(); ++i) {
+                    auto* proc = pipeline->processor(i);
+                    if (!proc) continue;
+
+                    std::string plugPath = proc->getPluginPath();
+                    if (plugPath.empty()) continue;
+
+                    QString path = QString::fromStdString(plugPath);
+                    QString key = QStringLiteral("vst/pluginStates/")
+                        + QString::fromUtf8(path.toUtf8().toBase64());
+                    QByteArray stateB64 = settings->value(key).toByteArray();
+                    if (stateB64.isEmpty()) continue;
+
+                    QByteArray state = QByteArray::fromBase64(stateB64);
+                    if (state.isEmpty()) continue;
+
+                    bool ok = proc->restoreState(state);
+                    if (ok) {
+                        qDebug() << "[STARTUP] Restored plugin state:"
+                                 << QString::fromStdString(proc->getName())
+                                 << "(" << state.size() << "bytes)";
+                    } else {
+                        qWarning() << "[STARTUP] Failed to restore state for"
+                                   << QString::fromStdString(proc->getName());
+                    }
+                }
+            }
+
             if (!failedPlugins.isEmpty()) {
                 QTimer::singleShot(500, this, [this, failedPlugins]() {
                     StyledMessageBox::warning(this, QStringLiteral("VST Plugin Loading"),
@@ -908,6 +939,33 @@ void MainWindow::performQuit()
 
     VST3Host::instance()->closeAllEditors();
     QThread::msleep(50);
+
+    // Save all VST plugin states before unloading
+    {
+        auto* pipeline = AudioEngine::instance()->dspPipeline();
+        auto* settings = Settings::instance();
+        if (pipeline) {
+            for (int i = 0; i < pipeline->processorCount(); ++i) {
+                auto* proc = pipeline->processor(i);
+                if (!proc) continue;
+
+                std::string plugPath = proc->getPluginPath();
+                if (plugPath.empty()) continue;
+
+                QByteArray state = proc->saveState();
+                if (state.isEmpty()) continue;
+
+                QString path = QString::fromStdString(plugPath);
+                QString key = QStringLiteral("vst/pluginStates/")
+                    + QString::fromUtf8(path.toUtf8().toBase64());
+                settings->setValue(key, state.toBase64());
+
+                qDebug() << "[SHUTDOWN] Saved plugin state:"
+                         << QString::fromStdString(proc->getName())
+                         << "(" << state.size() << "bytes)";
+            }
+        }
+    }
 
 #ifdef Q_OS_MAC
     MacMediaIntegration::instance().clearNowPlaying();

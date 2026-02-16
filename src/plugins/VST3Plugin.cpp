@@ -11,6 +11,7 @@
 #include <QCheckBox>
 #include <QApplication>
 #include <QDebug>
+#include <QDataStream>
 #include <cstring>
 
 using namespace Steinberg;
@@ -23,6 +24,14 @@ using namespace Steinberg::Vst;
 class MemoryStream : public IBStream
 {
 public:
+    MemoryStream() = default;
+    MemoryStream(const void* data, size_t size)
+        : m_data(static_cast<const uint8_t*>(data),
+                 static_cast<const uint8_t*>(data) + size) {}
+
+    const uint8_t* getData() const { return m_data.data(); }
+    size_t getSize() const { return m_data.size(); }
+
     // FUnknown — stack-allocated, no real ref-counting needed
     tresult PLUGIN_API queryInterface(const TUID, void** obj) override
     { if (obj) *obj = nullptr; return kNoInterface; }
@@ -951,4 +960,88 @@ void VST3Plugin::showPlaceholderEditor(QWidget* parent)
     window->show();
     window->raise();
     window->activateWindow();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  State Persistence
+// ═══════════════════════════════════════════════════════════════════════
+
+QByteArray VST3Plugin::saveState() const
+{
+    if (!m_loaded || !m_component) return {};
+
+    // Save component state
+    MemoryStream componentStream;
+    tresult compResult = m_component->getState(&componentStream);
+    if (compResult != kResultOk) {
+        qWarning() << "[VST3] Failed to get component state for"
+                   << QString::fromStdString(m_pluginName) << "result:" << compResult;
+        return {};
+    }
+
+    // Save controller state (if available)
+    MemoryStream controllerStream;
+    if (m_controller) {
+        m_controller->getState(&controllerStream);
+        // Failure OK — some plugins don't support separate controller state
+    }
+
+    // Pack both into single QByteArray via QDataStream
+    QByteArray data;
+    QDataStream ds(&data, QIODevice::WriteOnly);
+    ds << QByteArray(reinterpret_cast<const char*>(componentStream.getData()),
+                     static_cast<int>(componentStream.getSize()));
+    ds << QByteArray(reinterpret_cast<const char*>(controllerStream.getData()),
+                     static_cast<int>(controllerStream.getSize()));
+
+    qDebug() << "[VST3] Saved state for" << QString::fromStdString(m_pluginName)
+             << "(" << data.size() << "bytes, component:"
+             << componentStream.getSize() << "controller:"
+             << controllerStream.getSize() << ")";
+    return data;
+}
+
+bool VST3Plugin::restoreState(const QByteArray& data)
+{
+    if (!m_loaded || !m_component || data.isEmpty()) return false;
+
+    QDataStream ds(data);
+    QByteArray componentData, controllerData;
+    ds >> componentData >> controllerData;
+
+    if (componentData.isEmpty()) {
+        qWarning() << "[VST3] Empty component state for"
+                   << QString::fromStdString(m_pluginName);
+        return false;
+    }
+
+    // Restore component state
+    MemoryStream componentStream(componentData.constData(),
+                                  static_cast<size_t>(componentData.size()));
+    tresult compResult = m_component->setState(&componentStream);
+    if (compResult != kResultOk) {
+        qWarning() << "[VST3] Failed to restore component state for"
+                   << QString::fromStdString(m_pluginName) << "result:" << compResult;
+        return false;
+    }
+
+    // Restore controller state (if available)
+    if (m_controller && !controllerData.isEmpty()) {
+        MemoryStream controllerStream(controllerData.constData(),
+                                       static_cast<size_t>(controllerData.size()));
+        m_controller->setState(&controllerStream);
+    }
+
+    // Sync controller with restored component state
+    if (m_controller) {
+        MemoryStream syncStream;
+        if (m_component->getState(&syncStream) == kResultOk) {
+            syncStream.seek(0, IBStream::kIBSeekSet, nullptr);
+            m_controller->setComponentState(&syncStream);
+        }
+    }
+
+    qDebug() << "[VST3] Restored state for" << QString::fromStdString(m_pluginName)
+             << "(" << data.size() << "bytes)";
+    return true;
 }

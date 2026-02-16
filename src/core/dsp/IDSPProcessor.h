@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstdint>
 
+#include <QByteArray>
+
 // Parameter descriptor for DSP processors
 struct DSPParameter {
     std::string name;
@@ -43,4 +45,11 @@ public:
 
     // Reset internal state (e.g., filter histories)
     virtual void reset() {}
+
+    // State persistence — override in plugin subclasses
+    virtual QByteArray saveState() const { return {}; }
+    virtual bool restoreState(const QByteArray& data) { (void)data; return false; }
+
+    // Plugin path for identification — override in plugin subclasses
+    virtual std::string getPluginPath() const { return {}; }
 };
