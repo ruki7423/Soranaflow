@@ -1250,8 +1250,22 @@ SignalPathInfo AudioEngine::getSignalPath() const
             state.gainDb = gain->gainDb();
         }
         auto* eq = m_dspPipeline->equalizerProcessor();
-        if (eq) {
-            state.eqEnabled = eq->isEnabled();
+        if (eq && eq->isEnabled()) {
+            // Only report EQ as enabled if at least one band has audible effect
+            bool hasEffect = false;
+            for (int i = 0; i < eq->activeBands(); ++i) {
+                auto band = eq->getBand(i);
+                if (!band.enabled) continue;
+                // Peak/Shelf filters: no effect at 0 dB gain
+                if (band.type == EQBand::Peak || band.type == EQBand::LowShelf
+                    || band.type == EQBand::HighShelf) {
+                    if (std::abs(band.gainDb) > 0.01f) { hasEffect = true; break; }
+                } else {
+                    // LowPass, HighPass, Notch, BandPass always filter
+                    hasEffect = true; break;
+                }
+            }
+            state.eqEnabled = hasEffect;
         }
         for (int i = 0; i < m_dspPipeline->processorCount(); ++i) {
             auto* proc = m_dspPipeline->processor(i);
