@@ -25,6 +25,13 @@
 
 ---
 
+## What's New (v1.7.7)
+
+### Bug Fixes
+- Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`), causing macOS to block loading third-party VST3 plugins
+
+---
+
 ## What's New (v1.7.6)
 
 ### Internal Quality
@@ -169,7 +176,7 @@
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.7.6](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.6/SoranaFlow-1.7.6.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.7.7](https://github.com/ruki7423/Soranaflow/releases/download/v1.7.7/SoranaFlow-1.7.7.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -204,13 +211,17 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 27 (v1.0.0 → v1.7.6) |
+| GitHub Releases | 28 (v1.0.0 → v1.7.7) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.7.7 — VST3 Plugin Activation Fix
+
+- Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`)
 
 ### v1.7.6 — Internal Quality & Test Infrastructure
 
