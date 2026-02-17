@@ -706,6 +706,16 @@ void VST3Plugin::process(float* buf, int frames, int channels)
 
 void VST3Plugin::prepare(double sampleRate, int channels)
 {
+    // Skip redundant deactivate/reactivate cycle when settings match.
+    // loadFromPath() already activates the plugin; calling prepare() again
+    // with the same rate/channels triggers a rapid activate→deactivate→activate
+    // transition that some plugins (e.g. hardware-interfacing ones) can't handle,
+    // causing the main thread to hang in setActive(true).
+    if (m_loaded && m_processor &&
+        m_sampleRate == sampleRate && m_channels == channels) {
+        return;
+    }
+
     m_sampleRate = sampleRate;
     m_channels = channels;
 

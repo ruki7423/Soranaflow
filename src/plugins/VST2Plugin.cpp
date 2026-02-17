@@ -328,6 +328,10 @@ void VST2Plugin::process(float* buf, int frames, int channels)
 
 void VST2Plugin::prepare(double sampleRate, int channels)
 {
+    // Skip redundant suspend/resume when settings match (same fix as VST3Plugin)
+    if (m_effect && m_sampleRate == sampleRate && m_channels == channels)
+        return;
+
     m_sampleRate = sampleRate;
     m_channels = channels;
 
