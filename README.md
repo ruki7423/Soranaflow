@@ -25,13 +25,12 @@
 
 ---
 
-## What's New (v1.8.0)
-
-### New Features
-- **Composer tag support** — Composer metadata is now read from audio files (FLAC, MP3, AAC, AIFF, WAV, DSF/DFF), stored in the library database, and displayed in the track details panel
+## What's New (v1.8.1)
 
 ### Bug Fixes
-- **VST plugin stability** — Fixed a freeze that could occur when loading VST2/VST3 plugins during playback
+- **VST instrument bypass** — Instrument/synth VST plugins (e.g. Serum 2) no longer silence audio output. They are bypassed in the audio chain since they require MIDI input. Effect plugins continue to work normally.
+- **DAC fallback** — Audio output now falls back to system default when a saved external DAC is disconnected on launch
+- **VST3 state restore** — Improved state restore ordering to follow the VST3 spec
 
 ### Support
 If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
@@ -198,7 +197,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.8.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.8.0/SoranaFlow-1.8.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.8.1](https://github.com/ruki7423/Soranaflow/releases/download/v1.8.1/SoranaFlow-1.8.1.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -233,13 +232,19 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 32 (v1.0.0 → v1.8.0) |
+| GitHub Releases | 33 (v1.0.0 → v1.8.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.8.1 — VST Instrument Bypass + DAC Fallback
+
+- Instrument/synth VST plugins no longer silence audio
+- DAC fallback to system default on disconnect
+- VST3 state restore ordering fix
 
 ### v1.8.0 — Composer Tag + VST Stability
 
