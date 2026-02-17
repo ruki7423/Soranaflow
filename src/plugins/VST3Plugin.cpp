@@ -1025,6 +1025,17 @@ bool VST3Plugin::restoreState(const QByteArray& data)
         return false;
     }
 
+    // VST3 spec: setState() must be called while the plugin is NOT active/processing.
+    // Calling setState() on an active plugin causes many plugins to enter an
+    // undefined state (silent output, reset buffers, stale processing).
+    bool wasProcessing = m_processing;
+    if (wasProcessing && m_processor) {
+        m_processor->setProcessing(false);
+    }
+    if (m_component) {
+        m_component->setActive(false);
+    }
+
     // Restore component state
     MemoryStream componentStream(componentData.constData(),
                                   static_cast<size_t>(componentData.size()));
@@ -1032,6 +1043,9 @@ bool VST3Plugin::restoreState(const QByteArray& data)
     if (compResult != kResultOk) {
         qWarning() << "[VST3] Failed to restore component state for"
                    << QString::fromStdString(m_pluginName) << "result:" << compResult;
+        // Re-activate even on failure — plugin must return to processing state
+        if (m_component) m_component->setActive(true);
+        if (wasProcessing && m_processor) m_processor->setProcessing(true);
         return false;
     }
 
@@ -1051,7 +1065,19 @@ bool VST3Plugin::restoreState(const QByteArray& data)
         }
     }
 
+    // Re-activate: re-negotiate busses and setup processing in case
+    // the restored state changed the plugin's internal configuration
+    activateBusses();
+    setupProcessing(m_sampleRate, m_maxBlockSize);
+    if (m_component) {
+        m_component->setActive(true);
+    }
+    if (wasProcessing && m_processor) {
+        m_processor->setProcessing(true);
+        m_processing = true;
+    }
+
     qDebug() << "[VST3] Restored state for" << QString::fromStdString(m_pluginName)
-             << "(" << data.size() << "bytes)";
+             << "(" << data.size() << "bytes, deactivated/reactivated)";
     return true;
 }

@@ -556,12 +556,19 @@ bool VST2Plugin::restoreState(const QByteArray& data)
         return false;
     }
 
+    // Suspend before state restore — some plugins reset internal buffers
+    // or enter a broken state if state is set while running
+    dispatcher(VST_EFFECT_OPCODE_SUSPEND_RESUME, 0, 0);
+
     // isPreset=0 → full bank
     dispatcher(VST_EFFECT_OPCODE_SET_CHUNK_DATA, 0,
                static_cast<intptr_t>(data.size()),
                const_cast<char*>(data.constData()));
 
+    // Resume after state restore
+    dispatcher(VST_EFFECT_OPCODE_SUSPEND_RESUME, 0, 1);
+
     qDebug() << "[VST2] Restored state for" << QString::fromStdString(m_name)
-             << "(" << data.size() << "bytes)";
+             << "(" << data.size() << "bytes, suspended/resumed)";
     return true;
 }

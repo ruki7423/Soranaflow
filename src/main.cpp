@@ -325,7 +325,20 @@ int main(int argc, char* argv[]) {
                 if (!info.name.isEmpty()) settings->setOutputDeviceName(info.name);
                 settings->setOutputDeviceId(resolvedId);
             } else if (savedNumericId != 0 || !savedUID.isEmpty()) {
-                qDebug() << "[STARTUP] Saved device not available, using default";
+                // Saved device disconnected — actively set the system default
+                auto defaultDev = adm->defaultOutputDevice();
+                if (defaultDev.deviceId != 0) {
+                    AudioEngine::instance()->setOutputDevice(defaultDev.deviceId);
+                    settings->setOutputDeviceUID(defaultDev.uid);
+                    settings->setOutputDeviceName(defaultDev.name);
+                    settings->setOutputDeviceId(defaultDev.deviceId);
+                    qDebug() << "[STARTUP] Saved device not available, fell back to default:"
+                             << defaultDev.name << "(" << defaultDev.deviceId << ")";
+                } else {
+                    // No default device — use device ID 0 (system default)
+                    AudioEngine::instance()->setOutputDevice(0);
+                    qDebug() << "[STARTUP] Saved device not available, using system default (0)";
+                }
             }
         }
 
