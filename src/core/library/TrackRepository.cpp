@@ -164,8 +164,9 @@ bool TrackRepository::insertTrack(const Track& track,
         "sample_rate, bit_depth, bitrate, cover_url, track_number, disc_number, file_path, "
         "recording_mbid, artist_mbid, album_mbid, release_group_mbid, channel_count, "
         "file_size, file_mtime, album_artist, year, "
-        "replay_gain_track, replay_gain_album, replay_gain_track_peak, replay_gain_album_peak, has_replay_gain) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "replay_gain_track, replay_gain_album, replay_gain_track_peak, replay_gain_album_peak, has_replay_gain, "
+        "composer) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ))) {
         qWarning() << "TrackRepository::insertTrack PREPARE failed:" << q.lastError().text();
         return false;
@@ -201,6 +202,7 @@ bool TrackRepository::insertTrack(const Track& track,
     q.addBindValue(track.replayGainTrackPeak);
     q.addBindValue(track.replayGainAlbumPeak);
     q.addBindValue(track.hasReplayGain ? 1 : 0);
+    q.addBindValue(track.composer);
 
     if (!q.exec()) {
         qWarning() << "TrackRepository::insertTrack failed:" << q.lastError().text();
@@ -238,7 +240,7 @@ bool TrackRepository::updateTrack(const Track& track)
         "recording_mbid = ?, artist_mbid = ?, album_mbid = ?, release_group_mbid = ?, "
         "channel_count = ?, file_size = ?, file_mtime = ?, album_artist = ?, year = ?, "
         "replay_gain_track = ?, replay_gain_album = ?, replay_gain_track_peak = ?, "
-        "replay_gain_album_peak = ?, has_replay_gain = ? "
+        "replay_gain_album_peak = ?, has_replay_gain = ?, composer = ? "
         "WHERE id = ?"
     ));
 
@@ -270,6 +272,7 @@ bool TrackRepository::updateTrack(const Track& track)
     q.addBindValue(track.replayGainTrackPeak);
     q.addBindValue(track.replayGainAlbumPeak);
     q.addBindValue(track.hasReplayGain ? 1 : 0);
+    q.addBindValue(track.composer);
     q.addBindValue(track.id);
 
     if (!q.exec()) {
@@ -398,7 +401,7 @@ QVector<TrackIndex> TrackRepository::allTrackIndexes() const
     QSqlQuery q(*m_ctx->readDb);
     q.exec(QStringLiteral(
         "SELECT id, title, artist, album, duration, format, sample_rate, bit_depth, "
-        "track_number, disc_number, file_path, r128_loudness, r128_peak, album_artist "
+        "track_number, disc_number, file_path, r128_loudness, r128_peak, album_artist, composer "
         "FROM tracks ORDER BY artist, album, disc_number, track_number"));
     result.reserve(100000);
     while (q.next()) {
@@ -418,6 +421,7 @@ QVector<TrackIndex> TrackRepository::allTrackIndexes() const
         ti.r128Peak     = q.value(12).toDouble();
         ti.hasR128      = (ti.r128Loudness != 0.0);
         ti.albumArtist  = pool.intern(q.value(13).toString());  // pooled
+        ti.composer     = pool.intern(q.value(14).toString());  // pooled
         result.append(std::move(ti));
     }
     qDebug() << "[TIMING] allTrackIndexes:" << result.size() << "tracks in" << t.elapsed() << "ms";
@@ -525,8 +529,8 @@ void TrackRepository::rebuildFTSIndex()
     m_ctx->writeDb->transaction();
     q.exec(QStringLiteral("DELETE FROM tracks_fts"));
     q.exec(QStringLiteral(
-        "INSERT INTO tracks_fts(rowid, title, artist, album) "
-        "SELECT rowid, title, artist, album FROM tracks"
+        "INSERT INTO tracks_fts(rowid, title, artist, album, composer) "
+        "SELECT rowid, title, artist, album, composer FROM tracks"
     ));
     m_ctx->writeDb->commit();
     qDebug() << "[TIMING] rebuildFTSIndex internal:" << t.elapsed() << "ms";

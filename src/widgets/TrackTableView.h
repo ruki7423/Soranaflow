@@ -16,6 +16,7 @@ enum class TrackColumn {
     Artist,
     AlbumArtist,
     Album,
+    Composer,
     Format,
     Duration
 };
@@ -29,7 +30,7 @@ struct TrackTableConfig {
 inline TrackTableConfig libraryConfig() {
     return { QStringLiteral("library"),
              { TrackColumn::Number, TrackColumn::Title, TrackColumn::Artist,
-               TrackColumn::AlbumArtist, TrackColumn::Album,
+               TrackColumn::AlbumArtist, TrackColumn::Album, TrackColumn::Composer,
                TrackColumn::Format, TrackColumn::Duration } };
 }
 

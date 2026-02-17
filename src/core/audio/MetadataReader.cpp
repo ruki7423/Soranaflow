@@ -84,6 +84,12 @@ std::optional<Track> MetadataReader::readTrack(const QString& filePath)
             track.albumArtist = QString::fromStdString(vals.front().to8Bit(true));
     }
 
+    if (props.contains("COMPOSER")) {
+        auto vals = props["COMPOSER"];
+        if (!vals.isEmpty())
+            track.composer = QString::fromStdString(vals.front().to8Bit(true));
+    }
+
     if (props.contains("DISCNUMBER")) {
         auto vals = props["DISCNUMBER"];
         if (!vals.isEmpty()) {

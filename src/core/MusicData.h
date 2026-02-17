@@ -47,6 +47,7 @@ struct Track {
     QString artist;
     QString albumArtist;  // ALBUMARTIST tag — used for compilations/VA albums
     QString album;
+    QString composer;     // COMPOSER tag — for classical/soundtrack
     QString albumId;
     QString artistId;
     int     duration = 0;   // seconds
@@ -87,6 +88,7 @@ struct TrackIndex {
     QString artist;
     QString albumArtist;  // empty → fall back to artist for display/sort
     QString album;
+    QString composer;
     int     duration = 0;
     AudioFormat format = AudioFormat::FLAC;
     QString sampleRate;
@@ -107,6 +109,7 @@ inline Track trackFromIndex(const TrackIndex& idx) {
     t.artist = idx.artist;
     t.albumArtist = idx.albumArtist;
     t.album = idx.album;
+    t.composer = idx.composer;
     t.duration = idx.duration;
     t.format = idx.format;
     t.sampleRate = idx.sampleRate;
@@ -121,8 +124,8 @@ inline Track trackFromIndex(const TrackIndex& idx) {
 }
 
 inline TrackIndex indexFromTrack(const Track& t) {
-    return TrackIndex{t.id, t.title, t.artist, t.albumArtist, t.album, t.duration,
-                      t.format, t.sampleRate, t.bitDepth, t.trackNumber,
+    return TrackIndex{t.id, t.title, t.artist, t.albumArtist, t.album, t.composer,
+                      t.duration, t.format, t.sampleRate, t.bitDepth, t.trackNumber,
                       t.discNumber, t.filePath, t.r128Loudness, t.r128Peak, t.hasR128};
 }
 

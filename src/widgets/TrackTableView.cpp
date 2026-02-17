@@ -114,7 +114,8 @@ void TrackTableDelegate::paint(QPainter* painter,
     }
     case TrackColumn::Artist:
     case TrackColumn::AlbumArtist:
-    case TrackColumn::Album: {
+    case TrackColumn::Album:
+    case TrackColumn::Composer: {
         font.setPointSize(12);
         if (isHovered) font.setUnderline(true);
         painter->setFont(font);
@@ -373,6 +374,9 @@ QVariant HybridTrackModel::data(const QModelIndex& index, int role) const
     case TrackColumn::Album:
         if (role == Qt::DisplayRole) return t.album;
         break;
+    case TrackColumn::Composer:
+        if (role == Qt::DisplayRole) return t.composer;
+        break;
     case TrackColumn::Format:
         if (role == Qt::DisplayRole) return getFormatLabel(t.format);
         if (role == Qt::UserRole + 1) return static_cast<int>(t.format);
@@ -403,6 +407,7 @@ QVariant HybridTrackModel::headerData(int section, Qt::Orientation orientation, 
     case TrackColumn::Artist:      label = QStringLiteral("ARTIST"); break;
     case TrackColumn::AlbumArtist: label = QStringLiteral("ALBUM ARTIST"); break;
     case TrackColumn::Album:       label = QStringLiteral("ALBUM"); break;
+    case TrackColumn::Composer:    label = QStringLiteral("COMPOSER"); break;
     case TrackColumn::Format:      label = QStringLiteral("FORMAT"); break;
     case TrackColumn::Duration:    label = QStringLiteral("DURATION"); break;
     }
@@ -429,7 +434,8 @@ void HybridTrackModel::rebuildDisplayList()
         case FilterMode::Search:
             match = ti.title.contains(m_filterValue, Qt::CaseInsensitive) ||
                     ti.artist.contains(m_filterValue, Qt::CaseInsensitive) ||
-                    ti.album.contains(m_filterValue, Qt::CaseInsensitive);
+                    ti.album.contains(m_filterValue, Qt::CaseInsensitive) ||
+                    ti.composer.contains(m_filterValue, Qt::CaseInsensitive);
             break;
         case FilterMode::Artist:
             match = (ti.artist == m_filterValue);
@@ -476,6 +482,9 @@ void HybridTrackModel::applySortToDisplayList()
             }
             case TrackColumn::Album:
                 less = ta.album.compare(tb.album, Qt::CaseInsensitive) < 0;
+                break;
+            case TrackColumn::Composer:
+                less = ta.composer.compare(tb.composer, Qt::CaseInsensitive) < 0;
                 break;
             case TrackColumn::Format: {
                 auto qa = classifyAudioQuality(ta.format, ta.sampleRate, ta.bitDepth);
@@ -560,6 +569,7 @@ void TrackTableView::setupHeader()
         case TrackColumn::Artist:      hdr->resizeSection(i, 180); break;
         case TrackColumn::AlbumArtist: hdr->resizeSection(i, 160); break;
         case TrackColumn::Album:       hdr->resizeSection(i, 180); break;
+        case TrackColumn::Composer:    hdr->resizeSection(i, 160); break;
         case TrackColumn::Format:      hdr->resizeSection(i, 200); break;
         case TrackColumn::Duration:    hdr->resizeSection(i, 90); break;
         }

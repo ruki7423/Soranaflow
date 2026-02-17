@@ -319,9 +319,11 @@ void LibraryDatabase::createIndexes()
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title)"));
 
     // FTS5 full-text search index (replaces LIKE '%keyword%' table scan)
+    // Drop and recreate to pick up new columns (composer)
+    q.exec(QStringLiteral("DROP TABLE IF EXISTS tracks_fts"));
     q.exec(QStringLiteral(
         "CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5("
-        "  title, artist, album,"
+        "  title, artist, album, composer,"
         "  content=tracks,"
         "  content_rowid=rowid"
         ")"
@@ -347,6 +349,9 @@ void LibraryDatabase::createIndexes()
 
     // Migration: add album_artist to albums (preferred sort field from ALBUMARTIST tag)
     q.exec(QStringLiteral("ALTER TABLE albums ADD COLUMN album_artist TEXT"));
+
+    // Migration: add composer column
+    q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN composer TEXT DEFAULT ''"));
 
     // Migration: add ReplayGain columns (Bug B fix — v1.7.2)
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN replay_gain_track REAL DEFAULT 0"));

@@ -71,6 +71,11 @@ Track DatabaseContext::trackFromQuery(const QSqlQuery& query) const
     t.albumMbid        = query.value(QStringLiteral("album_mbid")).toString();
     t.releaseGroupMbid = query.value(QStringLiteral("release_group_mbid")).toString();
 
+    // Composer (migration column — may not exist in old DBs)
+    int compIdx = query.record().indexOf(QStringLiteral("composer"));
+    if (compIdx >= 0)
+        t.composer = query.value(compIdx).toString();
+
     // Year (migration column — may not exist in old DBs)
     int yearIdx = query.record().indexOf(QStringLiteral("year"));
     if (yearIdx >= 0)
