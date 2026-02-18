@@ -206,6 +206,13 @@ bool VST2Plugin::loadFromPath(const std::string& vstPath)
              << "params:" << m_effect->num_params
              << "hasEditor:" << hasEditor();
 
+    if (m_effect->num_inputs == 0) {
+        qWarning() << "VST2: Rejecting instrument plugin (0 audio inputs):"
+                    << QString::fromStdString(m_name);
+        unload();
+        return false;
+    }
+
     return true;
 }
 
@@ -250,6 +257,11 @@ void VST2Plugin::process(float* buf, int frames, int channels)
 {
     if (!m_enabled || !m_effect || !m_effect->process_float)
         return;
+
+    // Instruments (synths) have 0 audio inputs — they generate audio from MIDI.
+    // Without a MIDI source, their output is silence and would overwrite the
+    // audio buffer.  Bypass to preserve the signal.
+    if (m_effect->num_inputs == 0) return;
 
     std::unique_lock<std::mutex> lock(m_processMutex, std::try_to_lock);
     if (!lock.owns_lock()) return;  // Skip this cycle, don't block audio thread

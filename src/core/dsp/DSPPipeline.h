@@ -8,6 +8,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 
 // Ordered DSP processing chain.
@@ -60,5 +61,5 @@ private:
 
     // Plugin processors (VST3, etc.)
     std::vector<std::shared_ptr<IDSPProcessor>> m_plugins;
-    mutable std::mutex m_pluginMutex;
+    mutable std::shared_mutex m_pluginMutex;
 };

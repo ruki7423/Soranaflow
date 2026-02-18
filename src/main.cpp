@@ -275,9 +275,31 @@ int main(int argc, char* argv[]) {
             pipeline->setEnabled(dspOn);
             qDebug() << "[STARTUP] DSP pipeline enabled:" << dspOn;
             pipeline->gainProcessor()->setGainDb(settings->preampGain());
-            pipeline->equalizerProcessor()->setBand(0, 250.0f, settings->eqLow(), 1.0f);
-            pipeline->equalizerProcessor()->setBand(1, 1000.0f, settings->eqMid(), 1.0f);
-            pipeline->equalizerProcessor()->setBand(2, 4000.0f, settings->eqHigh(), 1.0f);
+
+            // Restore parametric EQ bands from settings
+            auto* eq = pipeline->equalizerProcessor();
+            int bandCount = settings->eqActiveBands();
+            eq->setActiveBands(bandCount);
+            for (int i = 0; i < bandCount; ++i) {
+                float freq = settings->eqBandFreq(i);
+                if (freq > 0.0f) {
+                    EQBand band;
+                    band.enabled   = settings->eqBandEnabled(i);
+                    band.type      = static_cast<EQBand::FilterType>(settings->eqBandType(i));
+                    band.frequency = freq;
+                    band.gainDb    = settings->eqBandGain(i);
+                    band.q         = settings->eqBandQ(i);
+                    if (band.q <= 0.0f) band.q = 1.0f;
+                    eq->setBand(i, band);
+                }
+            }
+
+            // Restore linear phase mode
+            bool linearPhase = settings->eqLinearPhase();
+            eq->setPhaseMode(linearPhase ? EqualizerProcessor::LinearPhase
+                                         : EqualizerProcessor::MinimumPhase);
+            qDebug() << "[STARTUP] EQ restored:" << bandCount << "bands,"
+                     << (linearPhase ? "Linear Phase" : "Minimum Phase");
         }
 
         // Restore output device — prefer UID (persistent), fall back to name, then numeric ID

@@ -271,6 +271,12 @@ bool VST3Plugin::loadFromPath(const std::string& vst3Path, int classIndex)
              << "vendor:" << QString::fromStdString(m_pluginVendor)
              << "uid:" << QString::fromStdString(m_pluginUID);
 
+    if (!m_isEffect) {
+        qWarning() << "VST3: Rejecting instrument plugin (no audio input):"
+                    << QString::fromStdString(m_pluginName);
+        return false;
+    }
+
     // 3. Create IComponent
     m_component = factory.createInstance<IComponent>(info.ID());
     if (!m_component) {
@@ -622,16 +628,20 @@ bool VST3Plugin::activateBusses()
 
 void VST3Plugin::process(float* buf, int frames, int channels)
 {
+    // Instruments (synths) have no audio input bus — they generate audio from
+    // MIDI events only.  Without a MIDI source, their output is silence and
+    // would overwrite the audio buffer.  Bypass to preserve the signal.
+    if (!m_isEffect) return;
+
     if (!m_enabled || !m_loaded || !m_processor || !m_processing)
         return;
 
     std::unique_lock<std::mutex> lock(m_processMutex, std::try_to_lock);
-    if (!lock.owns_lock()) return;  // Skip this cycle, don't block audio thread
+    if (!lock.owns_lock()) return;
 
     // Verify pre-allocated buffers are sufficient (never allocate on audio thread)
-    if (channels > (int)m_inputPtrs.size() || frames > m_maxBlockSize) {
-        return;  // Buffer mismatch — prepare() must be called first
-    }
+    if (channels > (int)m_inputPtrs.size() || frames > m_maxBlockSize)
+        return;
 
     // Deinterleave: interleaved buf -> per-channel input buffers
     for (int f = 0; f < frames; ++f) {
@@ -692,9 +702,7 @@ void VST3Plugin::process(float* buf, int frames, int channels)
     data.processContext = &processContext;
 
     tresult result = m_processor->process(data);
-    if (result != kResultOk) {
-        return;
-    }
+    if (result != kResultOk) return;
 
     // Re-interleave: per-channel output buffers -> interleaved buf
     for (int f = 0; f < frames; ++f) {

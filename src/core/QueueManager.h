@@ -42,6 +42,7 @@ public:
     void toggleShuffle();
     bool shuffleEnabled() const { return m_shuffle; }
     void setShuffle(bool enabled);
+    void invalidateShuffleOrder();  // Rebuild shuffle excluding current (after direct track selection)
 
     // Repeat (values match PlaybackState::RepeatMode: 0=Off, 1=All, 2=One)
     void cycleRepeat();
@@ -60,6 +61,7 @@ private:
     QVector<Track> m_queue;
     QVector<Track> m_userQueue;    // User-added tracks — survive setQueue(), play first
     QVector<int> m_shuffledIndices;
+    QVector<QString> m_shuffleHistory;  // Previously-played filePaths for "previous" in shuffle mode
     int m_queueIndex = -1;
     bool m_shuffle = false;
     int m_repeat = 0;  // 0=Off, 1=All, 2=One

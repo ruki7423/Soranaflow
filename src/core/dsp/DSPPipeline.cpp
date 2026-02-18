@@ -31,7 +31,7 @@ void DSPPipeline::process(float* buf, int frames, int channels)
     // on the real-time audio thread. If the main thread holds the lock
     // (e.g., adding/removing plugins), we skip plugin processing for
     // this buffer rather than blocking the audio thread.
-    std::unique_lock<std::mutex> lock(m_pluginMutex, std::try_to_lock);
+    std::shared_lock<std::shared_mutex> lock(m_pluginMutex, std::try_to_lock);
     if (lock.owns_lock()) {
         for (auto& proc : m_plugins) {
             if (proc && proc->isEnabled()) {
@@ -49,7 +49,7 @@ void DSPPipeline::prepare(double sampleRate, int channels)
     m_gain->prepare(sampleRate, channels);
     m_eq->prepare(sampleRate, channels);
 
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::unique_lock<std::shared_mutex> lock(m_pluginMutex);
     for (auto& proc : m_plugins) {
         if (proc) proc->prepare(sampleRate, channels);
     }
@@ -60,7 +60,7 @@ void DSPPipeline::reset()
     m_gain->reset();
     m_eq->reset();
 
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::unique_lock<std::shared_mutex> lock(m_pluginMutex);
     for (auto& proc : m_plugins) {
         if (proc) proc->reset();
     }
@@ -74,7 +74,7 @@ void DSPPipeline::addProcessor(std::shared_ptr<IDSPProcessor> proc)
     // Scoped lock — emit signal AFTER releasing to avoid deadlock.
     // getSignalPath() calls processorCount()/processor() which also lock m_pluginMutex.
     {
-        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        std::unique_lock<std::shared_mutex> lock(m_pluginMutex);
         m_plugins.push_back(std::move(proc));
         qDebug() << "[DSPPipeline] Added processor — external processors:" << (int)m_plugins.size();
     }
@@ -98,7 +98,7 @@ void DSPPipeline::removeProcessor(int index)
     // Destroying inside the lock would deadlock on the non-recursive mutex.
     std::shared_ptr<IDSPProcessor> removed;
     {
-        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        std::unique_lock<std::shared_mutex> lock(m_pluginMutex);
         if (index >= 0 && index < (int)m_plugins.size()) {
             qDebug() << "[DSPPipeline] Removing processor at index" << index
                      << "— remaining:" << (int)m_plugins.size() - 1;
@@ -117,13 +117,13 @@ void DSPPipeline::removeProcessor(int index)
 
 int DSPPipeline::processorCount() const
 {
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::shared_lock<std::shared_mutex> lock(m_pluginMutex);
     return (int)m_plugins.size();
 }
 
 IDSPProcessor* DSPPipeline::processor(int index) const
 {
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::shared_lock<std::shared_mutex> lock(m_pluginMutex);
     if (index >= 0 && index < (int)m_plugins.size()) {
         return m_plugins[index].get();
     }

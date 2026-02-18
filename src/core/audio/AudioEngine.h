@@ -36,7 +36,7 @@ public:
 
     static AudioEngine* instance();
 
-    State state() const { return m_state; }
+    State state() const { return m_state.load(std::memory_order_acquire); }
     double duration() const { return m_duration; }
     double position() const;
 
@@ -114,7 +114,7 @@ private:
     int renderAudio(float* buf, int maxFrames);
     void onPositionTimer();
 
-    State m_state = Stopped;
+    std::atomic<State> m_state{Stopped};
     std::atomic<double> m_duration{0.0};
 
     std::unique_ptr<AudioDecoder>    m_decoder;

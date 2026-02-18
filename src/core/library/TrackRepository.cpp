@@ -9,6 +9,51 @@
 #include <QMutexLocker>
 #include <QSet>
 
+// ── Korean jamo normalization for FTS5 search ────────────────────────
+// Compatibility jamo (U+3131-U+3163) are standalone characters that don't
+// match composed Hangul syllables in FTS5.  Convert them to conjoining jamo
+// (Choseong U+1100+ / Jungseong U+1161+) so NFC can compose syllable blocks.
+// E.g. ㄱ(3131)+ㅓ(3153) → ᄀ(1100)+ᅥ(1165) → NFC → 거(AC70)
+static QString normalizeKoreanForSearch(const QString& input)
+{
+    QString s = input;
+    s.remove(QLatin1Char('\\'));  // strip stray backslashes (macOS IME artifact)
+    if (s.isEmpty()) return s;
+
+    bool hasCompatJamo = false;
+    for (const QChar& ch : s) {
+        ushort c = ch.unicode();
+        if (c >= 0x3131 && c <= 0x3163) { hasCompatJamo = true; break; }
+    }
+    if (!hasCompatJamo) return s;
+
+    // Consonant → Choseong map (index = code - 0x3131, 0 = no mapping)
+    static const ushort kToChoseong[30] = {
+        0x1100, 0x1101, 0,      0x1102, 0,      0,      // ㄱㄲㄳㄴㄵㄶ
+        0x1103, 0x1104, 0x1105, 0,      0,      0,      // ㄷㄸㄹㄺㄻㄼ
+        0,      0,      0,      0,      0x1106, 0x1107,  // ㄽㄾㄿㅀㅁㅂ
+        0x1108, 0,      0x1109, 0x110A, 0x110B, 0x110C,  // ㅃㅄㅅㅆㅇㅈ
+        0x110D, 0x110E, 0x110F, 0x1110, 0x1111, 0x1112   // ㅉㅊㅋㅌㅍㅎ
+    };
+
+    QString mapped;
+    mapped.reserve(s.size());
+    for (const QChar& ch : s) {
+        ushort c = ch.unicode();
+        if (c >= 0x3131 && c <= 0x314E) {
+            ushort m = kToChoseong[c - 0x3131];
+            mapped.append(m ? QChar(m) : ch);
+        } else if (c >= 0x314F && c <= 0x3163) {
+            // Vowels: sequential mapping ㅏ(314F)→ᅡ(1161) ... ㅣ(3163)→ᅵ(1175)
+            mapped.append(QChar(static_cast<ushort>(0x1161 + (c - 0x314F))));
+        } else {
+            mapped.append(ch);
+        }
+    }
+
+    return mapped.normalized(QString::NormalizationForm_C);
+}
+
 // ── String pool for deduplicating artist/album names ─────────────────
 namespace {
 class StringPool {
@@ -436,9 +481,13 @@ QVector<Track> TrackRepository::searchTracks(const QString& query) const
     QVector<Track> result;
     if (query.isEmpty()) return result;
 
-    if (query.length() >= 2) {
+    // Normalize Korean jamo to composed syllables, strip backslashes
+    QString normalized = normalizeKoreanForSearch(query);
+    if (normalized.isEmpty()) return result;
+
+    if (normalized.length() >= 2) {
         // Use FTS5 for 2+ char queries (< 1ms vs table scan)
-        QString ftsQuery = query;
+        QString ftsQuery = normalized;
         ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
         ftsQuery += QStringLiteral("*");
 
@@ -456,7 +505,7 @@ QVector<Track> TrackRepository::searchTracks(const QString& query) const
                 result.append(m_ctx->trackFromQuery(q));
             }
         }
-        qDebug() << "[LibraryDB] FTS5 search:" << query << "->" << result.size() << "tracks";
+        qDebug() << "[LibraryDB] FTS5 search:" << normalized << "->" << result.size() << "tracks";
     } else {
         // 1 char: fallback to LIKE (FTS5 too broad for single chars)
         QSqlQuery q(*m_ctx->readDb);
@@ -465,7 +514,7 @@ QVector<Track> TrackRepository::searchTracks(const QString& query) const
             "title LIKE ? OR artist LIKE ? OR album LIKE ? "
             "ORDER BY artist, album, track_number"
         ));
-        QString pattern = QStringLiteral("%%1%").arg(query);
+        QString pattern = QStringLiteral("%%1%").arg(normalized);
         q.addBindValue(pattern);
         q.addBindValue(pattern);
         q.addBindValue(pattern);
@@ -485,8 +534,12 @@ QVector<QString> TrackRepository::searchTracksFTS(const QString& query) const
     QVector<QString> ids;
     if (query.isEmpty()) return ids;
 
+    // Normalize Korean jamo to composed syllables, strip backslashes
+    QString normalized = normalizeKoreanForSearch(query);
+    if (normalized.isEmpty()) return ids;
+
     // FTS5 query: prefix search with *
-    QString ftsQuery = query;
+    QString ftsQuery = normalized;
     ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
     ftsQuery += QStringLiteral("*");
 
@@ -505,7 +558,7 @@ QVector<QString> TrackRepository::searchTracksFTS(const QString& query) const
             ids.append(q.value(0).toString());
         }
     }
-    qDebug() << "[LibraryDB] FTS5 search:" << query << "->" << ids.size() << "results";
+    qDebug() << "[LibraryDB] FTS5 search:" << normalized << "->" << ids.size() << "results";
     return ids;
 }
 
@@ -549,6 +602,28 @@ void TrackRepository::updateR128Loudness(const QString& filePath, double loudnes
     q.addBindValue(filePath);
     if (!q.exec()) {
         qWarning() << "TrackRepository::updateR128Loudness failed:" << q.lastError().text();
+    }
+}
+
+void TrackRepository::updateReplayGain(const QString& filePath,
+                                       double trackGainDb, double albumGainDb,
+                                       double trackPeakLinear, double albumPeakLinear)
+{
+    QMutexLocker lock(m_ctx->writeMutex);
+    QSqlQuery q(*m_ctx->writeDb);
+    q.prepare(QStringLiteral(
+        "UPDATE tracks SET "
+        "replay_gain_track = ?, replay_gain_album = ?, "
+        "replay_gain_track_peak = ?, replay_gain_album_peak = ?, "
+        "has_replay_gain = 1 "
+        "WHERE file_path = ?"));
+    q.addBindValue(trackGainDb);
+    q.addBindValue(albumGainDb);
+    q.addBindValue(trackPeakLinear);
+    q.addBindValue(albumPeakLinear);
+    q.addBindValue(filePath);
+    if (!q.exec()) {
+        qWarning() << "TrackRepository::updateReplayGain failed:" << q.lastError().text();
     }
 }
 

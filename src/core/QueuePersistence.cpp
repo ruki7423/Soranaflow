@@ -3,11 +3,9 @@
 #include "Settings.h"
 
 #include <QDebug>
-#include <QElapsedTimer>
-#include <QMutex>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTimer>
-#include <QtConcurrent>
 
 QueuePersistence::QueuePersistence(QueueManager* mgr, QObject* parent)
     : QObject(parent)
@@ -27,71 +25,10 @@ void QueuePersistence::scheduleSave()
 
 void QueuePersistence::doSave()
 {
-    // Snapshot queue data (fast — just copies QVector of value types)
-    QVector<Track> snapshot = m_mgr->queue();
-    QVector<Track> userSnapshot = m_mgr->userQueue();
-    int idx = m_mgr->currentIndex();
-    bool shuffle = m_mgr->shuffleEnabled();
-    int repeat = m_mgr->repeatMode();
-
-    (void)QtConcurrent::run([snapshot, userSnapshot, idx, shuffle, repeat]() {
-        static QMutex mutex;
-        QMutexLocker lock(&mutex);
-
-        QElapsedTimer timer;
-        timer.start();
-
-        QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
-
-        settings.beginWriteArray(QStringLiteral("queue/tracks"), snapshot.size());
-        for (int i = 0; i < snapshot.size(); ++i) {
-            settings.setArrayIndex(i);
-            const Track& t = snapshot[i];
-            settings.setValue(QStringLiteral("id"), t.id);
-            settings.setValue(QStringLiteral("title"), t.title);
-            settings.setValue(QStringLiteral("artist"), t.artist);
-            settings.setValue(QStringLiteral("album"), t.album);
-            settings.setValue(QStringLiteral("albumId"), t.albumId);
-            settings.setValue(QStringLiteral("duration"), t.duration);
-            settings.setValue(QStringLiteral("filePath"), t.filePath);
-            settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
-            settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
-            settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
-            settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
-            settings.setValue(QStringLiteral("bitrate"), t.bitrate);
-            settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
-        }
-        settings.endArray();
-
-        // Save user queue separately
-        settings.beginWriteArray(QStringLiteral("queue/userTracks"), userSnapshot.size());
-        for (int i = 0; i < userSnapshot.size(); ++i) {
-            settings.setArrayIndex(i);
-            const Track& t = userSnapshot[i];
-            settings.setValue(QStringLiteral("id"), t.id);
-            settings.setValue(QStringLiteral("title"), t.title);
-            settings.setValue(QStringLiteral("artist"), t.artist);
-            settings.setValue(QStringLiteral("album"), t.album);
-            settings.setValue(QStringLiteral("albumId"), t.albumId);
-            settings.setValue(QStringLiteral("duration"), t.duration);
-            settings.setValue(QStringLiteral("filePath"), t.filePath);
-            settings.setValue(QStringLiteral("trackNumber"), t.trackNumber);
-            settings.setValue(QStringLiteral("format"), static_cast<int>(t.format));
-            settings.setValue(QStringLiteral("sampleRate"), t.sampleRate);
-            settings.setValue(QStringLiteral("bitDepth"), t.bitDepth);
-            settings.setValue(QStringLiteral("bitrate"), t.bitrate);
-            settings.setValue(QStringLiteral("coverUrl"), t.coverUrl);
-        }
-        settings.endArray();
-
-        settings.setValue(QStringLiteral("queue/currentIndex"), idx);
-        settings.setValue(QStringLiteral("queue/shuffle"), shuffle);
-        settings.setValue(QStringLiteral("queue/repeat"), repeat);
-
-        qDebug() << "[Queue] Saved" << snapshot.size() << "tracks +"
-                 << userSnapshot.size() << "user-queued in"
-                 << timer.elapsed() << "ms (async, index:" << idx << ")";
-    });
+    // Synchronous save on main thread. The 500ms debounce timer already
+    // prevents hot-path I/O. Using QtConcurrent::run here would create a
+    // separate QSettings instance racing with the main thread's QSettings.
+    saveImmediate();
 }
 
 void QueuePersistence::saveImmediate()
@@ -174,6 +111,16 @@ void QueuePersistence::restore()
         t.bitDepth = settings.value(QStringLiteral("bitDepth")).toString();
         t.bitrate = settings.value(QStringLiteral("bitrate")).toString();
         t.coverUrl = settings.value(QStringLiteral("coverUrl")).toString();
+
+        // Skip tracks with empty or non-existent local file paths.
+        // Apple Music tracks (id starts with "apple:") have no local file.
+        if (t.filePath.isEmpty() && !t.id.startsWith(QStringLiteral("apple:"))) {
+            continue;
+        }
+        if (!t.filePath.isEmpty() && !QFileInfo::exists(t.filePath)) {
+            qDebug() << "[Queue] Skipping missing file:" << t.filePath;
+            continue;
+        }
         tracks.append(t);
     }
     settings.endArray();
@@ -198,6 +145,14 @@ void QueuePersistence::restore()
         t.bitDepth = settings.value(QStringLiteral("bitDepth")).toString();
         t.bitrate = settings.value(QStringLiteral("bitrate")).toString();
         t.coverUrl = settings.value(QStringLiteral("coverUrl")).toString();
+
+        if (t.filePath.isEmpty() && !t.id.startsWith(QStringLiteral("apple:"))) {
+            continue;
+        }
+        if (!t.filePath.isEmpty() && !QFileInfo::exists(t.filePath)) {
+            qDebug() << "[Queue] Skipping missing file (user queue):" << t.filePath;
+            continue;
+        }
         userTracks.append(t);
     }
     settings.endArray();
@@ -205,6 +160,13 @@ void QueuePersistence::restore()
     int idx = settings.value(QStringLiteral("queue/currentIndex"), -1).toInt();
     bool shuffle = settings.value(QStringLiteral("queue/shuffle"), false).toBool();
     int repeat = settings.value(QStringLiteral("queue/repeat"), 0).toInt();
+
+    // Clamp index to valid range
+    if (!tracks.isEmpty()) {
+        idx = qBound(0, idx, tracks.size() - 1);
+    } else {
+        idx = -1;
+    }
 
     m_mgr->restoreState(tracks, idx, shuffle, repeat, userTracks);
 

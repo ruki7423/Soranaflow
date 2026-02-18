@@ -7,6 +7,7 @@ void QueueManager::setQueue(const QVector<Track>& tracks)
 {
     m_queue = tracks;
     m_queueIndex = tracks.isEmpty() ? -1 : 0;
+    m_shuffleHistory.clear();
     // m_userQueue intentionally NOT cleared — user-added tracks persist
     if (m_shuffle && !tracks.isEmpty())
         rebuildShuffleOrder();
@@ -41,6 +42,7 @@ void QueueManager::removeFromQueue(int index)
 {
     if (index < 0 || index >= m_queue.size()) return;
 
+    QString removedPath = m_queue[index].filePath;
     m_queue.removeAt(index);
 
     if (m_queue.isEmpty()) {
@@ -51,6 +53,11 @@ void QueueManager::removeFromQueue(int index)
         if (m_queueIndex >= m_queue.size())
             m_queueIndex = m_queue.size() - 1;
     }
+
+    // Remove only the deleted track from history, not all history
+    m_shuffleHistory.removeAll(removedPath);
+    if (m_shuffle && !m_queue.isEmpty())
+        rebuildShuffleOrder();
 }
 
 void QueueManager::removeFromUserQueue(int index)
@@ -77,6 +84,7 @@ void QueueManager::moveTo(int fromIndex, int toIndex)
             m_queueIndex++;
     }
 
+    // Do NOT clear m_shuffleHistory — filePaths don't change on reorder
     if (m_shuffle) rebuildShuffleOrder();
 }
 
@@ -85,6 +93,8 @@ void QueueManager::clearQueue()
     m_queue.clear();
     m_userQueue.clear();
     m_queueIndex = -1;
+    m_shuffledIndices.clear();
+    m_shuffleHistory.clear();
 }
 
 void QueueManager::clearUpcoming()
@@ -92,6 +102,8 @@ void QueueManager::clearUpcoming()
     m_userQueue.clear();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
         m_queue.resize(m_queueIndex + 1);
+    m_shuffleHistory.clear();
+    m_shuffledIndices.clear();
 }
 
 Track QueueManager::currentTrack() const
@@ -140,8 +152,8 @@ Track QueueManager::peekNextTrack() const
     if (m_shuffle) {
         if (!m_shuffledIndices.isEmpty())
             nextIdx = m_shuffledIndices.first();
-        else if (m_repeat == 1)  // All
-            nextIdx = 0;
+        else
+            return Track();  // Next cycle unknown until reshuffle
     } else {
         nextIdx = m_queueIndex + 1;
         if (nextIdx >= m_queue.size()) {
@@ -168,6 +180,8 @@ QueueManager::AdvanceResult QueueManager::advance()
         int insertPos = (m_queueIndex >= 0) ? m_queueIndex + 1 : 0;
         if (insertPos > m_queue.size()) insertPos = m_queue.size();
         m_queue.insert(insertPos, next);
+        if (m_shuffle && m_queueIndex >= 0 && m_queueIndex < m_queue.size())
+            m_shuffleHistory.append(m_queue[m_queueIndex].filePath);
         m_queueIndex = insertPos;
         if (m_shuffle) rebuildShuffleOrder();
         qDebug() << "[Queue] Playing user-queued track:" << next.title
@@ -176,19 +190,35 @@ QueueManager::AdvanceResult QueueManager::advance()
     }
 
     if (m_shuffle) {
-        if (m_shuffledIndices.isEmpty())
-            rebuildShuffleOrder();
+        if (m_shuffledIndices.isEmpty()) {
+            if (m_repeat != 1)  // Not "Repeat All" — all songs played
+                return EndOfQueue;
+
+            // Smart shuffle: new cycle — include ALL tracks, prevent back-to-back
+            int lastPlayed = m_queueIndex;
+            m_shuffledIndices.clear();
+            for (int i = 0; i < m_queue.size(); ++i)
+                m_shuffledIndices.append(i);
+            // Fisher-Yates shuffle
+            auto* rng = QRandomGenerator::global();
+            for (int i = m_shuffledIndices.size() - 1; i > 0; --i) {
+                int j = rng->bounded(i + 1);
+                std::swap(m_shuffledIndices[i], m_shuffledIndices[j]);
+            }
+            // Back-to-back prevention: first of new cycle != last of old cycle
+            if (m_shuffledIndices.size() > 1 && m_shuffledIndices.first() == lastPlayed) {
+                int swapWith = 1 + rng->bounded(m_shuffledIndices.size() - 1);
+                std::swap(m_shuffledIndices[0], m_shuffledIndices[swapWith]);
+            }
+            qDebug() << "[Shuffle] New cycle —" << m_shuffledIndices.size() << "tracks reshuffled";
+        }
 
         if (!m_shuffledIndices.isEmpty()) {
+            if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
+                m_shuffleHistory.append(m_queue[m_queueIndex].filePath);
             m_queueIndex = m_shuffledIndices.takeFirst();
         } else {
-            if (m_repeat == 1) {  // All
-                rebuildShuffleOrder();
-                if (!m_shuffledIndices.isEmpty())
-                    m_queueIndex = m_shuffledIndices.takeFirst();
-            } else {
-                return EndOfQueue;
-            }
+            return EndOfQueue;  // Queue has 0 tracks
         }
     } else {
         m_queueIndex++;
@@ -208,6 +238,26 @@ QueueManager::AdvanceResult QueueManager::advance()
 bool QueueManager::retreat()
 {
     if (m_queue.isEmpty()) return false;
+
+    if (m_shuffle) {
+        if (m_shuffleHistory.isEmpty()) return false;
+        QString prevPath = m_shuffleHistory.takeLast();
+
+        // Find the track by filePath in current queue
+        for (int i = 0; i < m_queue.size(); ++i) {
+            if (m_queue[i].filePath == prevPath) {
+                m_shuffledIndices.prepend(m_queueIndex);
+                m_queueIndex = i;
+                return true;
+            }
+        }
+
+        // Track no longer in queue — try next in history
+        if (!m_shuffleHistory.isEmpty())
+            return retreat();
+        return false;
+    }
+
     if (m_queueIndex > 0) {
         m_queueIndex--;
         return true;
@@ -233,6 +283,7 @@ int QueueManager::findOrInsertTrack(const Track& track)
 void QueueManager::toggleShuffle()
 {
     m_shuffle = !m_shuffle;
+    m_shuffleHistory.clear();
     if (m_shuffle)
         rebuildShuffleOrder();
     else
@@ -242,10 +293,19 @@ void QueueManager::toggleShuffle()
 void QueueManager::setShuffle(bool enabled)
 {
     m_shuffle = enabled;
+    m_shuffleHistory.clear();
     if (enabled && !m_queue.isEmpty())
         rebuildShuffleOrder();
     else if (!enabled)
         m_shuffledIndices.clear();
+}
+
+void QueueManager::invalidateShuffleOrder()
+{
+    if (m_shuffle && !m_queue.isEmpty()) {
+        m_shuffleHistory.clear();
+        rebuildShuffleOrder();
+    }
 }
 
 void QueueManager::cycleRepeat()
@@ -266,6 +326,7 @@ void QueueManager::restoreState(const QVector<Track>& tracks, int idx,
     m_shuffle = shuffle;
     m_repeat = repeat;
     m_userQueue = userQueue;
+    m_shuffleHistory.clear();
     if (m_shuffle && !m_queue.isEmpty())
         rebuildShuffleOrder();
 }
