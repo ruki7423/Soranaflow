@@ -76,6 +76,7 @@ public:
 
 private:
     void recalcCoeffs(int band);
+    void processMinimumPhase(float* buf, int frames, int channels);
     static BiquadCoeffs calcBiquad(double sampleRate, const EQBand& band);
 
     bool m_enabled = true;
@@ -84,8 +85,11 @@ private:
     int m_activeBands = 10;
     PhaseMode m_phaseMode = MinimumPhase;
     std::atomic<int> m_pendingPhaseMode{-1};  // -1 = no pending change
-    int m_phaseMuteSamples = 0;
-    static constexpr int PHASE_MUTE_SAMPLES = 128;
+    // Phase mode transition state (fade-out → switch+silence → fade-in)
+    int m_transitionPhase = 0;       // 0=none, 1=fade-out, 2=switch+silence, 3=fade-in
+    int m_transitionPos = 0;
+    PhaseMode m_transitionTarget = MinimumPhase;
+    static constexpr int TRANSITION_FADE_SAMPLES = 128;  // ~3ms @ 44.1kHz
 
     std::array<EQBand, MAX_BANDS> m_bands;
     std::array<BiquadCoeffs, MAX_BANDS> m_coeffs;

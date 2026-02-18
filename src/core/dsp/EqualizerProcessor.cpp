@@ -95,27 +95,93 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
 {
     if (!m_enabled) return;
 
-    // Apply deferred phase mode switch (set by UI thread)
-    int pending = m_pendingPhaseMode.exchange(-1, std::memory_order_acquire);
-    if (pending >= 0) {
-        m_phaseMode = static_cast<PhaseMode>(pending);
-#ifdef __APPLE__
-        if (m_phaseMode == MinimumPhase) {
-            for (auto& bandStates : m_state) {
-                for (auto& s : bandStates) { s = BiquadState{}; }
-            }
+    // Check for pending phase mode switch (only when not already transitioning)
+    if (m_transitionPhase == 0) {
+        int pending = m_pendingPhaseMode.exchange(-1, std::memory_order_acquire);
+        if (pending >= 0) {
+            m_transitionTarget = static_cast<PhaseMode>(pending);
+            m_transitionPhase = 1;  // start fade-out
+            m_transitionPos = 0;
         }
+    }
+
+    // ── Phase transition: fade-out → switch+silence → fade-in ──
+
+    if (m_transitionPhase == 1) {
+        // Process with CURRENT mode
+#ifdef __APPLE__
+        if (m_phaseMode == LinearPhase && m_fftSize > 0)
+            processLinearPhase(buf, frames, channels);
+        else
 #endif
-        m_phaseMuteSamples = PHASE_MUTE_SAMPLES;
+            processMinimumPhase(buf, frames, channels);
+
+        // Apply fade-out ramp
+        for (int i = 0; i < frames; ++i) {
+            float t = static_cast<float>(m_transitionPos + i) / TRANSITION_FADE_SAMPLES;
+            float gain = (t >= 1.0f) ? 0.0f : 1.0f - t;
+            for (int c = 0; c < channels; ++c)
+                buf[i * channels + c] *= gain;
+        }
+        m_transitionPos += frames;
+        if (m_transitionPos >= TRANSITION_FADE_SAMPLES)
+            m_transitionPhase = 2;
+        return;
     }
 
-    // Brief mute during mode switch to prevent clicks
-    if (m_phaseMuteSamples > 0) {
-        int muteFrames = std::min(frames, m_phaseMuteSamples);
-        std::memset(buf, 0, muteFrames * channels * sizeof(float));
-        m_phaseMuteSamples -= muteFrames;
+    if (m_transitionPhase == 2) {
+        // Switch mode + clear ALL processing state
+        m_phaseMode = m_transitionTarget;
+
+        for (auto& bandStates : m_state) {
+            for (auto& s : bandStates) { s = BiquadState{}; }
+        }
+#ifdef __APPLE__
+        for (auto& ola : m_olaState) {
+            if (!ola.inputBuf.empty())
+                std::memset(ola.inputBuf.data(), 0, ola.inputBuf.size() * sizeof(float));
+            if (!ola.overlapBuf.empty())
+                std::memset(ola.overlapBuf.data(), 0, ola.overlapBuf.size() * sizeof(float));
+            if (!ola.outputBuf.empty())
+                std::memset(ola.outputBuf.data(), 0, ola.outputBuf.size() * sizeof(float));
+            ola.position = 0;
+            ola.hasOutput = false;
+        }
+        if (m_phaseMode == LinearPhase)
+            m_firDirty.store(true, std::memory_order_relaxed);
+#endif
+
+        // Output silence for this block
+        std::memset(buf, 0, frames * channels * sizeof(float));
+
+        m_transitionPhase = 3;
+        m_transitionPos = 0;
+        return;
     }
 
+    if (m_transitionPhase == 3) {
+        // Process with NEW mode
+#ifdef __APPLE__
+        if (m_phaseMode == LinearPhase && m_fftSize > 0)
+            processLinearPhase(buf, frames, channels);
+        else
+#endif
+            processMinimumPhase(buf, frames, channels);
+
+        // Apply fade-in ramp
+        for (int i = 0; i < frames; ++i) {
+            float t = static_cast<float>(m_transitionPos + i) / TRANSITION_FADE_SAMPLES;
+            float gain = (t >= 1.0f) ? 1.0f : t;
+            for (int c = 0; c < channels; ++c)
+                buf[i * channels + c] *= gain;
+        }
+        m_transitionPos += frames;
+        if (m_transitionPos >= TRANSITION_FADE_SAMPLES)
+            m_transitionPhase = 0;  // transition complete
+        return;
+    }
+
+    // ── Normal processing ──
 #ifdef __APPLE__
     if (m_phaseMode == LinearPhase && m_fftSize > 0) {
         processLinearPhase(buf, frames, channels);
@@ -123,11 +189,16 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
     }
 #endif
 
+    processMinimumPhase(buf, frames, channels);
+}
+
+// ── processMinimumPhase ─────────────────────────────────────────────
+void EqualizerProcessor::processMinimumPhase(float* buf, int frames, int channels)
+{
     int ch = std::min(channels, MAX_CHANNELS);
 
     for (int band = 0; band < m_activeBands; ++band) {
         if (!m_bands[band].enabled) continue;
-        // Skip peak/shelf bands with 0 dB gain
         if (m_bands[band].type <= EQBand::HighShelf && m_bands[band].gainDb == 0.0f) continue;
 
         const auto& c = m_coeffs[band];
@@ -195,16 +266,18 @@ void EqualizerProcessor::setActiveBands(int count)
 void EqualizerProcessor::setPhaseMode(PhaseMode mode)
 {
     if (m_phaseMode == mode) return;
-    // Defer the actual switch to the audio thread via atomic pending flag.
-    // process() will pick it up and apply a brief mute to avoid clicks.
-    m_pendingPhaseMode.store(static_cast<int>(mode), std::memory_order_release);
 
 #ifdef __APPLE__
+    // Allocate LP buffers BEFORE signalling the RT thread so it sees ready buffers.
     if (mode == LinearPhase) {
         allocateLinearPhaseBuffers();
         m_firDirty.store(true, std::memory_order_relaxed);
     }
 #endif
+
+    // Defer the actual switch to the audio thread via atomic pending flag.
+    // process() will fade-out → switch → fade-in to avoid clicks.
+    m_pendingPhaseMode.store(static_cast<int>(mode), std::memory_order_release);
 }
 
 // ── latencySamples ──────────────────────────────────────────────────
