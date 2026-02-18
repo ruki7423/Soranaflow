@@ -1,10 +1,14 @@
 #include "ProcessingSettingsWidget.h"
 #include "SettingsUtils.h"
 #include "../../../core/Settings.h"
+#include "../../../core/dsp/ReplayGainScanner.h"
 #include "../../../widgets/StyledSwitch.h"
 #include "../../../widgets/StyledComboBox.h"
 
 #include <QVBoxLayout>
+#include <QPushButton>
+#include <QProgressBar>
+#include <QLabel>
 #include <cmath>
 
 ProcessingSettingsWidget::ProcessingSettingsWidget(QWidget* parent)
@@ -62,6 +66,91 @@ ProcessingSettingsWidget::ProcessingSettingsWidget(QWidget* parent)
         QStringLiteral("Target Loudness"),
         QStringLiteral("Reference loudness level for normalization"),
         targetCombo));
+
+    // ── Scan Library for ReplayGain ─────────────────────────────────
+    auto* scanWidget = new QWidget();
+    auto* scanLayout = new QHBoxLayout(scanWidget);
+    scanLayout->setContentsMargins(0, 0, 0, 0);
+    scanLayout->setSpacing(8);
+
+    m_scanButton = new QPushButton(QStringLiteral("Scan Library"));
+    m_scanButton->setFixedWidth(120);
+    m_scanButton->setStyleSheet(QStringLiteral(
+        "QPushButton { background: %1; color: %2; border: none; border-radius: 4px;"
+        " padding: 6px 12px; font-size: 13px; font-weight: bold; }"
+        "QPushButton:hover { background: %3; }"
+        "QPushButton:disabled { opacity: 0.5; }")
+        .arg(QStringLiteral("#4a9eff"),
+             QStringLiteral("#ffffff"),
+             QStringLiteral("#5aadff")));
+
+    m_scanProgress = new QProgressBar();
+    m_scanProgress->setFixedHeight(6);
+    m_scanProgress->setTextVisible(false);
+    m_scanProgress->setVisible(false);
+    m_scanProgress->setStyleSheet(QStringLiteral(
+        "QProgressBar { background: %1; border: none; border-radius: 3px; }"
+        "QProgressBar::chunk { background: #4a9eff; border-radius: 3px; }")
+        .arg(QStringLiteral("#2a2a2a")));
+
+    m_scanStatusLabel = new QLabel();
+    m_scanStatusLabel->setStyleSheet(QStringLiteral(
+        "color: %1; font-size: 12px; border: none;")
+        .arg(QStringLiteral("#888888")));
+    m_scanStatusLabel->setVisible(false);
+
+    auto* scanInfoLayout = new QVBoxLayout();
+    scanInfoLayout->setSpacing(4);
+    scanInfoLayout->addWidget(m_scanProgress);
+    scanInfoLayout->addWidget(m_scanStatusLabel);
+
+    scanLayout->addWidget(m_scanButton);
+    scanLayout->addLayout(scanInfoLayout, 1);
+
+    layout->addWidget(SettingsUtils::createSettingRow(
+        QStringLiteral("ReplayGain Scanner"),
+        QStringLiteral("Analyze library tracks for loudness normalization (EBU R128)"),
+        scanWidget));
+
+    // Scanner connections
+    auto* scanner = ReplayGainScanner::instance();
+
+    connect(m_scanButton, &QPushButton::clicked, this, [this, scanner]() {
+        if (scanner->isScanning()) {
+            scanner->stopScan();
+        } else {
+            scanner->startScan();
+        }
+    });
+
+    connect(scanner, &ReplayGainScanner::scanStarted, this, [this]() {
+        m_scanButton->setText(QStringLiteral("Stop Scan"));
+        m_scanProgress->setVisible(true);
+        m_scanProgress->setValue(0);
+        m_scanStatusLabel->setVisible(true);
+        m_scanStatusLabel->setText(QStringLiteral("Preparing..."));
+    });
+
+    connect(scanner, &ReplayGainScanner::scanProgress, this, [this](int current, int total) {
+        if (total > 0) {
+            m_scanProgress->setMaximum(total);
+            m_scanProgress->setValue(current);
+            m_scanStatusLabel->setText(
+                QStringLiteral("%1 / %2 tracks analyzed").arg(current).arg(total));
+        }
+    });
+
+    connect(scanner, &ReplayGainScanner::scanFinished, this, [this](int scannedCount, int albumCount) {
+        m_scanButton->setText(QStringLiteral("Scan Library"));
+        m_scanProgress->setVisible(false);
+        m_scanStatusLabel->setVisible(true);
+        if (scannedCount > 0) {
+            m_scanStatusLabel->setText(
+                QStringLiteral("Done: %1 tracks, %2 albums").arg(scannedCount).arg(albumCount));
+        } else {
+            m_scanStatusLabel->setText(QStringLiteral("All tracks up to date"));
+        }
+    });
 
     // ── Section: Headroom Management ────────────────────────────────
     layout->addWidget(SettingsUtils::createSectionHeader(QStringLiteral("Headroom Management")));

@@ -77,6 +77,7 @@ private:
     void connectToAudioEngine();
     void connectToMusicKitPlayer();
     void playNextTrack();
+    void loadAndPlayTrack(const Track& track);  // Audio loading only — no queue state changes
     void emitQueueChangedDebounced();
     void scheduleGaplessPrepare();
     void onGaplessTransition();

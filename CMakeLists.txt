@@ -161,9 +161,12 @@ add_library(sorana_library OBJECT
     src/core/library/PlaylistManager.cpp
     src/core/library/AutoOrganizer.h
     src/core/library/AutoOrganizer.cpp
+    src/core/dsp/ReplayGainScanner.h
+    src/core/dsp/ReplayGainScanner.cpp
 )
 sorana_module_setup(sorana_library)
-target_link_libraries(sorana_library PRIVATE Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Concurrent)
+target_link_libraries(sorana_library PRIVATE Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Concurrent
+    PkgConfig::EBUR128 PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE)
 
 # ── sorana_audio ──────────────────────────────────────────────────
 add_library(sorana_audio OBJECT

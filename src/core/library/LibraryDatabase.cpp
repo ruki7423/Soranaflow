@@ -507,6 +507,7 @@ bool LibraryDatabase::reorderPlaylistTrack(const QString& playlistId, int fromPo
 
 // ── Volume Leveling (delegated to TrackRepository) ──────────────────
 void LibraryDatabase::updateR128Loudness(const QString& filePath, double loudness, double peak) { m_trackRepo->updateR128Loudness(filePath, loudness, peak); }
+void LibraryDatabase::updateReplayGain(const QString& filePath, double trackGainDb, double albumGainDb, double trackPeakLinear, double albumPeakLinear) { m_trackRepo->updateReplayGain(filePath, trackGainDb, albumGainDb, trackPeakLinear, albumPeakLinear); }
 
 // ── Play History (delegated to TrackRepository) ─────────────────────
 void LibraryDatabase::recordPlay(const QString& trackId) { m_trackRepo->recordPlay(trackId); }

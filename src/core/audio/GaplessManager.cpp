@@ -171,6 +171,16 @@ GaplessManager::TransitionResult GaplessManager::swapToCurrent(
     QString& currentFilePath)
 {
     TransitionResult result;
+
+    // Safety: if next decoders were destroyed (shutdown), return empty result
+    if (!m_nextDecoder && !m_nextDsdDecoder) {
+        result.newDuration = 0;
+        result.newSampleRate = 0;
+        result.newChannels = 0;
+        result.newUsingDSD = false;
+        return result;
+    }
+
     result.newDuration = m_nextFormat.durationSecs;
     result.newSampleRate = m_nextFormat.sampleRate;
     result.newChannels = m_nextFormat.channels;

@@ -228,12 +228,16 @@ void PlaybackState::previous()
 
     // Otherwise go to the previous track
     if (m_queueMgr->retreat()) {
+        // Skip setCurrentTrackInfo: retreat() already set the queue index correctly.
+        // Calling findOrInsertTrack + invalidateShuffleOrder would wipe shuffle history.
         m_currentTrack = m_queueMgr->currentTrack();
         m_currentTime = 0;
+        m_autoplayActive = false;
         emit timeChanged(m_currentTime);
+        m_queuePersist->scheduleSave();
         emitQueueChangedDebounced();
         emit trackChanged(m_currentTrack);
-        playTrack(m_currentTrack);
+        loadAndPlayTrack(m_currentTrack);
     } else {
         // Already at the first track — just restart it
         seek(0);
@@ -304,17 +308,20 @@ void PlaybackState::setCurrentTrackInfo(const Track& track)
     int idx = m_queueMgr->findOrInsertTrack(track);
     m_queueMgr->setCurrentIndex(idx);
 
+    // Rebuild shuffle to exclude the newly-selected track
+    // (prevents advance() from returning this same track next)
+    if (m_queueMgr->shuffleEnabled())
+        m_queueMgr->invalidateShuffleOrder();
+
     m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
     emit timeChanged(m_currentTime);
     emit trackChanged(m_currentTrack);
 }
 
-// ── playTrack ───────────────────────────────────────────────────────
-void PlaybackState::playTrack(const Track& track)
+// ── loadAndPlayTrack (audio loading only — no queue state changes) ──
+void PlaybackState::loadAndPlayTrack(const Track& track)
 {
-    setCurrentTrackInfo(track);
-
     if (!m_playing) {
         m_playing = true;
         emit playStateChanged(m_playing);
@@ -356,6 +363,13 @@ void PlaybackState::playTrack(const Track& track)
             scheduleGaplessPrepare();
         }
     });
+}
+
+// ── playTrack ───────────────────────────────────────────────────────
+void PlaybackState::playTrack(const Track& track)
+{
+    setCurrentTrackInfo(track);
+    loadAndPlayTrack(track);
 }
 
 // ── Queue CRUD — delegate to QueueManager ───────────────────────────
@@ -515,12 +529,16 @@ void PlaybackState::playNextTrack()
     }
 
     // Advanced — play the new track
+    // Skip setCurrentTrackInfo: advance() already set the queue index correctly.
+    // Calling findOrInsertTrack + setCurrentIndex would corrupt the shuffle state.
     m_currentTrack = m_queueMgr->currentTrack();
     m_currentTime = 0;
+    m_autoplayActive = false;
     emit timeChanged(m_currentTime);
+    m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
     emit trackChanged(m_currentTrack);
-    playTrack(m_currentTrack);
+    loadAndPlayTrack(m_currentTrack);
 }
 
 // ── scheduleGaplessPrepare ──────────────────────────────────────────

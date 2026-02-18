@@ -82,6 +82,24 @@ void QueuePersistence::saveImmediate()
     settings.setValue(QStringLiteral("queue/shuffle"), m_mgr->shuffleEnabled());
     settings.setValue(QStringLiteral("queue/repeat"), m_mgr->repeatMode());
 
+    // Persist shuffle order so it survives restart
+    if (m_mgr->shuffleEnabled()) {
+        const auto shuffledIdx = m_mgr->shuffledIndices();
+        QVariantList idxList;
+        idxList.reserve(shuffledIdx.size());
+        for (int i : shuffledIdx) idxList.append(i);
+        settings.setValue(QStringLiteral("queue/shuffledIndices"), idxList);
+
+        const auto shuffleHist = m_mgr->shuffleHistory();
+        QStringList histList;
+        histList.reserve(shuffleHist.size());
+        for (const QString& s : shuffleHist) histList.append(s);
+        settings.setValue(QStringLiteral("queue/shuffleHistory"), histList);
+    } else {
+        settings.remove(QStringLiteral("queue/shuffledIndices"));
+        settings.remove(QStringLiteral("queue/shuffleHistory"));
+    }
+
     qDebug() << "[Queue] Saved" << queue.size() << "tracks +"
              << userQueue.size() << "user-queued, index:" << m_mgr->currentIndex();
 }
@@ -169,6 +187,29 @@ void QueuePersistence::restore()
     }
 
     m_mgr->restoreState(tracks, idx, shuffle, repeat, userTracks);
+
+    // Restore shuffle order if shuffle was enabled
+    if (shuffle && !tracks.isEmpty()) {
+        QVariantList idxList = settings.value(QStringLiteral("queue/shuffledIndices")).toList();
+        if (!idxList.isEmpty()) {
+            QVector<int> shuffledIdx;
+            shuffledIdx.reserve(idxList.size());
+            for (const QVariant& v : idxList) {
+                int i = v.toInt();
+                if (i >= 0 && i < tracks.size())
+                    shuffledIdx.append(i);
+            }
+            m_mgr->setShuffledIndices(shuffledIdx);
+        }
+
+        QStringList histList = settings.value(QStringLiteral("queue/shuffleHistory")).toStringList();
+        if (!histList.isEmpty()) {
+            QVector<QString> history;
+            history.reserve(histList.size());
+            for (const QString& s : histList) history.append(s);
+            m_mgr->setShuffleHistory(history);
+        }
+    }
 
     qDebug() << "[Queue] Restored" << tracks.size() << "tracks +"
              << userTracks.size() << "user-queued, index:" << idx;

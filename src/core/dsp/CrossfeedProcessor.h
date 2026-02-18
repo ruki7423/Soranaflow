@@ -52,7 +52,7 @@ private:
     float m_lpStateR = 0.0f;
 
     // Delay buffer (render thread only)
-    static constexpr int MAX_DELAY = 64;
+    static constexpr int MAX_DELAY = 256;
     float m_delayL[MAX_DELAY] = {};
     float m_delayR[MAX_DELAY] = {};
     int m_delayIdx = 0;

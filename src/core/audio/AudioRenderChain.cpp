@@ -27,7 +27,8 @@ void AudioRenderChain::updateHeadroomGain()
     case Settings::HeadroomMode::Auto: {
         bool anyDspActive = Settings::instance()->volumeLeveling()
                          || Settings::instance()->crossfeedEnabled()
-                         || (Settings::instance()->convolutionEnabled() && m_convolution.hasIR());
+                         || (Settings::instance()->convolutionEnabled() && m_convolution.hasIR())
+                         || Settings::instance()->upsamplingEnabled();
         dB = anyDspActive ? -3.0 : 0.0;
         break;
     }
@@ -77,13 +78,20 @@ void AudioRenderChain::process(float* buf, int frames, int channels,
         dsp->process(buf, frames, channels);
     }
 
-    // Volume leveling
+    // Volume leveling (with smooth ramp to prevent clicks)
     if (leveling) {
-        float lg = leveling->gainLinear();
-        if (lg != 1.0f) {
-            int n = frames * channels;
-            for (int i = 0; i < n; ++i) buf[i] *= lg;
+        float targetGain = leveling->gainLinear();
+        float prevGain = m_prevLevelingGain;
+        if (targetGain != 1.0f || prevGain != 1.0f) {
+            for (int f = 0; f < frames; ++f) {
+                float t = (frames > 1) ? (float)f / (float)(frames - 1) : 1.0f;
+                float gain = prevGain + (targetGain - prevGain) * t;
+                for (int c = 0; c < channels; ++c) {
+                    buf[f * channels + c] *= gain;
+                }
+            }
         }
+        m_prevLevelingGain = targetGain;
     }
 
     // Peak limiter (safety net after all DSP)

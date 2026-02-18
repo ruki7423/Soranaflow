@@ -351,9 +351,12 @@ void MainWindow::initializeDeferred()
                 }
             }
             qDebug() << "[STARTUP] VST plugins loaded:" << loaded
-                     << "of" << paths.size();
+                     << "of" << paths.size()
+                     << "pipeline.rate:" << pipeline->isEnabled()
+                     << "pluginCount:" << pipeline->processorCount();
 
             // Restore saved plugin states
+            QStringList failedRestores;
             if (loaded > 0 && pipeline) {
                 auto* settings = Settings::instance();
                 for (int i = 0; i < pipeline->processorCount(); ++i) {
@@ -380,8 +383,18 @@ void MainWindow::initializeDeferred()
                     } else {
                         qWarning() << "[STARTUP] Failed to restore state for"
                                    << QString::fromStdString(proc->getName());
+                        failedRestores.append(QString::fromStdString(proc->getName()));
                     }
                 }
+            }
+
+            if (!failedRestores.isEmpty()) {
+                QTimer::singleShot(600, this, [this, failedRestores]() {
+                    StyledMessageBox::warning(this, QStringLiteral("VST State Restore"),
+                        QStringLiteral("Could not restore saved state for:\n\n%1\n\n"
+                        "These plugins will use their default settings.")
+                            .arg(failedRestores.join(QStringLiteral("\n"))));
+                });
             }
 
             if (!failedPlugins.isEmpty()) {

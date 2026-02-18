@@ -152,8 +152,10 @@ Track QueueManager::peekNextTrack() const
     if (m_shuffle) {
         if (!m_shuffledIndices.isEmpty())
             nextIdx = m_shuffledIndices.first();
+        else if (m_repeat == 1 && !m_queue.isEmpty())
+            nextIdx = 0;  // Repeat All: next cycle will start from some track
         else
-            return Track();  // Next cycle unknown until reshuffle
+            return Track();  // No repeat or empty queue
     } else {
         nextIdx = m_queueIndex + 1;
         if (nextIdx >= m_queue.size()) {
@@ -284,9 +286,9 @@ void QueueManager::toggleShuffle()
 {
     m_shuffle = !m_shuffle;
     m_shuffleHistory.clear();
-    if (m_shuffle)
+    if (m_shuffle && !m_queue.isEmpty())
         rebuildShuffleOrder();
-    else
+    else if (!m_shuffle)
         m_shuffledIndices.clear();
 }
 

@@ -169,8 +169,8 @@ bool ConvolutionProcessor::loadIR(const std::string& filePath)
     int waitCount = 0;
     while (m_irSwapPending.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if (++waitCount > 2000) {  // 2 second timeout
-            qDebug() << "[Convolution] Timeout waiting for IR swap";
+        if (++waitCount > 5000) {  // 5 second timeout
+            qWarning() << "[Convolution] Timeout waiting for IR swap";
             return false;
         }
     }

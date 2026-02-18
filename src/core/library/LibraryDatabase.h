@@ -86,6 +86,9 @@ public:
 
     // ── Volume Leveling ───────────────────────────────────────────────
     void updateR128Loudness(const QString& filePath, double loudness, double peak);
+    void updateReplayGain(const QString& filePath,
+                          double trackGainDb, double albumGainDb,
+                          double trackPeakLinear, double albumPeakLinear);
 
     // ── MBID helpers ──────────────────────────────────────────────────
     QString releaseGroupMbidForAlbum(const QString& albumId) const;

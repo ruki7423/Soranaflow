@@ -55,6 +55,12 @@ public:
                       bool shuffle, int repeat,
                       const QVector<Track>& userQueue = {});
 
+    // Shuffle order persistence
+    QVector<int> shuffledIndices() const { return m_shuffledIndices; }
+    QVector<QString> shuffleHistory() const { return m_shuffleHistory; }
+    void setShuffledIndices(const QVector<int>& indices) { m_shuffledIndices = indices; }
+    void setShuffleHistory(const QVector<QString>& history) { m_shuffleHistory = history; }
+
 private:
     void rebuildShuffleOrder();
 

@@ -44,8 +44,20 @@ private:
     QList<LyricLine> parseLrc(const QString& lrcText);
     QList<LyricLine> parsePlainText(const QString& text);
 
+    void retryLrclib(const QString& title,
+                     const QString& artist,
+                     const QString& album,
+                     int durationSec);
+
     QNetworkAccessManager* m_nam = nullptr;
     QNetworkReply* m_pendingReply = nullptr;
     QList<LyricLine> m_lyrics;
     bool m_synced = false;
+
+    // LRCLIB retry state
+    int m_lrclibRetryCount = 0;
+    static constexpr int LRCLIB_MAX_RETRIES = 3;
+    static constexpr int LRCLIB_RETRY_DELAY_MS = 2000;
+    QString m_lastTitle, m_lastArtist, m_lastAlbum;
+    int m_lastDurationSec = 0;
 };

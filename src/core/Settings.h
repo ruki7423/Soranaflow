@@ -135,6 +135,10 @@ public:
     bool eqBandEnabled(int band) const;
     void setEqBandEnabled(int band, bool enabled);
 
+    // Linear phase EQ mode
+    bool eqLinearPhase() const;
+    void setEqLinearPhase(bool enabled);
+
     // ── VST ──────────────────────────────────────────────────────────
     QStringList activeVstPlugins() const;
     void setActiveVstPlugins(const QStringList& paths);

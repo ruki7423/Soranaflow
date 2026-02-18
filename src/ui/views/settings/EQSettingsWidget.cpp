@@ -267,6 +267,29 @@ QWidget* EQSettingsWidget::createEQCard(QVBoxLayout* parentLayout)
             this, &EQSettingsWidget::applyEQPreset);
     headerLayout->addWidget(m_eqPresetCombo);
 
+    // Phase mode combo (Minimum Phase / Linear Phase)
+    m_phaseModeCombo = new StyledComboBox(dspCard);
+    m_phaseModeCombo->addItems({
+        QStringLiteral("Minimum Phase"),
+        QStringLiteral("Linear Phase")
+    });
+    m_phaseModeCombo->setFixedWidth(140);
+    // Restore from settings
+    bool lpSaved = Settings::instance()->eqLinearPhase();
+    m_phaseModeCombo->setCurrentIndex(lpSaved ? 1 : 0);
+    connect(m_phaseModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [](int index) {
+        bool linear = (index == 1);
+        Settings::instance()->setEqLinearPhase(linear);
+        auto* pipeline = AudioEngine::instance()->dspPipeline();
+        if (pipeline) {
+            auto mode = linear ? EqualizerProcessor::LinearPhase
+                               : EqualizerProcessor::MinimumPhase;
+            pipeline->equalizerProcessor()->setPhaseMode(mode);
+        }
+    });
+    headerLayout->addWidget(m_phaseModeCombo);
+
     m_dspEnabledSwitch = new StyledSwitch(dspCard);
     m_dspEnabledSwitch->setChecked(Settings::instance()->dspEnabled());
     connect(m_dspEnabledSwitch, &StyledSwitch::toggled, this, [](bool checked) {

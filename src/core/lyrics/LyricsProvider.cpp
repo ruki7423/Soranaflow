@@ -9,6 +9,7 @@ extern "C" {
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QJsonDocument>
@@ -87,6 +88,7 @@ void LyricsProvider::fetchLyrics(const QString& filePath,
 
     // 3. Try LRCLIB online API (if internet metadata is enabled)
     if (!title.isEmpty() && Settings::instance()->internetMetadataEnabled()) {
+        m_lrclibRetryCount = 0;
         fetchFromLrclib(title, artist, album, durationSec);
     } else {
         emit lyricsNotFound();
@@ -202,11 +204,36 @@ QList<LyricLine> LyricsProvider::readLrcFile(const QString& audioFilePath)
 //  fetchFromLrclib — LRCLIB API (async)
 // ═════════════════════════════════════════════════════════════════════
 
+void LyricsProvider::retryLrclib(const QString& title,
+                                  const QString& artist,
+                                  const QString& album,
+                                  int durationSec)
+{
+    if (m_lrclibRetryCount >= LRCLIB_MAX_RETRIES) {
+        qDebug() << "[Lyrics] LRCLIB: max retries reached";
+        emit lyricsNotFound();
+        return;
+    }
+    m_lrclibRetryCount++;
+    int delayMs = LRCLIB_RETRY_DELAY_MS * m_lrclibRetryCount;
+    qDebug() << "[Lyrics] LRCLIB retry" << m_lrclibRetryCount
+             << "in" << delayMs << "ms";
+    QTimer::singleShot(delayMs, this, [this, title, artist, album, durationSec]() {
+        fetchFromLrclib(title, artist, album, durationSec);
+    });
+}
+
 void LyricsProvider::fetchFromLrclib(const QString& title,
                                       const QString& artist,
                                       const QString& album,
                                       int durationSec)
 {
+    // Save params for retry
+    m_lastTitle = title;
+    m_lastArtist = artist;
+    m_lastAlbum = album;
+    m_lastDurationSec = durationSec;
+
     // Detect if query title has non-ASCII (Japanese/Korean/etc.)
     bool queryHasNonAscii = false;
     for (const QChar& ch : title) {
@@ -292,7 +319,7 @@ void LyricsProvider::fetchFromLrclib(const QString& title,
             if (searchReply->error() != QNetworkReply::NoError) {
                 qDebug() << "[Lyrics] LRCLIB search error:"
                          << searchReply->errorString();
-                emit lyricsNotFound();
+                retryLrclib(m_lastTitle, m_lastArtist, m_lastAlbum, m_lastDurationSec);
                 return;
             }
 

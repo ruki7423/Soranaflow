@@ -4,6 +4,11 @@
 #include <cmath>
 #include <array>
 #include <vector>
+#include <atomic>
+
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
 
 // Biquad filter coefficients
 struct BiquadCoeffs {
@@ -25,7 +30,7 @@ struct EQBand {
     FilterType type  = Peak;
     float frequency  = 1000.0f;   // Hz
     float gainDb     = 0.0f;      // dB (-24 to +24)
-    float q          = 0.7071f;   // Quality factor (0.1 to 30), default = 1/√2 Butterworth
+    float q          = 0.7071f;   // Quality factor (0.1 to 30), default = 1/sqrt(2) Butterworth
 };
 
 // 20-band parametric EQ processor (REW-style)
@@ -34,7 +39,10 @@ public:
     static constexpr int MAX_BANDS = 20;
     static constexpr int MAX_CHANNELS = 24;
 
+    enum PhaseMode { MinimumPhase = 0, LinearPhase = 1 };
+
     EqualizerProcessor();
+    ~EqualizerProcessor();
 
     void process(float* buf, int frames, int channels) override;
 
@@ -53,6 +61,11 @@ public:
     int activeBands() const { return m_activeBands; }
     void setActiveBands(int count);
 
+    // Phase mode
+    void setPhaseMode(PhaseMode mode);
+    PhaseMode phaseMode() const { return m_phaseMode; }
+    int latencySamples() const;
+
     // Frequency response for graph visualization (returns dB values)
     std::vector<double> getFrequencyResponse(int numPoints = 512) const;
 
@@ -69,9 +82,58 @@ private:
     double m_sampleRate = 44100.0;
     int m_channels = 2;
     int m_activeBands = 10;
+    PhaseMode m_phaseMode = MinimumPhase;
+    std::atomic<int> m_pendingPhaseMode{-1};  // -1 = no pending change
+    int m_phaseMuteSamples = 0;
+    static constexpr int PHASE_MUTE_SAMPLES = 128;
 
     std::array<EQBand, MAX_BANDS> m_bands;
     std::array<BiquadCoeffs, MAX_BANDS> m_coeffs;
     // Per-band, per-channel biquad state
     std::array<std::array<BiquadState, MAX_CHANNELS>, MAX_BANDS> m_state;
+
+    // ── Linear Phase (vDSP/Accelerate overlap-add) ──────────────────
+#ifdef __APPLE__
+    static constexpr int LP_PARTITION_SIZE = 1024;
+    static constexpr int LP_MAX_FFT_LOG2N = 15;  // supports up to 32768-point FFT
+
+    std::atomic<bool> m_firDirty{true};  // UI thread sets, RT thread reads
+
+    int m_firLen = 0;
+    int m_fftSize = 0;
+    int m_fftHalf = 0;
+    int m_fftLog2n = 0;
+
+    FFTSetup m_fftSetup = nullptr;
+
+    // Kernel in frequency domain
+    std::vector<float> m_firKernelFDReal;
+    std::vector<float> m_firKernelFDImag;
+    DSPSplitComplex m_firKernelFD{};
+
+    // Per-channel OLA state
+    struct ChannelOLA {
+        std::vector<float> inputBuf;    // LP_PARTITION_SIZE
+        std::vector<float> overlapBuf;  // fftSize - LP_PARTITION_SIZE
+        std::vector<float> outputBuf;   // LP_PARTITION_SIZE
+        int position = 0;
+        bool hasOutput = false;
+    };
+    std::vector<ChannelOLA> m_olaState;  // [MAX_CHANNELS]
+
+    // FFT scratch buffers
+    std::vector<float> m_lpFftInBuf;
+    std::vector<float> m_lpSplitReal, m_lpSplitImag;
+    DSPSplitComplex m_lpFftSplit{};
+    std::vector<float> m_lpAccumReal, m_lpAccumImag;
+    DSPSplitComplex m_lpAccumSplit{};
+    std::vector<float> m_lpIfftOut;
+
+    // Kernel build scratch
+    std::vector<float> m_lpKernelBuildBuf;
+
+    void allocateLinearPhaseBuffers();
+    void buildFIRKernel();
+    void processLinearPhase(float* buf, int frames, int channels);
+#endif
 };

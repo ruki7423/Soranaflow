@@ -584,6 +584,17 @@ void Settings::setEqBandEnabled(int band, bool enabled)
         QStringLiteral("dsp/eqBand%1Enabled").arg(band), enabled);
 }
 
+// ── Linear Phase EQ ─────────────────────────────────────────────────
+bool Settings::eqLinearPhase() const
+{
+    return m_settings.value(QStringLiteral("dsp/eqLinearPhase"), false).toBool();
+}
+
+void Settings::setEqLinearPhase(bool enabled)
+{
+    m_settings.setValue(QStringLiteral("dsp/eqLinearPhase"), enabled);
+}
+
 // ── VST ─────────────────────────────────────────────────────────────
 QStringList Settings::activeVstPlugins() const
 {

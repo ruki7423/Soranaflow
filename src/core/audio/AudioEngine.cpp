@@ -196,7 +196,7 @@ AudioEngine::AudioEngine(QObject* parent)
         auto* s = Settings::instance();
         m_renderChain.convolution().setEnabled(s->convolutionEnabled());
         QString irPath = s->convolutionIRPath();
-        if (!irPath.isEmpty()) {
+        if (!irPath.isEmpty() && QFileInfo::exists(irPath)) {
             (void)QtConcurrent::run([this, irPath]() {
                 bool ok = m_renderChain.convolution().loadIR(irPath.toStdString());
                 qDebug() << "[Convolution] IR load:" << irPath << (ok ? "OK" : "FAILED");
@@ -239,7 +239,7 @@ AudioEngine::AudioEngine(QObject* parent)
         m_renderChain.hrtf().setEnabled(s->hrtfEnabled());
         m_renderChain.hrtf().setSpeakerAngle(s->hrtfSpeakerAngle());
         QString sofaPath = s->hrtfSofaPath();
-        if (!sofaPath.isEmpty()) {
+        if (!sofaPath.isEmpty() && QFileInfo::exists(sofaPath)) {
             (void)QtConcurrent::run([this, sofaPath]() {
                 bool ok = m_renderChain.hrtf().loadSOFA(sofaPath);
                 qDebug() << "[HRTF] SOFA load:" << sofaPath << (ok ? "OK" : "FAILED");
@@ -405,6 +405,9 @@ bool AudioEngine::load(const QString& filePath)
     m_sampleRate.store(fmt.sampleRate, std::memory_order_relaxed);
     m_channels.store(fmt.channels, std::memory_order_relaxed);
     m_renderChain.setSampleRate(static_cast<int>(fmt.sampleRate));
+    // Reset spatial DSP state on format change (DSD→PCM, rate change)
+    // to flush stale filter history from the previous track
+    m_renderChain.hrtf().reset();
     m_duration = fmt.durationSecs;
     m_framesRendered.store(0, std::memory_order_relaxed);
 
@@ -577,6 +580,9 @@ void AudioEngine::stop()
     if (m_output) {
         m_output->setRenderCallback(nullptr);
         m_output->stop();
+        // Wait for any in-flight render callback to finish before touching decoders
+        for (int i = 0; i < 50 && m_renderingInProgress.load(std::memory_order_acquire); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         m_output->close();
     }
 
@@ -609,6 +615,10 @@ void AudioEngine::stop()
 // ── seek ────────────────────────────────────────────────────────────
 void AudioEngine::seek(double secs)
 {
+    double dur = m_duration.load(std::memory_order_relaxed);
+    if (secs < 0.0) secs = 0.0;
+    if (dur > 0.0 && secs > dur) secs = dur;
+
     std::lock_guard<std::mutex> lock(m_decoderMutex);
     bool seekOk = false;
     if (m_usingDSDDecoder && m_dsdDecoder && m_dsdDecoder->isOpen()) {
@@ -617,7 +627,10 @@ void AudioEngine::seek(double secs)
         seekOk = m_decoder->seek(secs);
     }
     if (seekOk) {
-        m_framesRendered.store((int64_t)(secs * m_sampleRate), std::memory_order_relaxed);
+        double sr = m_sampleRate.load(std::memory_order_relaxed);
+        int64_t targetFrame = (sr > 0) ? (int64_t)(secs * sr) : 0;
+        if (targetFrame < 0) targetFrame = 0;
+        m_framesRendered.store(targetFrame, std::memory_order_relaxed);
         if (m_dspPipeline) m_dspPipeline->reset();
         emit positionChanged(secs);
     }
@@ -969,7 +982,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                 if (!m_gapless.isCrossfading() && cfMs > 0
                     && m_gapless.isNextTrackReady()
                     && !m_gapless.nextUsingDSD()
-                    && std::abs(m_gapless.nextFormat().sampleRate - sr) < 1.0
+                    && std::abs(m_gapless.nextFormat().sampleRate - sr) < 100.0
                     && m_gapless.nextFormat().channels == channels) {
                     int64_t totalFrames = (int64_t)(m_duration * sr);
                     int64_t cfFrames = (int64_t)(cfMs * sr / 1000.0);

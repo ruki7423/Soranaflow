@@ -95,6 +95,27 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
 {
     if (!m_enabled) return;
 
+    // Apply deferred phase mode switch (set by UI thread)
+    int pending = m_pendingPhaseMode.exchange(-1, std::memory_order_acquire);
+    if (pending >= 0) {
+        m_phaseMode = static_cast<PhaseMode>(pending);
+#ifdef __APPLE__
+        if (m_phaseMode == MinimumPhase) {
+            for (auto& bandStates : m_state) {
+                for (auto& s : bandStates) { s = BiquadState{}; }
+            }
+        }
+#endif
+        m_phaseMuteSamples = PHASE_MUTE_SAMPLES;
+    }
+
+    // Brief mute during mode switch to prevent clicks
+    if (m_phaseMuteSamples > 0) {
+        int muteFrames = std::min(frames, m_phaseMuteSamples);
+        std::memset(buf, 0, muteFrames * channels * sizeof(float));
+        m_phaseMuteSamples -= muteFrames;
+    }
+
 #ifdef __APPLE__
     if (m_phaseMode == LinearPhase && m_fftSize > 0) {
         processLinearPhase(buf, frames, channels);
@@ -174,19 +195,14 @@ void EqualizerProcessor::setActiveBands(int count)
 void EqualizerProcessor::setPhaseMode(PhaseMode mode)
 {
     if (m_phaseMode == mode) return;
-    m_phaseMode = mode;
+    // Defer the actual switch to the audio thread via atomic pending flag.
+    // process() will pick it up and apply a brief mute to avoid clicks.
+    m_pendingPhaseMode.store(static_cast<int>(mode), std::memory_order_release);
 
 #ifdef __APPLE__
     if (mode == LinearPhase) {
         allocateLinearPhaseBuffers();
         m_firDirty.store(true, std::memory_order_relaxed);
-    } else {
-        // Switching back to minimum phase — reset biquad state
-        for (auto& bandStates : m_state) {
-            for (auto& s : bandStates) {
-                s = BiquadState{};
-            }
-        }
     }
 #endif
 }

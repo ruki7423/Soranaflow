@@ -463,6 +463,9 @@ int main(int argc, char* argv[]) {
 
         std::signal(SIGSEGV, shutdownCrashHandler);
         std::signal(SIGABRT, shutdownCrashHandler);
+        // Save window geometry before shutdown (covers force-quit / Cmd+Q)
+        Settings::instance()->setWindowGeometry(window.saveGeometry());
+
         // Flush debounced saves before anything shuts down
         PlaybackState::instance()->flushPendingSaves();
         Settings::instance()->sync();

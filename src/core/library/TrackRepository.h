@@ -50,6 +50,9 @@ public:
 
     // ── Volume Leveling ──────────────────────────────────────────────
     void updateR128Loudness(const QString& filePath, double loudness, double peak);
+    void updateReplayGain(const QString& filePath,
+                          double trackGainDb, double albumGainDb,
+                          double trackPeakLinear, double albumPeakLinear);
 
     // ── Play History ─────────────────────────────────────────────────
     void recordPlay(const QString& trackId);
