@@ -655,22 +655,29 @@ void EqualizerProcessor::processLinearPhase(float* buf, int frames, int channels
                 vDSP_ztoc(&m_lpAccumSplit, 1,
                           reinterpret_cast<DSPComplex*>(m_lpIfftOut.data()), 2, m_fftHalf);
 
-                // Scale: 1/fftSize (NOT 1/(fftSize*4) like ConvolutionProcessor).
-                // buildFIRKernel() does IFFT→scale(1/N)→FFT roundtrip which cancels
-                // vDSP's forward FFT factor, so the product only carries α from the
-                // input FFT, not α² like direct FFT×FFT convolution.
-                float scale = 1.0f / static_cast<float>(m_fftSize);
+                // Scale: 1/(fftSize*4), same as ConvolutionProcessor.
+                // Both input and kernel were forward-FFT'd by vDSP (each ×2),
+                // and vDSP inverse doesn't divide by N.  Total spurious factor = 4N.
+                float scale = 1.0f / static_cast<float>(m_fftSize * 4);
                 vDSP_vsmul(m_lpIfftOut.data(), 1, &scale, m_lpIfftOut.data(), 1, m_fftSize);
 
                 // Overlap-add: output = result[0..PART-1] + overlap[0..PART-1]
                 vDSP_vadd(m_lpIfftOut.data(), 1, ola.overlapBuf.data(), 1,
                          ola.outputBuf.data(), 1, LP_PARTITION_SIZE);
 
-                // Save tail as new overlap
+                // Update overlap: shift consumed portion, add new IFFT tail.
+                // The overlap buffer is longer than one partition (fftSize > 2*partSize)
+                // so we must preserve the unconsumed tail from previous blocks.
                 int overlapLen = m_fftSize - LP_PARTITION_SIZE;
-                std::memcpy(ola.overlapBuf.data(),
-                           m_lpIfftOut.data() + LP_PARTITION_SIZE,
-                           overlapLen * sizeof(float));
+                int carryLen = overlapLen - LP_PARTITION_SIZE;
+                std::memmove(ola.overlapBuf.data(),
+                            ola.overlapBuf.data() + LP_PARTITION_SIZE,
+                            carryLen * sizeof(float));
+                std::memset(ola.overlapBuf.data() + carryLen, 0,
+                           LP_PARTITION_SIZE * sizeof(float));
+                vDSP_vadd(m_lpIfftOut.data() + LP_PARTITION_SIZE, 1,
+                         ola.overlapBuf.data(), 1,
+                         ola.overlapBuf.data(), 1, overlapLen);
 
                 ola.position = 0;
 
