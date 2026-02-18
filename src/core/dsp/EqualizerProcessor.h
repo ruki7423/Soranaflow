@@ -85,11 +85,12 @@ private:
     int m_activeBands = 10;
     PhaseMode m_phaseMode = MinimumPhase;
     std::atomic<int> m_pendingPhaseMode{-1};  // -1 = no pending change
-    // Phase mode transition state (fade-out → switch+silence → fade-in)
-    int m_transitionPhase = 0;       // 0=none, 1=fade-out, 2=switch+silence, 3=fade-in
+    // Phase mode transition (fade-out → mute/warmup → fade-in)
+    int m_transitionPhase = 0;       // 0=none, 1=fade-out, 2=mute+fade-in
     int m_transitionPos = 0;
     PhaseMode m_transitionTarget = MinimumPhase;
-    static constexpr int TRANSITION_FADE_SAMPLES = 128;  // ~3ms @ 44.1kHz
+    int m_warmupDuration = 0;
+    static constexpr int TRANSITION_FADE_LEN = 256;  // ~6ms fade
 
     std::array<EQBand, MAX_BANDS> m_bands;
     std::array<BiquadCoeffs, MAX_BANDS> m_coeffs;

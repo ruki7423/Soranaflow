@@ -105,10 +105,8 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
         }
     }
 
-    // ── Phase transition: fade-out → switch+silence → fade-in ──
-
+    // ── Phase 1: Fade-out current mode ──
     if (m_transitionPhase == 1) {
-        // Process with CURRENT mode
 #ifdef __APPLE__
         if (m_phaseMode == LinearPhase && m_fftSize > 0)
             processLinearPhase(buf, frames, channels);
@@ -116,51 +114,52 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
 #endif
             processMinimumPhase(buf, frames, channels);
 
-        // Apply fade-out ramp
         for (int i = 0; i < frames; ++i) {
-            float t = static_cast<float>(m_transitionPos + i) / TRANSITION_FADE_SAMPLES;
+            float t = static_cast<float>(m_transitionPos + i) / TRANSITION_FADE_LEN;
             float gain = (t >= 1.0f) ? 0.0f : 1.0f - t;
             for (int c = 0; c < channels; ++c)
                 buf[i * channels + c] *= gain;
         }
         m_transitionPos += frames;
-        if (m_transitionPos >= TRANSITION_FADE_SAMPLES)
-            m_transitionPhase = 2;
-        return;
-    }
+        if (m_transitionPos >= TRANSITION_FADE_LEN) {
+            // === Switch mode + clear ALL state ===
+            m_phaseMode = m_transitionTarget;
 
-    if (m_transitionPhase == 2) {
-        // Switch mode + clear ALL processing state
-        m_phaseMode = m_transitionTarget;
-
-        for (auto& bandStates : m_state) {
-            for (auto& s : bandStates) { s = BiquadState{}; }
-        }
+            for (auto& bandStates : m_state)
+                for (auto& s : bandStates) s = BiquadState{};
 #ifdef __APPLE__
-        for (auto& ola : m_olaState) {
-            if (!ola.inputBuf.empty())
-                std::memset(ola.inputBuf.data(), 0, ola.inputBuf.size() * sizeof(float));
-            if (!ola.overlapBuf.empty())
-                std::memset(ola.overlapBuf.data(), 0, ola.overlapBuf.size() * sizeof(float));
-            if (!ola.outputBuf.empty())
-                std::memset(ola.outputBuf.data(), 0, ola.outputBuf.size() * sizeof(float));
-            ola.position = 0;
-            ola.hasOutput = false;
-        }
-        if (m_phaseMode == LinearPhase)
-            m_firDirty.store(true, std::memory_order_relaxed);
+            for (auto& ola : m_olaState) {
+                if (!ola.inputBuf.empty())
+                    std::memset(ola.inputBuf.data(), 0, ola.inputBuf.size() * sizeof(float));
+                if (!ola.overlapBuf.empty())
+                    std::memset(ola.overlapBuf.data(), 0, ola.overlapBuf.size() * sizeof(float));
+                if (!ola.outputBuf.empty())
+                    std::memset(ola.outputBuf.data(), 0, ola.outputBuf.size() * sizeof(float));
+                ola.position = 0;
+                ola.hasOutput = false;
+            }
+            if (m_phaseMode == LinearPhase)
+                m_firDirty.store(true, std::memory_order_relaxed);
+
+            // LP needs a full partition before producing output.
+            // MP biquads need ~256 samples to reach steady state.
+            m_warmupDuration = (m_phaseMode == LinearPhase)
+                ? LP_PARTITION_SIZE + TRANSITION_FADE_LEN
+                : 2 * TRANSITION_FADE_LEN;
+#else
+            m_warmupDuration = 2 * TRANSITION_FADE_LEN;
 #endif
-
-        // Output silence for this block
-        std::memset(buf, 0, frames * channels * sizeof(float));
-
-        m_transitionPhase = 3;
-        m_transitionPos = 0;
+            m_transitionPhase = 2;
+            m_transitionPos = 0;
+        }
         return;
     }
 
-    if (m_transitionPhase == 3) {
-        // Process with NEW mode
+    // ── Phase 2: Mute while new mode warms up, then fade-in ──
+    if (m_transitionPhase == 2) {
+        // Process with new mode to warm it up (fills OLA partition / settles biquads).
+        // processLinearPhase reads input from buf (real audio) but may not write
+        // output when !hasOutput — we apply the gain envelope below regardless.
 #ifdef __APPLE__
         if (m_phaseMode == LinearPhase && m_fftSize > 0)
             processLinearPhase(buf, frames, channels);
@@ -168,15 +167,23 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
 #endif
             processMinimumPhase(buf, frames, channels);
 
-        // Apply fade-in ramp
+        // Gain envelope: silence during warmup, then fade-in.
+        // silentEnd = point where fade-in ramp starts.
+        int silentEnd = m_warmupDuration - TRANSITION_FADE_LEN;
         for (int i = 0; i < frames; ++i) {
-            float t = static_cast<float>(m_transitionPos + i) / TRANSITION_FADE_SAMPLES;
-            float gain = (t >= 1.0f) ? 1.0f : t;
+            int pos = m_transitionPos + i;
+            float gain;
+            if (pos < silentEnd) {
+                gain = 0.0f;
+            } else {
+                float t = static_cast<float>(pos - silentEnd) / TRANSITION_FADE_LEN;
+                gain = (t >= 1.0f) ? 1.0f : t;
+            }
             for (int c = 0; c < channels; ++c)
                 buf[i * channels + c] *= gain;
         }
         m_transitionPos += frames;
-        if (m_transitionPos >= TRANSITION_FADE_SAMPLES)
+        if (m_transitionPos >= m_warmupDuration)
             m_transitionPhase = 0;  // transition complete
         return;
     }
