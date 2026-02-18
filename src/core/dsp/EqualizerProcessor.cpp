@@ -141,11 +141,18 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
             if (m_phaseMode == LinearPhase)
                 m_firDirty.store(true, std::memory_order_relaxed);
 
-            // LP needs a full partition before producing output.
-            // MP biquads need ~256 samples to reach steady state.
-            m_warmupDuration = (m_phaseMode == LinearPhase)
-                ? LP_PARTITION_SIZE + TRANSITION_FADE_LEN
-                : 2 * TRANSITION_FADE_LEN;
+            // LP latency = LP_PARTITION_SIZE + firLen/2 (typically 3072 @ 44.1kHz).
+            // The OLA pipeline needs this many input samples before output becomes
+            // non-zero, PLUS one more partition to actually read the first valid
+            // output block, PLUS the fade-in ramp length.
+            // MP biquads settle quickly; 2× fade length is sufficient.
+            if (m_phaseMode == LinearPhase && m_firLen > 0) {
+                int lpLatency = LP_PARTITION_SIZE + m_firLen / 2;
+                int partitions = (lpLatency + LP_PARTITION_SIZE - 1) / LP_PARTITION_SIZE;
+                m_warmupDuration = (partitions + 1) * LP_PARTITION_SIZE + TRANSITION_FADE_LEN;
+            } else {
+                m_warmupDuration = 2 * TRANSITION_FADE_LEN;
+            }
 #else
             m_warmupDuration = 2 * TRANSITION_FADE_LEN;
 #endif
@@ -157,9 +164,7 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
 
     // ── Phase 2: Mute while new mode warms up, then fade-in ──
     if (m_transitionPhase == 2) {
-        // Process with new mode to warm it up (fills OLA partition / settles biquads).
-        // processLinearPhase reads input from buf (real audio) but may not write
-        // output when !hasOutput — we apply the gain envelope below regardless.
+        // Process with new mode to warm it up (fills OLA pipeline / settles biquads).
 #ifdef __APPLE__
         if (m_phaseMode == LinearPhase && m_fftSize > 0)
             processLinearPhase(buf, frames, channels);
@@ -168,7 +173,6 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
             processMinimumPhase(buf, frames, channels);
 
         // Gain envelope: silence during warmup, then fade-in.
-        // silentEnd = point where fade-in ramp starts.
         int silentEnd = m_warmupDuration - TRANSITION_FADE_LEN;
         for (int i = 0; i < frames; ++i) {
             int pos = m_transitionPos + i;
@@ -687,8 +691,14 @@ void EqualizerProcessor::processLinearPhase(float* buf, int frames, int channels
                 for (int c = 0; c < ch; ++c) {
                     buf[baseIdx + c] = m_olaState[c].outputBuf[firstChPos + i];
                 }
+            } else {
+                // First partition(s) — output silence (inherent latency).
+                // Must zero buf explicitly; input data is consumed into inputBuf above
+                // but without this, raw input would leak through to downstream.
+                for (int c = 0; c < ch; ++c) {
+                    buf[baseIdx + c] = 0.0f;
+                }
             }
-            // else: first partition — output silence (inherent latency)
         }
 
         // Update positions
