@@ -398,9 +398,20 @@ void MainWindow::initializeDeferred()
             }
 
             if (!failedPlugins.isEmpty()) {
+                // Remove failed plugins from saved list so they don't retry on next launch
+                QStringList remaining;
+                for (const QString& p : paths) {
+                    QString baseName = QFileInfo(p).completeBaseName();
+                    if (!failedPlugins.contains(baseName))
+                        remaining.append(p);
+                }
+                Settings::instance()->setActiveVstPlugins(remaining);
+                qDebug() << "[STARTUP] Removed" << failedPlugins.size()
+                         << "failed VST plugins from saved settings";
+
                 QTimer::singleShot(500, this, [this, failedPlugins]() {
                     StyledMessageBox::warning(this, QStringLiteral("VST Plugin Loading"),
-                        QStringLiteral("The following plugins could not be loaded:\n\n%1\n\n"
+                        QStringLiteral("The following plugins could not be loaded and have been removed:\n\n%1\n\n"
                         "They may be incompatible, damaged, or blocked by macOS security.\n"
                         "Try right-clicking each plugin in Finder → Open to allow it.")
                             .arg(failedPlugins.join(QStringLiteral("\n"))));

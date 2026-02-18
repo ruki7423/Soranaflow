@@ -15,6 +15,7 @@ public:
     void setShuffleEnabled(bool enabled);
     void setRepeatMode(PlaybackState::RepeatMode mode);
     void resetProgress(int duration);
+    void showTemporaryMessage(const QString& msg);
 
 public slots:
     void refreshTheme();

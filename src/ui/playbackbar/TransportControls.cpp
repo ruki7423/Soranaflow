@@ -1,6 +1,7 @@
 #include "TransportControls.h"
 #include "../../core/ThemeManager.h"
 #include <QHBoxLayout>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QFont>
 #include <QFile>
@@ -235,6 +236,16 @@ void TransportControls::resetProgress(int duration)
     m_progressSlider->setRange(0, 1000);
     m_progressSlider->setValue(0);
     m_currentTimeLabel->setText("0:00");
+}
+
+void TransportControls::showTemporaryMessage(const QString& msg)
+{
+    // Briefly show message in the total time label (3 seconds), then restore
+    QString saved = m_totalTimeLabel->text();
+    m_totalTimeLabel->setText(msg);
+    QTimer::singleShot(3000, this, [this, saved]() {
+        m_totalTimeLabel->setText(saved);
+    });
 }
 
 void TransportControls::refreshTheme()

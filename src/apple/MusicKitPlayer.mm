@@ -836,7 +836,7 @@ void MusicKitPlayer::updateOutputDevice()
 // ── runJS ───────────────────────────────────────────────────────────
 void MusicKitPlayer::runJS(const QString& js)
 {
-    if (!m_wk || !m_wk->webView) return;
+    if (m_cleanedUp || !m_wk || !m_wk->webView) return;
 
     NSString* jsNS = js.toNSString();
     NSString* jsLeft = [jsNS length] > 40 ? [jsNS substringToIndex:40] : jsNS;

@@ -12,6 +12,7 @@
 #include <QStandardPaths>
 #include <QDateTime>
 #include <QMutex>
+#include <QPixmapCache>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -133,6 +134,9 @@ int main(int argc, char* argv[]) {
     app.setOrganizationName("SoranaFlow");
     app.setApplicationName("Sorana Flow");
     app.setApplicationVersion(APP_VERSION);
+
+    // Bound Qt's global pixmap cache (default 10MB is fine, but be explicit)
+    QPixmapCache::setCacheLimit(20 * 1024);  // 20 MB max
 
     // Track app activation state (crucial for Finder launch diagnosis)
     QObject::connect(&app, &QApplication::applicationStateChanged,

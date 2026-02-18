@@ -109,6 +109,11 @@ void PlaybackBar::wirePlaybackStateSignals()
     connect(ps, &PlaybackState::queueChanged, this, [this]() {
         m_nowPlaying->setAutoplayVisible(false);
     });
+
+    // End-of-queue feedback — briefly show "End of queue" in transport area
+    connect(ps, &PlaybackState::queueExhausted, this, [this]() {
+        m_transport->showTemporaryMessage(QStringLiteral("End of queue"));
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -32,8 +32,10 @@ public:
     int size() const { return m_queue.size() + m_userQueue.size(); }
 
     // Navigation — advance/retreat through the queue
-    AdvanceResult advance();
-    bool retreat();
+    // userInitiated=true when user presses Next/Previous (bypasses Repeat One)
+    // userInitiated=false for auto-advance (track finished naturally)
+    AdvanceResult advance(bool userInitiated = false);
+    bool retreat(bool userInitiated = false);
 
     // Track lookup — find by ID or insert after current index
     int findOrInsertTrack(const Track& track);

@@ -171,10 +171,11 @@ Track QueueManager::peekNextTrack() const
     return Track();
 }
 
-QueueManager::AdvanceResult QueueManager::advance()
+QueueManager::AdvanceResult QueueManager::advance(bool userInitiated)
 {
     if (m_queue.isEmpty() && m_userQueue.isEmpty()) return EndOfQueue;
-    if (m_repeat == 2) return RepeatOne;  // One
+    // Repeat One: only auto-repeat on natural track end, not manual Next
+    if (m_repeat == 2 && !userInitiated) return RepeatOne;
 
     // User queue takes priority — consume next user-queued track
     if (!m_userQueue.isEmpty()) {
@@ -237,8 +238,9 @@ QueueManager::AdvanceResult QueueManager::advance()
     return Advanced;
 }
 
-bool QueueManager::retreat()
+bool QueueManager::retreat(bool userInitiated)
 {
+    Q_UNUSED(userInitiated)  // retreat doesn't have RepeatOne logic, but keep signature consistent
     if (m_queue.isEmpty()) return false;
 
     if (m_shuffle) {

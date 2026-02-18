@@ -71,12 +71,13 @@ signals:
     void shuffleChanged(bool enabled);
     void repeatChanged(RepeatMode mode);
     void autoplayTrackStarted();
+    void queueExhausted();  // emitted when end of queue reached (repeat=off, no autoplay)
 
 private:
     explicit PlaybackState(QObject* parent = nullptr);
     void connectToAudioEngine();
     void connectToMusicKitPlayer();
-    void playNextTrack();
+    void playNextTrack(bool userInitiated = false);
     void loadAndPlayTrack(const Track& track);  // Audio loading only — no queue state changes
     void emitQueueChangedDebounced();
     void scheduleGaplessPrepare();

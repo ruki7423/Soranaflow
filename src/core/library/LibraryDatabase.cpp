@@ -141,6 +141,7 @@ bool LibraryDatabase::open()
 
     createTables();
     createIndexes();
+    verifyFTSIndex();
 
     // ── Migration: add MBID columns to existing databases ────────
     {
@@ -319,16 +320,24 @@ void LibraryDatabase::createIndexes()
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title)"));
 
     // FTS5 full-text search index (replaces LIKE '%keyword%' table scan)
-    // Drop and recreate to pick up new columns (composer)
-    q.exec(QStringLiteral("DROP TABLE IF EXISTS tracks_fts"));
-    q.exec(QStringLiteral(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5("
-        "  title, artist, album, composer,"
-        "  content=tracks,"
-        "  content_rowid=rowid"
-        ")"
-    ));
-    qDebug() << "[LibraryDB] FTS5 index created/verified";
+    // Check if table exists; create only if missing (preserves index across restarts)
+    {
+        QSqlQuery chk(m_db);
+        chk.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tracks_fts'"));
+        if (!chk.next()) {
+            q.exec(QStringLiteral(
+                "CREATE VIRTUAL TABLE tracks_fts USING fts5("
+                "  title, artist, album, composer,"
+                "  content=tracks,"
+                "  content_rowid=rowid"
+                ")"
+            ));
+            qDebug() << "[LibraryDB] FTS5 table created (first run)";
+        } else {
+            qDebug() << "[LibraryDB] FTS5 table exists — preserved";
+        }
+    }
 
     // Migration: add R128 loudness columns (safe to call multiple times)
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN r128_loudness REAL DEFAULT 0"));
@@ -478,6 +487,46 @@ QVector<Track> LibraryDatabase::allTracks() const { return m_trackRepo->allTrack
 QVector<TrackIndex> LibraryDatabase::allTrackIndexes() const { return m_trackRepo->allTrackIndexes(); }
 QVector<QString> LibraryDatabase::searchTracksFTS(const QString& query) const { return m_trackRepo->searchTracksFTS(query); }
 void LibraryDatabase::rebuildFTSIndex() { m_trackRepo->rebuildFTSIndex(); }
+
+void LibraryDatabase::verifyFTSIndex()
+{
+    // Quick check: if tracks exist but FTS5 MATCH returns 0, rebuild
+    QSqlQuery countQ(m_readDb);
+    countQ.exec(QStringLiteral("SELECT count(*) FROM tracks"));
+    int trackCount = (countQ.next()) ? countQ.value(0).toInt() : 0;
+    if (trackCount == 0) return;
+
+    // Sample a real title from the tracks table for the MATCH test
+    QSqlQuery sampleQ(m_readDb);
+    sampleQ.exec(QStringLiteral("SELECT title FROM tracks WHERE title IS NOT NULL AND title != '' LIMIT 1"));
+    if (!sampleQ.next()) return;
+    QString sampleTitle = sampleQ.value(0).toString().trimmed();
+    if (sampleTitle.isEmpty()) return;
+
+    // Use first 3 chars as prefix search (avoids FTS5 special char issues)
+    QString testTerm = sampleTitle.left(3);
+    testTerm.replace(QLatin1Char('\''), QStringLiteral("''"));
+    testTerm.replace(QLatin1Char('"'), QString());
+
+    QSqlQuery testQ(m_readDb);
+    testQ.prepare(QStringLiteral(
+        "SELECT count(*) FROM tracks_fts WHERE tracks_fts MATCH :q"));
+    testQ.bindValue(QStringLiteral(":q"), testTerm + QStringLiteral("*"));
+
+    int ftsHits = 0;
+    if (testQ.exec() && testQ.next())
+        ftsHits = testQ.value(0).toInt();
+
+    if (ftsHits == 0) {
+        qWarning() << "[LibraryDB] FTS5 index stale/empty (" << trackCount
+                    << "tracks, 0 FTS hits for" << testTerm << ") — rebuilding...";
+        rebuildFTSIndex();
+    } else {
+        qDebug() << "[LibraryDB] FTS5 index verified:" << ftsHits
+                 << "hits for" << testTerm << "(" << trackCount << "tracks)";
+    }
+}
+
 QVector<Track> LibraryDatabase::searchTracks(const QString& query) const { return m_trackRepo->searchTracks(query); }
 int LibraryDatabase::trackCount() const { return m_trackRepo->trackCount(); }
 

@@ -133,6 +133,7 @@ private:
     explicit LibraryDatabase(QObject* parent = nullptr);
     void createTables();
     void createIndexes();
+    void verifyFTSIndex();
     void doRebuildInternal();
 
     QSqlDatabase m_db;        // write connection (scanner, inserts, updates)

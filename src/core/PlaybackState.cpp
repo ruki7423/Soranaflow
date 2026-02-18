@@ -211,7 +211,7 @@ void PlaybackState::next()
     if (m_queueMgr->isEmpty())
         return;
 
-    playNextTrack();
+    playNextTrack(true);  // user-initiated
 }
 
 // ── previous ────────────────────────────────────────────────────────
@@ -227,7 +227,7 @@ void PlaybackState::previous()
     }
 
     // Otherwise go to the previous track
-    if (m_queueMgr->retreat()) {
+    if (m_queueMgr->retreat(true)) {  // user-initiated
         // Skip setCurrentTrackInfo: retreat() already set the queue index correctly.
         // Calling findOrInsertTrack + invalidateShuffleOrder would wipe shuffle history.
         m_currentTrack = m_queueMgr->currentTrack();
@@ -486,14 +486,14 @@ void PlaybackState::flushPendingSaves()
 }
 
 // ── playNextTrack (core next-track logic) ───────────────────────────
-void PlaybackState::playNextTrack()
+void PlaybackState::playNextTrack(bool userInitiated)
 {
     if (m_queueMgr->isEmpty())
         return;
 
     auto* engine = AudioEngine::instance();
 
-    auto result = m_queueMgr->advance();
+    auto result = m_queueMgr->advance(userInitiated);
 
     if (result == QueueManager::RepeatOne) {
         m_currentTime = 0;
@@ -525,6 +525,7 @@ void PlaybackState::playNextTrack()
             engine->stop();
         emit timeChanged(m_currentTime);
         emit playStateChanged(m_playing);
+        emit queueExhausted();
         return;
     }
 

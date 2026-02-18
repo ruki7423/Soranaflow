@@ -469,7 +469,12 @@ bool AudioEngine::load(const QString& filePath)
         double ratio = (outputFmt.sampleRate > fmt.sampleRate)
             ? (double)outputFmt.sampleRate / fmt.sampleRate : 1.0;
         int maxSourceFrames = (int)(4096.0 / ratio) + 64;
-        m_decodeBuf.resize(maxSourceFrames * fmt.channels);
+        size_t needed = (size_t)(maxSourceFrames * fmt.channels);
+        // Release excess memory from previous larger buffers
+        if (m_decodeBuf.size() > needed * 2) {
+            m_decodeBuf = std::vector<float>();  // force deallocation
+        }
+        m_decodeBuf.resize(needed);
     }
 
     // Pre-allocate crossfade buffer (generous — covers any CoreAudio buffer size)
