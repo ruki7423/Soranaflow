@@ -43,6 +43,12 @@ public:
     int  processorCount() const;
     IDSPProcessor* processor(int index) const;
 
+    // Returns true (once) if a plugin was disabled due to an exception
+    // in its process() callback. Cleared on read.
+    bool consumePluginFault() {
+        return m_pluginFaulted.exchange(false, std::memory_order_acq_rel);
+    }
+
     // Call after modifying individual processor state (gain dB, EQ bands,
     // processor enable/disable) to notify the signal path widget.
     void notifyConfigurationChanged();
@@ -67,4 +73,7 @@ private:
     // Plugin processors (VST3, etc.)
     std::vector<std::shared_ptr<IDSPProcessor>> m_plugins;
     mutable std::shared_mutex m_pluginMutex;
+
+    // Set on RT thread when a plugin throws in process(); consumed by UI
+    std::atomic<bool> m_pluginFaulted{false};
 };

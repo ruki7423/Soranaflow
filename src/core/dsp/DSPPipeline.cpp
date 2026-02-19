@@ -51,6 +51,7 @@ void DSPPipeline::process(float* buf, int frames, int channels)
                     proc->process(buf, frames, channels);
                 } catch (...) {
                     proc->setEnabled(false);
+                    m_pluginFaulted.store(true, std::memory_order_release);
                 }
             }
         }

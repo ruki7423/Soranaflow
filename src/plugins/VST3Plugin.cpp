@@ -860,11 +860,14 @@ QWidget* VST3Plugin::openEditor(QWidget* parent)
     m_plugFrame = std::make_unique<PlugFrameAdapter>(window);
     m_plugView->setFrame(m_plugFrame.get());
 
-    // Show and process events to ensure native window handle is created
+    // Show the window — WA_NativeWindow (set above) + winId() below
+    // forces native window handle creation without processEvents().
+    // processEvents() was removed because it causes reentrancy: pending
+    // signals/timers fire mid-editor-setup, risking deadlock or corruption.
     window->show();
-    QApplication::processEvents();
 
-    // QWidget::winId() on macOS returns an NSView* cast to WId
+    // QWidget::winId() on macOS returns an NSView* cast to WId.
+    // Forces native window creation when WA_NativeWindow is set.
     WId wid = window->winId();
     void* nativeView = reinterpret_cast<void*>(wid);
     qDebug() << "VST3: Native view handle:" << nativeView;

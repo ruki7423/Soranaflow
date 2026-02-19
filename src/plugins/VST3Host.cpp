@@ -92,6 +92,12 @@ void VST3Host::scanDirectory(const std::string& dir)
         // Load the module to enumerate audio classes and read real metadata.
         // This gives us per-class entries (e.g. "Serum2 (Fx)" + "Serum2 (Instrument)")
         // and accurate vendor/UID information.
+        //
+        // IMPORTANT: The entire per-plugin block is wrapped in try-catch because
+        // Module::create() loads plugin binaries which can throw during static
+        // initialization. Without this, one bad plugin kills the entire scan.
+        try {
+
         std::string errorDesc;
         auto module = VST3::Hosting::Module::create(bundlePath, errorDesc);
         if (!module) {
@@ -166,6 +172,14 @@ void VST3Host::scanDirectory(const std::string& dir)
         }
 
         // Module is released here — we only needed it for metadata
+
+        } catch (const std::exception& e) {
+            qWarning() << "[VST3] Exception scanning" << QString::fromStdString(bundleName)
+                       << ":" << e.what() << "— skipping";
+        } catch (...) {
+            qWarning() << "[VST3] Unknown exception scanning"
+                       << QString::fromStdString(bundleName) << "— skipping";
+        }
     }
 }
 

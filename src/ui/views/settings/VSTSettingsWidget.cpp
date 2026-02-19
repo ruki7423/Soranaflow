@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QLabel>
 #include <QFrame>
+#include <memory>
 
 VSTSettingsWidget::VSTSettingsWidget(QWidget* parent)
     : QWidget(parent)
@@ -72,10 +73,16 @@ void VSTSettingsWidget::loadVstPlugins()
         // Only create + add processor if not loaded at startup
         if (!alreadyLoaded) {
             std::shared_ptr<IDSPProcessor> proc;
-            if (isVst2) {
-                proc = vst2host->createProcessorFromPath(path.toStdString());
-            } else {
-                proc = host->createProcessorFromPath(path.toStdString());
+            try {
+                if (isVst2) {
+                    proc = vst2host->createProcessorFromPath(path.toStdString());
+                } else {
+                    proc = host->createProcessorFromPath(path.toStdString());
+                }
+            } catch (const std::exception& e) {
+                qWarning() << "[VST] Exception loading saved plugin" << path << ":" << e.what();
+            } catch (...) {
+                qWarning() << "[VST] Unknown exception loading saved plugin" << path;
             }
             if (!proc) continue;
             if (pipeline) {
@@ -265,8 +272,24 @@ QWidget* VSTSettingsWidget::createVSTCard(QVBoxLayout* parentLayout)
         int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginName = item->text();
 
-        auto* host = VST3Host::instance();
-        auto proc = host->createProcessor(pluginIndex);
+        // Loading a VST3 plugin runs synchronously on the main thread
+        // (VST3 SDK requires it). Show wait cursor for feedback.
+        m_vst3AvailableList->setEnabled(false);
+        setCursor(Qt::WaitCursor);
+
+        std::shared_ptr<IDSPProcessor> proc;
+        try {
+            auto* host = VST3Host::instance();
+            proc = host->createProcessor(pluginIndex);
+        } catch (const std::exception& e) {
+            qWarning() << "[VST3] Exception loading" << pluginName << ":" << e.what();
+        } catch (...) {
+            qWarning() << "[VST3] Unknown exception loading" << pluginName;
+        }
+
+        unsetCursor();
+        m_vst3AvailableList->setEnabled(true);
+
         if (!proc) {
             qWarning() << "[VST3] Double-click: failed to create processor for"
                         << pluginName;
@@ -327,7 +350,21 @@ QWidget* VSTSettingsWidget::createVSTCard(QVBoxLayout* parentLayout)
         int pluginIndex = item->data(Qt::UserRole).toInt();
         QString pluginName = item->text();
 
-        auto proc = VST2Host::instance()->createProcessor(pluginIndex);
+        m_vst2AvailableList->setEnabled(false);
+        setCursor(Qt::WaitCursor);
+
+        std::shared_ptr<IDSPProcessor> proc;
+        try {
+            proc = VST2Host::instance()->createProcessor(pluginIndex);
+        } catch (const std::exception& e) {
+            qWarning() << "[VST2] Exception loading" << pluginName << ":" << e.what();
+        } catch (...) {
+            qWarning() << "[VST2] Unknown exception loading" << pluginName;
+        }
+
+        unsetCursor();
+        m_vst2AvailableList->setEnabled(true);
+
         if (!proc) {
             qWarning() << "[VST2] Double-click: failed to create processor for"
                         << pluginName;
