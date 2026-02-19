@@ -69,7 +69,7 @@ private:
     QVector<Track> m_queue;
     QVector<Track> m_userQueue;    // User-added tracks — survive setQueue(), play first
     QVector<int> m_shuffledIndices;
-    QVector<QString> m_shuffleHistory;  // Previously-played filePaths for "previous" in shuffle mode
+    QVector<QString> m_shuffleHistory;  // Previously-played track IDs for "previous" in shuffle mode
     int m_queueIndex = -1;
     bool m_shuffle = false;
     int m_repeat = 0;  // 0=Off, 1=All, 2=One

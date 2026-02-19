@@ -216,13 +216,15 @@ struct DSDDecoder::Impl {
 
         DSFHeader header;
         file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        if (!file || file.gcount() != sizeof(header)) return false;
         if (std::memcmp(header.magic, "DSD ", 4) != 0) return false;
 
         DSFFormatChunk fmt;
         file.read(reinterpret_cast<char*>(&fmt), sizeof(fmt));
+        if (!file || file.gcount() != sizeof(fmt)) return false;
         if (std::memcmp(fmt.magic, "fmt ", 4) != 0) return false;
 
-        channels = fmt.channelNum;
+        channels = std::max(1u, std::min(fmt.channelNum, 6u));
         dsdRate = fmt.sampleRate;
         totalDSDSamples = fmt.sampleCount;
         blockSize = fmt.blockSizePerCh;
@@ -231,6 +233,7 @@ struct DSDDecoder::Impl {
 
         DSFDataChunk dataChunk;
         file.read(reinterpret_cast<char*>(&dataChunk), sizeof(dataChunk));
+        if (!file || file.gcount() != sizeof(dataChunk)) return false;
         if (std::memcmp(dataChunk.magic, "data", 4) != 0) return false;
 
         dataOffset = file.tellg();

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
-project(SoranaFlow VERSION 1.8.1 LANGUAGES CXX)
+project(SoranaFlow VERSION 1.8.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,7 +93,6 @@ set(SORANA_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/metadata
     ${CMAKE_CURRENT_SOURCE_DIR}/src/radio
     ${CMAKE_CURRENT_SOURCE_DIR}/src/apple
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/tidal
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${CMAKE_CURRENT_BINARY_DIR}  # For generated SoranaFlow-Swift.h
 )
@@ -161,8 +160,8 @@ add_library(sorana_library OBJECT
     src/core/library/PlaylistManager.cpp
     src/core/library/AutoOrganizer.h
     src/core/library/AutoOrganizer.cpp
-    src/core/dsp/ReplayGainScanner.h
-    src/core/dsp/ReplayGainScanner.cpp
+    src/core/library/ReplayGainScanner.h
+    src/core/library/ReplayGainScanner.cpp
 )
 sorana_module_setup(sorana_library)
 target_link_libraries(sorana_library PRIVATE Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Concurrent
@@ -219,8 +218,12 @@ add_library(sorana_dsp OBJECT
     src/core/dsp/ConvolutionProcessor.cpp
     src/core/dsp/HRTFProcessor.h
     src/core/dsp/HRTFProcessor.cpp
+    src/core/dsp/LoudnessContour.h
 )
 sorana_module_setup(sorana_dsp)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(sorana_dsp PRIVATE -O3 -ffast-math)
+endif()
 target_link_libraries(sorana_dsp PRIVATE
     Qt6::Core PkgConfig::SOXR PkgConfig::EBUR128
     PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL PkgConfig::SWRESAMPLE
@@ -386,14 +389,6 @@ if(APPLE)
     )
 endif()
 
-# ── sorana_tidal ──────────────────────────────────────────────────
-add_library(sorana_tidal OBJECT
-    src/tidal/TidalManager.h
-    src/tidal/TidalManager.cpp
-)
-sorana_module_setup(sorana_tidal)
-target_link_libraries(sorana_tidal PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
-
 # ── sorana_widgets ────────────────────────────────────────────────
 add_library(sorana_widgets OBJECT
     src/widgets/StyledButton.h
@@ -495,8 +490,6 @@ add_library(sorana_ui OBJECT
     src/ui/amview/AMAlbumPanel.cpp
     src/ui/views/FolderBrowserView.h
     src/ui/views/FolderBrowserView.cpp
-    # src/ui/views/TidalView.h      # TODO: restore when Tidal API available
-    # src/ui/views/TidalView.cpp    # TODO: restore when Tidal API available
     src/ui/views/SearchResultsView.h
     src/ui/views/SearchResultsView.cpp
     src/ui/dialogs/TagEditorDialog.h
@@ -550,7 +543,7 @@ if(APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         sorana_core sorana_library sorana_audio sorana_dsp
         sorana_metadata sorana_radio sorana_plugins sorana_platform
-        sorana_apple_music sorana_tidal sorana_widgets sorana_ui
+        sorana_apple_music sorana_widgets sorana_ui
     )
 else()
     add_executable(${PROJECT_NAME}
@@ -561,7 +554,7 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
         sorana_core sorana_library sorana_audio sorana_dsp
         sorana_metadata sorana_radio sorana_plugins sorana_platform
-        sorana_tidal sorana_widgets sorana_ui
+        sorana_widgets sorana_ui
     )
 endif()
 

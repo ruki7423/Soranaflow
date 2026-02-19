@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <complex>
 #include <cstring>
+#include <thread>
+#include <QDebug>
 
 static constexpr double PI = 3.14159265358979323846;
 
@@ -33,6 +35,11 @@ EqualizerProcessor::EqualizerProcessor()
     for (int i = 0; i < MAX_BANDS; ++i)
         recalcCoeffs(i);
 
+    // Sync pending state with active
+    m_pendingBands = m_bands;
+    m_pendingCoeffs = m_coeffs;
+    m_pendingActiveBands = m_activeBands;
+
 #ifdef __APPLE__
     m_fftSetup = vDSP_create_fftsetup(LP_MAX_FFT_LOG2N, kFFTRadix2);
 #endif
@@ -46,22 +53,54 @@ EqualizerProcessor::~EqualizerProcessor()
         vDSP_destroy_fftsetup(m_fftSetup);
         m_fftSetup = nullptr;
     }
+    if (m_stageFftSetup) {
+        vDSP_destroy_fftsetup(m_stageFftSetup);
+        m_stageFftSetup = nullptr;
+    }
+    if (m_biquadSetup) {
+        vDSP_biquad_DestroySetup(m_biquadSetup);
+        m_biquadSetup = nullptr;
+    }
+    if (m_stagedBiquadSetup) {
+        vDSP_biquad_DestroySetup(m_stagedBiquadSetup);
+        m_stagedBiquadSetup = nullptr;
+    }
 #endif
 }
 
 // ── prepare ─────────────────────────────────────────────────────────
+// THREAD SAFETY: prepare() writes m_sampleRate, m_channels, resizes vectors.
+// It must ONLY be called when the audio render callback is stopped.
+// All callers (AudioEngine::load, setSampleRate) stop audio first.
 void EqualizerProcessor::prepare(double sampleRate, int channels)
 {
     m_sampleRate = sampleRate;
     m_channels = std::min(channels, MAX_CHANNELS);
     for (int i = 0; i < MAX_BANDS; ++i)
         recalcCoeffs(i);
+
+    // Sync pending state
+    m_pendingBands = m_bands;
+    m_pendingCoeffs = m_coeffs;
+    m_pendingActiveBands = m_activeBands;
+    m_bandsDirty.store(false, std::memory_order_relaxed);
+
+    // Pre-allocate fade buffers (4096 frames max)
+    m_enableFadeBuf.resize(4096 * m_channels);
+    m_coeffFadeBuf.resize(4096 * m_channels);
+
     reset();
 
 #ifdef __APPLE__
+    // Pre-allocate biquad delay arrays (max size for any section count)
+    for (int c = 0; c < MAX_CHANNELS; ++c)
+        m_biquadDelay[c].assign(2 + 2 * MAX_BANDS, 0.0f);
+    buildBiquadSetup();
+
     if (m_phaseMode == LinearPhase) {
         allocateLinearPhaseBuffers();
         m_firDirty.store(true, std::memory_order_relaxed);
+        buildFIRKernelStaged();
     }
 #endif
 }
@@ -76,24 +115,61 @@ void EqualizerProcessor::reset()
     }
 
 #ifdef __APPLE__
-    // Clear OLA state
-    for (auto& ch : m_olaState) {
-        if (!ch.inputBuf.empty())
-            std::memset(ch.inputBuf.data(), 0, ch.inputBuf.size() * sizeof(float));
-        if (!ch.overlapBuf.empty())
-            std::memset(ch.overlapBuf.data(), 0, ch.overlapBuf.size() * sizeof(float));
-        if (!ch.outputBuf.empty())
-            std::memset(ch.outputBuf.data(), 0, ch.outputBuf.size() * sizeof(float));
-        ch.position = 0;
-        ch.hasOutput = false;
-    }
+    resetOLAState();
 #endif
 }
 
 // ── process ─────────────────────────────────────────────────────────
 void EqualizerProcessor::process(float* buf, int frames, int channels)
 {
-    if (!m_enabled) return;
+    // Enable/disable with crossfade to prevent pops
+    bool fading = (m_enabled && m_enableFadeMix < 1.0f)
+               || (!m_enabled && m_enableFadeMix > 0.0f);
+    if (!m_enabled && !fading) return;
+
+    int n = frames * channels;
+    bool needBlend = fading && (int)m_enableFadeBuf.size() >= n;
+    if (needBlend) {
+        std::memcpy(m_enableFadeBuf.data(), buf, n * sizeof(float));
+    }
+
+    // Apply pending band parameter updates (thread-safe: UI → audio thread)
+    if (m_bandsDirty.load(std::memory_order_acquire)) {
+        if (!m_pendingLock.test_and_set(std::memory_order_acquire)) {
+            m_bands = m_pendingBands;
+            m_coeffs = m_pendingCoeffs;
+            m_activeBands = m_pendingActiveBands;
+            m_bandsDirty.store(false, std::memory_order_relaxed);
+            m_pendingLock.clear(std::memory_order_release);
+
+            // Clear biquad state to prevent old-state + new-coefficients discontinuity.
+            // Start a short dry→processed crossfade to mask the filter restart.
+            if (m_phaseMode == MinimumPhase) {
+                for (auto& bandStates : m_state)
+                    for (auto& s : bandStates) s = BiquadState{};
+#ifdef __APPLE__
+                // Swap staged vDSP biquad setup if available
+                if (m_biquadSetupReady.load(std::memory_order_acquire)) {
+                    if (m_biquadSetup) vDSP_biquad_DestroySetup(m_biquadSetup);
+                    m_biquadSetup = m_stagedBiquadSetup;
+                    m_biquadSections = m_stagedBiquadSections;
+                    m_stagedBiquadSetup = nullptr;
+                    m_biquadSetupReady.store(false, std::memory_order_relaxed);
+                    for (int c = 0; c < MAX_CHANNELS; ++c)
+                        std::fill(m_biquadDelay[c].begin(), m_biquadDelay[c].end(), 0.0f);
+                }
+#endif
+                if ((int)m_coeffFadeBuf.size() >= n) {
+                    std::memcpy(m_coeffFadeBuf.data(), buf, n * sizeof(float));
+                    m_coeffFading = true;
+                    m_coeffFadePos = 0;
+                }
+            }
+            // Note: LP kernel is already built by UI thread via buildFIRKernelStaged()
+            // in the setBand/setActiveBands callers. RT thread swaps via m_stagedKernelReady.
+        }
+        // If lock held by UI, skip — next callback will pick it up
+    }
 
     // Check for pending phase mode switch (only when not already transitioning)
     if (m_transitionPhase == 0) {
@@ -108,7 +184,7 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
     // ── Phase 1: Fade-out current mode ──
     if (m_transitionPhase == 1) {
 #ifdef __APPLE__
-        if (m_phaseMode == LinearPhase && m_fftSize > 0)
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
             processLinearPhase(buf, frames, channels);
         else
 #endif
@@ -128,24 +204,13 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
             for (auto& bandStates : m_state)
                 for (auto& s : bandStates) s = BiquadState{};
 #ifdef __APPLE__
-            for (auto& ola : m_olaState) {
-                if (!ola.inputBuf.empty())
-                    std::memset(ola.inputBuf.data(), 0, ola.inputBuf.size() * sizeof(float));
-                if (!ola.overlapBuf.empty())
-                    std::memset(ola.overlapBuf.data(), 0, ola.overlapBuf.size() * sizeof(float));
-                if (!ola.outputBuf.empty())
-                    std::memset(ola.outputBuf.data(), 0, ola.outputBuf.size() * sizeof(float));
-                ola.position = 0;
-                ola.hasOutput = false;
-            }
+            resetOLAState();
+            // Clear MP coefficient crossfade — prevents stale dry buffer
+            // from leaking into LP output (fixes +105 pops at EQ_OUT)
+            m_coeffFading = false;
             if (m_phaseMode == LinearPhase)
                 m_firDirty.store(true, std::memory_order_relaxed);
 
-            // LP latency = LP_PARTITION_SIZE + firLen/2 (typically 3072 @ 44.1kHz).
-            // The OLA pipeline needs this many input samples before output becomes
-            // non-zero, PLUS one more partition to actually read the first valid
-            // output block, PLUS the fade-in ramp length.
-            // MP biquads settle quickly; 2× fade length is sufficient.
             if (m_phaseMode == LinearPhase && m_firLen > 0) {
                 int lpLatency = LP_PARTITION_SIZE + m_firLen / 2;
                 int partitions = (lpLatency + LP_PARTITION_SIZE - 1) / LP_PARTITION_SIZE;
@@ -159,20 +224,17 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
             m_transitionPhase = 2;
             m_transitionPos = 0;
         }
-        return;
     }
 
     // ── Phase 2: Mute while new mode warms up, then fade-in ──
-    if (m_transitionPhase == 2) {
-        // Process with new mode to warm it up (fills OLA pipeline / settles biquads).
+    else if (m_transitionPhase == 2) {
 #ifdef __APPLE__
-        if (m_phaseMode == LinearPhase && m_fftSize > 0)
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
             processLinearPhase(buf, frames, channels);
         else
 #endif
             processMinimumPhase(buf, frames, channels);
 
-        // Gain envelope: silence during warmup, then fade-in.
         int silentEnd = m_warmupDuration - TRANSITION_FADE_LEN;
         for (int i = 0; i < frames; ++i) {
             int pos = m_transitionPos + i;
@@ -188,19 +250,53 @@ void EqualizerProcessor::process(float* buf, int frames, int channels)
         }
         m_transitionPos += frames;
         if (m_transitionPos >= m_warmupDuration)
-            m_transitionPhase = 0;  // transition complete
-        return;
+            m_transitionPhase = 0;
     }
 
     // ── Normal processing ──
+    else {
 #ifdef __APPLE__
-    if (m_phaseMode == LinearPhase && m_fftSize > 0) {
-        processLinearPhase(buf, frames, channels);
-        return;
-    }
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
+            processLinearPhase(buf, frames, channels);
+        else
 #endif
+            processMinimumPhase(buf, frames, channels);
+    }
 
-    processMinimumPhase(buf, frames, channels);
+    // ── Coefficient crossfade (dry→processed after preset change) ──
+    if (m_coeffFading && (int)m_coeffFadeBuf.size() >= n) {
+        for (int f = 0; f < frames; ++f) {
+            float t = (float)(m_coeffFadePos + f) / (float)COEFF_FADE_LEN;
+            if (t > 1.0f) t = 1.0f;
+            float dry = 1.0f - t;
+            for (int c = 0; c < channels; ++c) {
+                int idx = f * channels + c;
+                buf[idx] = m_coeffFadeBuf[idx] * dry + buf[idx] * t;
+            }
+        }
+        m_coeffFadePos += frames;
+        if (m_coeffFadePos >= COEFF_FADE_LEN)
+            m_coeffFading = false;
+    }
+
+    // ── Enable/disable crossfade ──
+    if (needBlend) {
+        constexpr float step = 1.0f / 256.0f;
+        float dir = m_enabled ? step : -step;
+        for (int f = 0; f < frames; ++f) {
+            m_enableFadeMix += dir;
+            if (m_enableFadeMix < 0.0f) m_enableFadeMix = 0.0f;
+            if (m_enableFadeMix > 1.0f) m_enableFadeMix = 1.0f;
+            float dry = 1.0f - m_enableFadeMix;
+            for (int c = 0; c < channels; ++c) {
+                int idx = f * channels + c;
+                buf[idx] = m_enableFadeBuf[idx] * dry + buf[idx] * m_enableFadeMix;
+            }
+        }
+    } else if (m_enabled && m_enableFadeMix < 1.0f) {
+        m_enableFadeMix = 1.0f;  // snap to fully on
+    }
+
 }
 
 // ── processMinimumPhase ─────────────────────────────────────────────
@@ -208,6 +304,20 @@ void EqualizerProcessor::processMinimumPhase(float* buf, int frames, int channel
 {
     int ch = std::min(channels, MAX_CHANNELS);
 
+#ifdef __APPLE__
+    // Fast path: vDSP_biquad with all active bands cascaded per channel
+    if (m_biquadSetup && m_biquadSections > 0) {
+        for (int c = 0; c < ch; ++c) {
+            vDSP_biquad(m_biquadSetup, m_biquadDelay[c].data(),
+                        buf + c, channels,    // input with stride
+                        buf + c, channels,    // output with stride (in-place)
+                        frames);
+        }
+        return;
+    }
+#endif
+
+    // Fallback: manual double-precision biquad
     for (int band = 0; band < m_activeBands; ++band) {
         if (!m_bands[band].enabled) continue;
         if (m_bands[band].type <= EQBand::HighShelf && m_bands[band].gainDb == 0.0f) continue;
@@ -237,10 +347,21 @@ void EqualizerProcessor::processMinimumPhase(float* buf, int frames, int channel
 void EqualizerProcessor::setBand(int band, const EQBand& params)
 {
     if (band < 0 || band >= MAX_BANDS) return;
-    m_bands[band] = params;
-    recalcCoeffs(band);
+
+    // Write to pending state under lock (audio thread copies to active)
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    m_pendingBands[band] = params;
+    m_pendingCoeffs[band] = calcBiquad(m_sampleRate, params);
+    m_pendingLock.clear(std::memory_order_release);
+    m_bandsDirty.store(true, std::memory_order_release);
+
 #ifdef __APPLE__
-    m_firDirty.store(true, std::memory_order_relaxed);
+    if (!m_deferKernelBuild) {
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
+            buildFIRKernelStaged();
+        else if (m_phaseMode == MinimumPhase)
+            buildBiquadSetup();
+    }
 #endif
 }
 
@@ -248,12 +369,22 @@ void EqualizerProcessor::setBand(int band, const EQBand& params)
 void EqualizerProcessor::setBand(int band, float freqHz, float gainDb, float q)
 {
     if (band < 0 || band >= MAX_BANDS) return;
-    m_bands[band].frequency = freqHz;
-    m_bands[band].gainDb = gainDb;
-    m_bands[band].q = q;
-    recalcCoeffs(band);
+
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    m_pendingBands[band].frequency = freqHz;
+    m_pendingBands[band].gainDb = gainDb;
+    m_pendingBands[band].q = q;
+    m_pendingCoeffs[band] = calcBiquad(m_sampleRate, m_pendingBands[band]);
+    m_pendingLock.clear(std::memory_order_release);
+    m_bandsDirty.store(true, std::memory_order_release);
+
 #ifdef __APPLE__
-    m_firDirty.store(true, std::memory_order_relaxed);
+    if (!m_deferKernelBuild) {
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
+            buildFIRKernelStaged();
+        else if (m_phaseMode == MinimumPhase)
+            buildBiquadSetup();
+    }
 #endif
 }
 
@@ -261,15 +392,41 @@ void EqualizerProcessor::setBand(int band, float freqHz, float gainDb, float q)
 EQBand EqualizerProcessor::getBand(int band) const
 {
     if (band < 0 || band >= MAX_BANDS) return {};
-    return m_bands[band];
+    return m_pendingBands[band];
 }
 
 // ── setActiveBands ──────────────────────────────────────────────────
 void EqualizerProcessor::setActiveBands(int count)
 {
-    m_activeBands = std::clamp(count, 1, MAX_BANDS);
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    m_pendingActiveBands = std::clamp(count, 1, MAX_BANDS);
+    m_pendingLock.clear(std::memory_order_release);
+    m_bandsDirty.store(true, std::memory_order_release);
+
 #ifdef __APPLE__
-    m_firDirty.store(true, std::memory_order_relaxed);
+    if (!m_deferKernelBuild) {
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
+            buildFIRKernelStaged();
+        else if (m_phaseMode == MinimumPhase)
+            buildBiquadSetup();
+    }
+#endif
+}
+
+// ── beginBatchUpdate / endBatchUpdate ────────────────────────────────
+void EqualizerProcessor::beginBatchUpdate()
+{
+    m_deferKernelBuild = true;
+}
+
+void EqualizerProcessor::endBatchUpdate()
+{
+    m_deferKernelBuild = false;
+#ifdef __APPLE__
+    if (m_phaseMode == LinearPhase && m_firLen > 0)
+        buildFIRKernelStaged();
+    else if (m_phaseMode == MinimumPhase)
+        buildBiquadSetup();
 #endif
 }
 
@@ -282,7 +439,7 @@ void EqualizerProcessor::setPhaseMode(PhaseMode mode)
     // Allocate LP buffers BEFORE signalling the RT thread so it sees ready buffers.
     if (mode == LinearPhase) {
         allocateLinearPhaseBuffers();
-        m_firDirty.store(true, std::memory_order_relaxed);
+        buildFIRKernelStaged();
     }
 #endif
 
@@ -305,6 +462,7 @@ int EqualizerProcessor::latencySamples() const
 std::vector<double> EqualizerProcessor::getFrequencyResponse(int numPoints) const
 {
     std::vector<double> response(numPoints, 0.0);
+    if (numPoints < 2) return response;
 
     for (int i = 0; i < numPoints; ++i) {
         // Logarithmic frequency scale from 20Hz to 20kHz
@@ -315,11 +473,11 @@ std::vector<double> EqualizerProcessor::getFrequencyResponse(int numPoints) cons
 
         double totalDb = 0.0;
 
-        for (int band = 0; band < m_activeBands; ++band) {
-            if (!m_bands[band].enabled) continue;
-            if (m_bands[band].type <= EQBand::HighShelf && m_bands[band].gainDb == 0.0f) continue;
+        for (int band = 0; band < m_pendingActiveBands; ++band) {
+            if (!m_pendingBands[band].enabled) continue;
+            if (m_pendingBands[band].type <= EQBand::HighShelf && m_pendingBands[band].gainDb == 0.0f) continue;
 
-            const auto& c = m_coeffs[band];
+            const auto& c = m_pendingCoeffs[band];
 
             // Evaluate H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)
             std::complex<double> z = std::exp(std::complex<double>(0, w));
@@ -345,11 +503,12 @@ std::vector<double> EqualizerProcessor::getFrequencyResponse(int numPoints) cons
 std::vector<DSPParameter> EqualizerProcessor::getParameters() const
 {
     std::vector<DSPParameter> params;
-    for (int i = 0; i < m_activeBands; ++i) {
+    int bands = m_pendingActiveBands;
+    for (int i = 0; i < bands; ++i) {
         std::string prefix = "Band " + std::to_string(i + 1) + " ";
-        params.push_back({prefix + "Freq", m_bands[i].frequency, 20.0f, 20000.0f, m_bands[i].frequency, "Hz"});
-        params.push_back({prefix + "Gain", m_bands[i].gainDb, -24.0f, 24.0f, 0.0f, "dB"});
-        params.push_back({prefix + "Q", m_bands[i].q, 0.1f, 30.0f, 1.0f, ""});
+        params.push_back({prefix + "Freq", m_pendingBands[i].frequency, 20.0f, 20000.0f, m_pendingBands[i].frequency, "Hz"});
+        params.push_back({prefix + "Gain", m_pendingBands[i].gainDb, -24.0f, 24.0f, 0.0f, "dB"});
+        params.push_back({prefix + "Q", m_pendingBands[i].q, 0.1f, 30.0f, 1.0f, ""});
     }
     return params;
 }
@@ -361,14 +520,23 @@ void EqualizerProcessor::setParameter(int index, float value)
     int param = index % 3;
     if (band < 0 || band >= MAX_BANDS) return;
 
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
     switch (param) {
-    case 0: m_bands[band].frequency = value; break;
-    case 1: m_bands[band].gainDb = value; break;
-    case 2: m_bands[band].q = value; break;
+    case 0: m_pendingBands[band].frequency = value; break;
+    case 1: m_pendingBands[band].gainDb = value; break;
+    case 2: m_pendingBands[band].q = value; break;
     }
-    recalcCoeffs(band);
+    m_pendingCoeffs[band] = calcBiquad(m_sampleRate, m_pendingBands[band]);
+    m_pendingLock.clear(std::memory_order_release);
+    m_bandsDirty.store(true, std::memory_order_release);
+
 #ifdef __APPLE__
-    m_firDirty.store(true, std::memory_order_relaxed);
+    if (!m_deferKernelBuild) {
+        if (m_phaseMode == LinearPhase && m_firLen > 0)
+            buildFIRKernelStaged();
+        else if (m_phaseMode == MinimumPhase)
+            buildBiquadSetup();
+    }
 #endif
 }
 
@@ -380,9 +548,9 @@ float EqualizerProcessor::getParameter(int index) const
     if (band < 0 || band >= MAX_BANDS) return 0.0f;
 
     switch (param) {
-    case 0: return m_bands[band].frequency;
-    case 1: return m_bands[band].gainDb;
-    case 2: return m_bands[band].q;
+    case 0: return m_pendingBands[band].frequency;
+    case 1: return m_pendingBands[band].gainDb;
+    case 2: return m_pendingBands[band].q;
     }
     return 0.0f;
 }
@@ -508,69 +676,132 @@ void EqualizerProcessor::allocateLinearPhaseBuffers()
     else
         m_firLen = 16384;
 
-    // FFT size: next power of 2 >= firLen + LP_PARTITION_SIZE
-    m_fftSize = nextPow2(m_firLen + LP_PARTITION_SIZE);
-    m_fftHalf = m_fftSize / 2;
-    m_fftLog2n = ilog2(m_fftSize);
+    // Kernel build FFT: next power of 2 >= firLen (for magnitude sampling)
+    m_firBuildFftSize = nextPow2(m_firLen);
+    m_firBuildFftHalf = m_firBuildFftSize / 2;
+    m_firBuildFftLog2n = ilog2(m_firBuildFftSize);
 
-    // Kernel frequency-domain storage
-    m_firKernelFDReal.assign(m_fftHalf, 0.0f);
-    m_firKernelFDImag.assign(m_fftHalf, 0.0f);
-    m_firKernelFD.realp = m_firKernelFDReal.data();
-    m_firKernelFD.imagp = m_firKernelFDImag.data();
+    // Number of kernel partitions: ceil(firLen / LP_PARTITION_SIZE)
+    m_numKernelPartitions = (m_firLen + LP_PARTITION_SIZE - 1) / LP_PARTITION_SIZE;
 
-    // Per-channel OLA state
-    int overlapLen = m_fftSize - LP_PARTITION_SIZE;
-    m_olaState.resize(MAX_CHANNELS);
-    for (auto& ch : m_olaState) {
-        ch.inputBuf.assign(LP_PARTITION_SIZE, 0.0f);
-        ch.overlapBuf.assign(overlapLen, 0.0f);
-        ch.outputBuf.assign(LP_PARTITION_SIZE, 0.0f);
-        ch.position = 0;
-        ch.hasOutput = false;
+    // Double-buffered OLA instances
+    for (int s = 0; s < 2; ++s) {
+        auto& inst = m_olaSlots[s];
+        inst.channels.resize(MAX_CHANNELS);
+        for (auto& ch : inst.channels) {
+            ch.inputBuf.assign(LP_PARTITION_SIZE, 0.0f);
+            ch.overlapBuf.assign(LP_PARTITION_SIZE, 0.0f);
+            ch.outputBuf.assign(LP_PARTITION_SIZE, 0.0f);
+            ch.fdlReals.resize(m_numKernelPartitions);
+            ch.fdlImags.resize(m_numKernelPartitions);
+            ch.fdl.resize(m_numKernelPartitions);
+            for (int p = 0; p < m_numKernelPartitions; ++p) {
+                ch.fdlReals[p].assign(CONV_FFT_HALF, 0.0f);
+                ch.fdlImags[p].assign(CONV_FFT_HALF, 0.0f);
+                ch.fdl[p].realp = ch.fdlReals[p].data();
+                ch.fdl[p].imagp = ch.fdlImags[p].data();
+            }
+        }
+        inst.kernReals.resize(m_numKernelPartitions);
+        inst.kernImags.resize(m_numKernelPartitions);
+        inst.kernParts.resize(m_numKernelPartitions);
+        for (int p = 0; p < m_numKernelPartitions; ++p) {
+            inst.kernReals[p].assign(CONV_FFT_HALF, 0.0f);
+            inst.kernImags[p].assign(CONV_FFT_HALF, 0.0f);
+            inst.kernParts[p].realp = inst.kernReals[p].data();
+            inst.kernParts[p].imagp = inst.kernImags[p].data();
+        }
+        inst.phase = 0;
+        inst.fdlIdx = 0;
+        inst.hasOutput = false;
+        inst.partitionsProcessed = 0;
     }
+    m_curSlot = 0;
+    m_nextSlot = -1;
+    m_crossfading = false;
+    m_xfadePos = 0;
 
-    // FFT scratch buffers
-    m_lpFftInBuf.assign(m_fftSize, 0.0f);
-    m_lpSplitReal.assign(m_fftHalf, 0.0f);
-    m_lpSplitImag.assign(m_fftHalf, 0.0f);
+    // FFT scratch buffers (CONV_FFT_SIZE = 2048)
+    m_lpFftInBuf.assign(CONV_FFT_SIZE, 0.0f);
+    m_lpSplitReal.assign(CONV_FFT_HALF, 0.0f);
+    m_lpSplitImag.assign(CONV_FFT_HALF, 0.0f);
     m_lpFftSplit.realp = m_lpSplitReal.data();
     m_lpFftSplit.imagp = m_lpSplitImag.data();
 
-    m_lpAccumReal.assign(m_fftHalf, 0.0f);
-    m_lpAccumImag.assign(m_fftHalf, 0.0f);
+    m_lpAccumReal.assign(CONV_FFT_HALF, 0.0f);
+    m_lpAccumImag.assign(CONV_FFT_HALF, 0.0f);
     m_lpAccumSplit.realp = m_lpAccumReal.data();
     m_lpAccumSplit.imagp = m_lpAccumImag.data();
 
-    m_lpIfftOut.assign(m_fftSize, 0.0f);
+    m_lpIfftOut.assign(CONV_FFT_SIZE, 0.0f);
 
-    // Kernel build scratch
-    m_lpKernelBuildBuf.assign(m_fftSize, 0.0f);
+    // Kernel build scratch (uses m_firBuildFftSize)
+    m_lpKernelBuildBuf.assign(m_firBuildFftSize, 0.0f);
+
+    // Pre-allocate RT scratch buffers
+    m_lpMagBins.assign(m_firBuildFftHalf + 1, 0.0f);
+    m_lpSpecReal.assign(m_firBuildFftHalf, 0.0f);
+    m_lpSpecImag.assign(m_firBuildFftHalf, 0.0f);
+    m_lpKernelTimeBuf.assign(m_firLen, 0.0f);
+
+    // Staged kernel buffers (UI thread builds here, RT thread swaps from here)
+    m_stagedPartReals.resize(m_numKernelPartitions);
+    m_stagedPartImags.resize(m_numKernelPartitions);
+    for (int p = 0; p < m_numKernelPartitions; ++p) {
+        m_stagedPartReals[p].assign(CONV_FFT_HALF, 0.0f);
+        m_stagedPartImags[p].assign(CONV_FFT_HALF, 0.0f);
+    }
+    m_stagedKernelReady.store(false, std::memory_order_relaxed);
+    m_stagedLock.clear();
+
+    // UI-thread scratch buffers
+    m_stageMagBins.assign(m_firBuildFftHalf + 1, 0.0f);
+    m_stageSpecReal.assign(m_firBuildFftHalf, 0.0f);
+    m_stageSpecImag.assign(m_firBuildFftHalf, 0.0f);
+    m_stageKernelBuildBuf.assign(m_firBuildFftSize, 0.0f);
+    m_stageKernelTimeBuf.assign(m_firLen, 0.0f);
+    m_stageFftInBuf.assign(CONV_FFT_SIZE, 0.0f);
+    if (!m_stageFftSetup)
+        m_stageFftSetup = vDSP_create_fftsetup(LP_MAX_FFT_LOG2N, kFFTRadix2);
+
+    // Double-buffer scratch (max 4096 frames * MAX_CHANNELS)
+    m_dryBuf.assign(4096 * MAX_CHANNELS, 0.0f);
+    m_nextBuf.assign(4096 * MAX_CHANNELS, 0.0f);
 }
 
-// ── buildFIRKernel ──────────────────────────────────────────────────
-// Called from RT thread when m_firDirty is set.
-// Computes zero-phase FIR kernel from current biquad coefficients.
-void EqualizerProcessor::buildFIRKernel()
+// ── buildFIRKernelStaged ─────────────────────────────────────────────
+// Called from UI thread. Computes zero-phase FIR kernel from pending
+// biquad coefficients and writes into staged buffers for RT-safe swap.
+void EqualizerProcessor::buildFIRKernelStaged()
 {
-    if (!m_fftSetup || m_fftSize <= 0) return;
+    if (!m_stageFftSetup || m_firBuildFftSize <= 0) return;
+
+    const int buildHalf = m_firBuildFftHalf;
+    const int buildSize = m_firBuildFftSize;
+
+    // Snapshot pending params under m_pendingLock
+    std::array<EQBand, MAX_BANDS> snapBands;
+    std::array<BiquadCoeffs, MAX_BANDS> snapCoeffs;
+    int snapActive;
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    snapBands = m_pendingBands;
+    snapCoeffs = m_pendingCoeffs;
+    snapActive = m_pendingActiveBands;
+    m_pendingLock.clear(std::memory_order_release);
 
     // ── Step 1: Compute combined magnitude at each frequency bin ────
-    // We need fftHalf+1 bins (0..fftHalf), but store DC at real[0]
-    // and Nyquist at imag[0] in vDSP packed format.
-    std::vector<float> magBins(m_fftHalf + 1, 1.0f);
+    std::fill(m_stageMagBins.begin(), m_stageMagBins.end(), 1.0f);
 
-    for (int k = 0; k <= m_fftHalf; ++k) {
-        double w = 2.0 * PI * k / m_fftSize;
+    for (int k = 0; k <= buildHalf; ++k) {
+        double w = 2.0 * PI * k / buildSize;
         double combinedMag = 1.0;
 
-        for (int band = 0; band < m_activeBands; ++band) {
-            if (!m_bands[band].enabled) continue;
-            if (m_bands[band].type <= EQBand::HighShelf && m_bands[band].gainDb == 0.0f) continue;
+        for (int band = 0; band < snapActive; ++band) {
+            if (!snapBands[band].enabled) continue;
+            if (snapBands[band].type <= EQBand::HighShelf && snapBands[band].gainDb == 0.0f) continue;
 
-            const auto& c = m_coeffs[band];
+            const auto& c = snapCoeffs[band];
 
-            // H(z) at z = e^jw
             std::complex<double> z = std::exp(std::complex<double>(0, w));
             std::complex<double> z1 = 1.0 / z;
             std::complex<double> z2 = z1 * z1;
@@ -582,201 +813,626 @@ void EqualizerProcessor::buildFIRKernel()
             combinedMag *= mag;
         }
 
-        magBins[k] = static_cast<float>(combinedMag);
+        m_stageMagBins[k] = static_cast<float>(combinedMag);
     }
 
     // ── Step 2: Pack magnitude into vDSP split-complex (zero phase) ─
-    // real[0] = DC, imag[0] = Nyquist, real[k] = mag[k], imag[k] = 0
-    std::vector<float> specReal(m_fftHalf, 0.0f);
-    std::vector<float> specImag(m_fftHalf, 0.0f);
+    std::memset(m_stageSpecImag.data(), 0, buildHalf * sizeof(float));
 
-    specReal[0] = magBins[0];          // DC
-    specImag[0] = magBins[m_fftHalf];  // Nyquist
-    for (int k = 1; k < m_fftHalf; ++k) {
-        specReal[k] = magBins[k];
-        specImag[k] = 0.0f;  // zero phase
+    m_stageSpecReal[0] = m_stageMagBins[0];           // DC
+    m_stageSpecImag[0] = m_stageMagBins[buildHalf];   // Nyquist
+    for (int k = 1; k < buildHalf; ++k) {
+        m_stageSpecReal[k] = m_stageMagBins[k];
     }
 
     DSPSplitComplex specSplit;
-    specSplit.realp = specReal.data();
-    specSplit.imagp = specImag.data();
+    specSplit.realp = m_stageSpecReal.data();
+    specSplit.imagp = m_stageSpecImag.data();
 
     // ── Step 3: Inverse FFT → zero-phase impulse response ───────────
-    vDSP_fft_zrip(m_fftSetup, &specSplit, 1, m_fftLog2n, kFFTDirection_Inverse);
+    vDSP_fft_zrip(m_stageFftSetup, &specSplit, 1, m_firBuildFftLog2n, kFFTDirection_Inverse);
 
-    // Unpack to real
     vDSP_ztoc(&specSplit, 1,
-              reinterpret_cast<DSPComplex*>(m_lpKernelBuildBuf.data()), 2, m_fftHalf);
+              reinterpret_cast<DSPComplex*>(m_stageKernelBuildBuf.data()), 2, buildHalf);
 
-    // Normalize: vDSP inverse gives unnormalized IDFT.
-    // For zero-phase spectrum → time domain, scale by 1/fftSize.
-    float ifftScale = 1.0f / static_cast<float>(m_fftSize);
-    vDSP_vsmul(m_lpKernelBuildBuf.data(), 1, &ifftScale,
-               m_lpKernelBuildBuf.data(), 1, m_fftSize);
+    float ifftScale = 1.0f / static_cast<float>(buildSize);
+    vDSP_vsmul(m_stageKernelBuildBuf.data(), 1, &ifftScale,
+               m_stageKernelBuildBuf.data(), 1, buildSize);
 
     // ── Step 4: Circular shift to center — make causal ──────────────
-    // The zero-phase IR is symmetric about sample 0:
-    //   Right half: samples 0..fftSize/2
-    //   Left half (negative time): samples fftSize-firLen/2..fftSize-1
-    // We extract firLen samples centered around sample 0.
     int halfFir = m_firLen / 2;
-    std::vector<float> kernel(m_firLen, 0.0f);
+    std::memset(m_stageKernelTimeBuf.data(), 0, m_firLen * sizeof(float));
 
-    // Left half: from the end of the buffer (negative time samples)
     for (int i = 0; i < halfFir; ++i) {
-        int srcIdx = m_fftSize - halfFir + i;
-        if (srcIdx >= 0 && srcIdx < m_fftSize)
-            kernel[i] = m_lpKernelBuildBuf[srcIdx];
+        int srcIdx = buildSize - halfFir + i;
+        if (srcIdx >= 0 && srcIdx < buildSize)
+            m_stageKernelTimeBuf[i] = m_stageKernelBuildBuf[srcIdx];
     }
-    // Right half: from the beginning
     for (int i = 0; i < halfFir; ++i) {
-        if (i < m_fftSize)
-            kernel[halfFir + i] = m_lpKernelBuildBuf[i];
+        if (i < buildSize)
+            m_stageKernelTimeBuf[halfFir + i] = m_stageKernelBuildBuf[i];
     }
 
     // ── Step 5: Apply Blackman-Harris window ────────────────────────
     for (int n = 0; n < m_firLen; ++n) {
         double t = static_cast<double>(n) / (m_firLen - 1);
-        double w = 0.35875
+        double wn = 0.35875
                  - 0.48829 * std::cos(2.0 * PI * t)
                  + 0.14128 * std::cos(4.0 * PI * t)
                  - 0.01168 * std::cos(6.0 * PI * t);
-        kernel[n] *= static_cast<float>(w);
+        m_stageKernelTimeBuf[n] *= static_cast<float>(wn);
     }
 
-    // ── Step 6: Zero-pad to fftSize and forward FFT → store kernel FD
-    std::memset(m_lpKernelBuildBuf.data(), 0, m_fftSize * sizeof(float));
-    std::memcpy(m_lpKernelBuildBuf.data(), kernel.data(), m_firLen * sizeof(float));
+    // ── Step 6: Partition, zero-pad, FFT — into staged buffers under lock ─
+    // Build partitioned FFT data into local temporaries first
+    std::vector<std::vector<float>> tmpReals(m_numKernelPartitions);
+    std::vector<std::vector<float>> tmpImags(m_numKernelPartitions);
 
-    // Pack into split complex
-    vDSP_ctoz(reinterpret_cast<const DSPComplex*>(m_lpKernelBuildBuf.data()), 2,
-              &m_firKernelFD, 1, m_fftHalf);
+    for (int p = 0; p < m_numKernelPartitions; ++p) {
+        tmpReals[p].resize(CONV_FFT_HALF);
+        tmpImags[p].resize(CONV_FFT_HALF);
 
-    // Forward FFT
-    vDSP_fft_zrip(m_fftSetup, &m_firKernelFD, 1, m_fftLog2n, kFFTDirection_Forward);
+        int srcOffset = p * LP_PARTITION_SIZE;
+        int copyLen = std::min(LP_PARTITION_SIZE, m_firLen - srcOffset);
+        if (copyLen <= 0) {
+            std::memset(tmpReals[p].data(), 0, CONV_FFT_HALF * sizeof(float));
+            std::memset(tmpImags[p].data(), 0, CONV_FFT_HALF * sizeof(float));
+            continue;
+        }
 
-    // ── Done ────────────────────────────────────────────────────────
-    m_firDirty.store(false, std::memory_order_relaxed);
+        // Zero-pad partition to CONV_FFT_SIZE in scratch buffer
+        std::memset(m_stageFftInBuf.data(), 0, CONV_FFT_SIZE * sizeof(float));
+        std::memcpy(m_stageFftInBuf.data(), m_stageKernelTimeBuf.data() + srcOffset,
+                    copyLen * sizeof(float));
+
+        // Pack and forward FFT into tmp split
+        DSPSplitComplex tmpSplit;
+        tmpSplit.realp = tmpReals[p].data();
+        tmpSplit.imagp = tmpImags[p].data();
+
+        vDSP_ctoz(reinterpret_cast<const DSPComplex*>(m_stageFftInBuf.data()), 2,
+                  &tmpSplit, 1, CONV_FFT_HALF);
+        vDSP_fft_zrip(m_stageFftSetup, &tmpSplit, 1, CONV_FFT_LOG2N,
+                      kFFTDirection_Forward);
+    }
+
+    // Acquire staged lock, copy results, set ready flag
+    while (m_stagedLock.test_and_set(std::memory_order_acquire)) {}
+    for (int p = 0; p < m_numKernelPartitions; ++p) {
+        std::memcpy(m_stagedPartReals[p].data(), tmpReals[p].data(),
+                   CONV_FFT_HALF * sizeof(float));
+        std::memcpy(m_stagedPartImags[p].data(), tmpImags[p].data(),
+                   CONV_FFT_HALF * sizeof(float));
+    }
+    m_stagedKernelReady.store(true, std::memory_order_release);
+    m_stagedLock.clear(std::memory_order_release);
+}
+
+// ── resetOLAState ─────────────────────────────────────────────────────
+// Clears both double-buffered OLA instances: FDL, overlap, output, phase.
+void EqualizerProcessor::resetOLAState()
+{
+    for (int s = 0; s < 2; ++s) {
+        auto& inst = m_olaSlots[s];
+        for (auto& ch : inst.channels) {
+            if (!ch.inputBuf.empty())
+                std::memset(ch.inputBuf.data(), 0, ch.inputBuf.size() * sizeof(float));
+            if (!ch.overlapBuf.empty())
+                std::memset(ch.overlapBuf.data(), 0, ch.overlapBuf.size() * sizeof(float));
+            if (!ch.outputBuf.empty())
+                std::memset(ch.outputBuf.data(), 0, ch.outputBuf.size() * sizeof(float));
+            for (auto& v : ch.fdlReals)
+                std::memset(v.data(), 0, v.size() * sizeof(float));
+            for (auto& v : ch.fdlImags)
+                std::memset(v.data(), 0, v.size() * sizeof(float));
+        }
+        inst.phase = 0;
+        inst.fdlIdx = 0;
+        inst.hasOutput = false;
+        inst.partitionsProcessed = 0;
+    }
+    m_curSlot = 0;
+    m_nextSlot = -1;
+    m_crossfading = false;
+    m_xfadePos = 0;
 }
 
 // ── processLinearPhase ──────────────────────────────────────────────
-// Mirrors ConvolutionProcessor's sample-by-sample overlap-add pattern.
+// Double-buffered partitioned convolution with seamless kernel crossfade.
+// When a new kernel is staged, the alternate OLA instance warms up while
+// the current one continues playing, then crossfades to eliminate dropouts.
 void EqualizerProcessor::processLinearPhase(float* buf, int frames, int channels)
 {
-    if (!m_fftSetup || m_fftSize <= 0) return;
+    if (!m_fftSetup || m_firLen <= 0) return;
 
-    // Rebuild kernel if dirty (band params changed)
-    if (m_firDirty.load(std::memory_order_relaxed)) {
-        buildFIRKernel();
+    auto& cur = m_olaSlots[m_curSlot];
+
+    // ── Staged kernel swap check (RT-safe: try-once, no blocking) ────
+    if (m_stagedKernelReady.load(std::memory_order_acquire)) {
+        if (!m_stagedLock.test_and_set(std::memory_order_acquire)) {
+            if (!cur.hasOutput) {
+                // First build — copy kernel directly into current slot
+                for (int p = 0; p < m_numKernelPartitions; ++p) {
+                    std::memcpy(cur.kernReals[p].data(), m_stagedPartReals[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                    std::memcpy(cur.kernImags[p].data(), m_stagedPartImags[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                    cur.kernParts[p].realp = cur.kernReals[p].data();
+                    cur.kernParts[p].imagp = cur.kernImags[p].data();
+                }
+                m_stagedKernelReady.store(false, std::memory_order_relaxed);
+                m_firDirty.store(false, std::memory_order_relaxed);
+            } else if (m_nextSlot < 0) {
+                // Start warmup on alternate slot
+                int alt = 1 - m_curSlot;
+                auto& next = m_olaSlots[alt];
+                // Reset alternate slot OLA state
+                for (auto& ch : next.channels) {
+                    std::memset(ch.inputBuf.data(), 0, ch.inputBuf.size() * sizeof(float));
+                    std::memset(ch.overlapBuf.data(), 0, ch.overlapBuf.size() * sizeof(float));
+                    std::memset(ch.outputBuf.data(), 0, ch.outputBuf.size() * sizeof(float));
+                    for (auto& v : ch.fdlReals) std::memset(v.data(), 0, v.size() * sizeof(float));
+                    for (auto& v : ch.fdlImags) std::memset(v.data(), 0, v.size() * sizeof(float));
+                }
+                next.phase = 0;
+                next.fdlIdx = 0;
+                next.hasOutput = false;
+                next.partitionsProcessed = 0;
+                // Copy staged kernel
+                for (int p = 0; p < m_numKernelPartitions; ++p) {
+                    std::memcpy(next.kernReals[p].data(), m_stagedPartReals[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                    std::memcpy(next.kernImags[p].data(), m_stagedPartImags[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                    next.kernParts[p].realp = next.kernReals[p].data();
+                    next.kernParts[p].imagp = next.kernImags[p].data();
+                }
+                m_nextSlot = alt;
+                m_crossfading = false;
+                m_xfadePos = 0;
+                m_stagedKernelReady.store(false, std::memory_order_relaxed);
+                m_firDirty.store(false, std::memory_order_relaxed);
+            } else {
+                // Already warming up — update next slot's kernel, restart warmup
+                auto& next = m_olaSlots[m_nextSlot];
+                for (int p = 0; p < m_numKernelPartitions; ++p) {
+                    std::memcpy(next.kernReals[p].data(), m_stagedPartReals[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                    std::memcpy(next.kernImags[p].data(), m_stagedPartImags[p].data(),
+                               CONV_FFT_HALF * sizeof(float));
+                }
+                // Reset FDL and overlap (kernel changed, need fresh warmup)
+                for (auto& ch : next.channels) {
+                    std::memset(ch.overlapBuf.data(), 0, ch.overlapBuf.size() * sizeof(float));
+                    for (auto& v : ch.fdlReals) std::memset(v.data(), 0, v.size() * sizeof(float));
+                    for (auto& v : ch.fdlImags) std::memset(v.data(), 0, v.size() * sizeof(float));
+                }
+                next.hasOutput = false;
+                next.partitionsProcessed = 0;
+                m_crossfading = false;
+                m_xfadePos = 0;
+                m_stagedKernelReady.store(false, std::memory_order_relaxed);
+                m_firDirty.store(false, std::memory_order_relaxed);
+            }
+            m_stagedLock.clear(std::memory_order_release);
+        }
+        // If lock failed: UI is building staged, try next callback
     }
 
+    // ── Process OLA instances ────────────────────────────────────────
+    int n = frames * channels;
+    bool dualProcess = (m_nextSlot >= 0) && (n <= static_cast<int>(m_dryBuf.size()));
+
+    if (dualProcess) {
+        // Save input for second instance
+        std::memcpy(m_dryBuf.data(), buf, n * sizeof(float));
+
+        // Process current slot (in-place: reads buf, writes buf)
+        processOLAInstance(cur, buf, buf, frames, channels);
+
+        // Process next slot from saved input
+        auto& next = m_olaSlots[m_nextSlot];
+        processOLAInstance(next, m_dryBuf.data(), m_nextBuf.data(), frames, channels);
+
+        // Start crossfade when next slot produces output
+        if (next.hasOutput && !m_crossfading) {
+            m_crossfading = true;
+            m_xfadePos = 0;
+        }
+
+        if (m_crossfading) {
+            int ch = std::min(channels, MAX_CHANNELS);
+            for (int i = 0; i < frames; ++i) {
+                float t = static_cast<float>(m_xfadePos + i)
+                        / static_cast<float>(LP_TRANS_FADE_LEN);
+                if (t > 1.0f) t = 1.0f;
+                float gOld = std::sqrtf(1.0f - t);
+                float gNew = std::sqrtf(t);
+                for (int c = 0; c < ch; ++c) {
+                    int idx = i * channels + c;
+                    buf[idx] = buf[idx] * gOld + m_nextBuf[idx] * gNew;
+                }
+            }
+            m_xfadePos += frames;
+            if (m_xfadePos >= LP_TRANS_FADE_LEN) {
+                // Crossfade complete — switch active slot
+                m_curSlot = m_nextSlot;
+                m_nextSlot = -1;
+                m_crossfading = false;
+                m_xfadePos = 0;
+            }
+        }
+    } else {
+        // Single instance processing (normal steady-state)
+        processOLAInstance(cur, buf, buf, frames, channels);
+    }
+}
+
+// ── processOLAInstance ──────────────────────────────────────────────
+// Core partitioned convolution for a single OLA instance.
+// Reads interleaved input from inBuf, writes interleaved output to outBuf.
+// Uses vDSP_zvma for SIMD complex multiply-accumulate (TASK 3).
+void EqualizerProcessor::processOLAInstance(OLAInstance& inst,
+                                            const float* inBuf, float* outBuf,
+                                            int frames, int channels)
+{
     int ch = std::min(channels, MAX_CHANNELS);
+    if (ch < 1 || inst.channels.empty()) return;
+
     int pos = 0;
 
     while (pos < frames) {
-        // How many samples until partition is full
-        int firstChPos = m_olaState.empty() ? 0 : m_olaState[0].position;
-        int avail = std::min(frames - pos, LP_PARTITION_SIZE - firstChPos);
+        int avail = std::min(frames - pos, LP_PARTITION_SIZE - inst.phase);
 
+        // Deinterleave input, write previous output
         for (int i = 0; i < avail; ++i) {
             int baseIdx = (pos + i) * channels;
 
-            // Deinterleave input into per-channel partition buffers
-            for (int c = 0; c < ch; ++c) {
-                m_olaState[c].inputBuf[firstChPos + i] = buf[baseIdx + c];
-            }
+            for (int c = 0; c < ch; ++c)
+                inst.channels[c].inputBuf[inst.phase + i] = inBuf[baseIdx + c];
 
-            // Output previously convolved result
-            if (m_olaState[0].hasOutput) {
-                for (int c = 0; c < ch; ++c) {
-                    buf[baseIdx + c] = m_olaState[c].outputBuf[firstChPos + i];
-                }
+            if (inst.hasOutput) {
+                for (int c = 0; c < ch; ++c)
+                    outBuf[baseIdx + c] = inst.channels[c].outputBuf[inst.phase + i];
             } else {
-                // First partition(s) — output silence (inherent latency).
-                // Must zero buf explicitly; input data is consumed into inputBuf above
-                // but without this, raw input would leak through to downstream.
-                for (int c = 0; c < ch; ++c) {
-                    buf[baseIdx + c] = 0.0f;
-                }
+                for (int c = 0; c < ch; ++c)
+                    outBuf[baseIdx + c] = 0.0f;
             }
         }
 
-        // Update positions
-        for (int c = 0; c < ch; ++c) {
-            m_olaState[c].position = firstChPos + avail;
-        }
+        inst.phase += avail;
         pos += avail;
 
         // When partition is full, convolve
-        if (m_olaState[0].position >= LP_PARTITION_SIZE) {
+        if (inst.phase >= LP_PARTITION_SIZE) {
             for (int c = 0; c < ch; ++c) {
-                auto& ola = m_olaState[c];
+                auto& ola = inst.channels[c];
 
-                // Zero-pad partition to fftSize
+                // Zero-pad input to CONV_FFT_SIZE: [input | zeros]
                 std::memcpy(m_lpFftInBuf.data(), ola.inputBuf.data(),
                            LP_PARTITION_SIZE * sizeof(float));
                 std::memset(m_lpFftInBuf.data() + LP_PARTITION_SIZE, 0,
-                           (m_fftSize - LP_PARTITION_SIZE) * sizeof(float));
+                           LP_PARTITION_SIZE * sizeof(float));
 
                 // Pack and forward FFT
                 vDSP_ctoz(reinterpret_cast<const DSPComplex*>(m_lpFftInBuf.data()), 2,
-                          &m_lpFftSplit, 1, m_fftHalf);
-                vDSP_fft_zrip(m_fftSetup, &m_lpFftSplit, 1, m_fftLog2n,
+                          &m_lpFftSplit, 1, CONV_FFT_HALF);
+                vDSP_fft_zrip(m_fftSetup, &m_lpFftSplit, 1, CONV_FFT_LOG2N,
                               kFFTDirection_Forward);
 
-                // Complex multiply with kernel FD
-                // Bin 0: DC and Nyquist (packed separately)
-                m_lpAccumReal[0] = m_lpSplitReal[0] * m_firKernelFDReal[0];
-                m_lpAccumImag[0] = m_lpSplitImag[0] * m_firKernelFDImag[0];
+                // Store in FDL
+                std::memcpy(ola.fdl[inst.fdlIdx].realp, m_lpFftSplit.realp,
+                           CONV_FFT_HALF * sizeof(float));
+                std::memcpy(ola.fdl[inst.fdlIdx].imagp, m_lpFftSplit.imagp,
+                           CONV_FFT_HALF * sizeof(float));
 
-                // Bins 1..fftHalf-1: standard complex multiply
-                for (int k = 1; k < m_fftHalf; ++k) {
-                    float ar = m_lpSplitReal[k], ai = m_lpSplitImag[k];
-                    float br = m_firKernelFDReal[k], bi = m_firKernelFDImag[k];
-                    m_lpAccumReal[k] = ar * br - ai * bi;
-                    m_lpAccumImag[k] = ar * bi + ai * br;
+                // Clear accumulator
+                std::memset(m_lpAccumReal.data(), 0, CONV_FFT_HALF * sizeof(float));
+                std::memset(m_lpAccumImag.data(), 0, CONV_FFT_HALF * sizeof(float));
+
+                // Accumulate: sum over all partitions of FDL[k] * kernel[k]
+                for (int p = 0; p < m_numKernelPartitions; ++p) {
+                    int fdlSlot = (inst.fdlIdx - p + m_numKernelPartitions) % m_numKernelPartitions;
+
+                    const float* ar = ola.fdl[fdlSlot].realp;
+                    const float* ai = ola.fdl[fdlSlot].imagp;
+                    const float* br = inst.kernParts[p].realp;
+                    const float* bi = inst.kernParts[p].imagp;
+
+                    // Bin 0: DC and Nyquist (packed separately in vDSP format)
+                    m_lpAccumReal[0] += ar[0] * br[0];
+                    m_lpAccumImag[0] += ai[0] * bi[0];
+
+                    // Bins 1..CONV_FFT_HALF-1: vDSP complex multiply-accumulate
+                    DSPSplitComplex zvA = { const_cast<float*>(ar + 1), const_cast<float*>(ai + 1) };
+                    DSPSplitComplex zvB = { const_cast<float*>(br + 1), const_cast<float*>(bi + 1) };
+                    DSPSplitComplex zvC = { m_lpAccumReal.data() + 1, m_lpAccumImag.data() + 1 };
+                    vDSP_zvma(&zvA, 1, &zvB, 1, &zvC, 1, &zvC, 1, CONV_FFT_HALF - 1);
                 }
 
                 // Inverse FFT
-                vDSP_fft_zrip(m_fftSetup, &m_lpAccumSplit, 1, m_fftLog2n,
+                vDSP_fft_zrip(m_fftSetup, &m_lpAccumSplit, 1, CONV_FFT_LOG2N,
                               kFFTDirection_Inverse);
 
                 // Unpack to real
                 vDSP_ztoc(&m_lpAccumSplit, 1,
-                          reinterpret_cast<DSPComplex*>(m_lpIfftOut.data()), 2, m_fftHalf);
+                          reinterpret_cast<DSPComplex*>(m_lpIfftOut.data()), 2, CONV_FFT_HALF);
 
-                // Scale: 1/(fftSize*4), same as ConvolutionProcessor.
-                // Both input and kernel were forward-FFT'd by vDSP (each ×2),
-                // and vDSP inverse doesn't divide by N.  Total spurious factor = 4N.
-                float scale = 1.0f / static_cast<float>(m_fftSize * 4);
-                vDSP_vsmul(m_lpIfftOut.data(), 1, &scale, m_lpIfftOut.data(), 1, m_fftSize);
+                // Scale: 1/(CONV_FFT_SIZE * 4) — same as ConvolutionProcessor
+                float scale = 1.0f / static_cast<float>(CONV_FFT_SIZE * 4);
+                vDSP_vsmul(m_lpIfftOut.data(), 1, &scale, m_lpIfftOut.data(), 1, CONV_FFT_SIZE);
 
-                // Overlap-add: output = result[0..PART-1] + overlap[0..PART-1]
+                // Overlap-add: first half + previous overlap → output
                 vDSP_vadd(m_lpIfftOut.data(), 1, ola.overlapBuf.data(), 1,
                          ola.outputBuf.data(), 1, LP_PARTITION_SIZE);
 
-                // Update overlap: shift consumed portion, add new IFFT tail.
-                // The overlap buffer is longer than one partition (fftSize > 2*partSize)
-                // so we must preserve the unconsumed tail from previous blocks.
-                int overlapLen = m_fftSize - LP_PARTITION_SIZE;
-                int carryLen = overlapLen - LP_PARTITION_SIZE;
-                std::memmove(ola.overlapBuf.data(),
-                            ola.overlapBuf.data() + LP_PARTITION_SIZE,
-                            carryLen * sizeof(float));
-                std::memset(ola.overlapBuf.data() + carryLen, 0,
+                // Save second half as overlap for next block
+                std::memcpy(ola.overlapBuf.data(), m_lpIfftOut.data() + LP_PARTITION_SIZE,
                            LP_PARTITION_SIZE * sizeof(float));
-                vDSP_vadd(m_lpIfftOut.data() + LP_PARTITION_SIZE, 1,
-                         ola.overlapBuf.data(), 1,
-                         ola.overlapBuf.data(), 1, overlapLen);
+            }
 
-                ola.position = 0;
+            // Advance FDL index after all channels
+            inst.fdlIdx = (inst.fdlIdx + 1) % m_numKernelPartitions;
+            inst.phase = 0;
 
-                if (!ola.hasOutput) {
-                    ola.hasOutput = true;
-                }
+            if (!inst.hasOutput) {
+                inst.partitionsProcessed++;
+                if (inst.partitionsProcessed >= m_numKernelPartitions + 1)
+                    inst.hasOutput = true;  // FDL full + 1 clean overlap partition
             }
         }
     }
+}
+
+// ── buildBiquadSetup ─────────────────────────────────────────────────
+// Called from UI thread. Creates a vDSP_biquad_Setup from pending
+// biquad coefficients for all active enabled bands, staged for RT swap.
+void EqualizerProcessor::buildBiquadSetup()
+{
+    // Snapshot pending params under lock
+    std::array<EQBand, MAX_BANDS> snapBands;
+    std::array<BiquadCoeffs, MAX_BANDS> snapCoeffs;
+    int snapActive;
+    while (m_pendingLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    snapBands = m_pendingBands;
+    snapCoeffs = m_pendingCoeffs;
+    snapActive = m_pendingActiveBands;
+    m_pendingLock.clear(std::memory_order_release);
+
+    // Count active sections (enabled bands with non-zero effect)
+    int sections = 0;
+    for (int i = 0; i < snapActive; ++i) {
+        if (!snapBands[i].enabled) continue;
+        if (snapBands[i].type <= EQBand::HighShelf && snapBands[i].gainDb == 0.0f) continue;
+        sections++;
+    }
+
+    if (sections == 0) {
+        if (m_stagedBiquadSetup) {
+            vDSP_biquad_DestroySetup(m_stagedBiquadSetup);
+            m_stagedBiquadSetup = nullptr;
+        }
+        m_stagedBiquadSections = 0;
+        m_biquadSetupReady.store(true, std::memory_order_release);
+        return;
+    }
+
+    // Build coefficient array: 5 doubles per section [b0, b1, b2, a1, a2]
+    std::vector<double> coeffs(5 * sections);
+    int idx = 0;
+    for (int i = 0; i < snapActive; ++i) {
+        if (!snapBands[i].enabled) continue;
+        if (snapBands[i].type <= EQBand::HighShelf && snapBands[i].gainDb == 0.0f) continue;
+        const auto& c = snapCoeffs[i];
+        coeffs[idx * 5 + 0] = c.b0;
+        coeffs[idx * 5 + 1] = c.b1;
+        coeffs[idx * 5 + 2] = c.b2;
+        coeffs[idx * 5 + 3] = c.a1;
+        coeffs[idx * 5 + 4] = c.a2;
+        idx++;
+    }
+
+    vDSP_biquad_Setup newSetup = vDSP_biquad_CreateSetup(coeffs.data(), sections);
+    if (!newSetup) return;
+
+    if (m_stagedBiquadSetup)
+        vDSP_biquad_DestroySetup(m_stagedBiquadSetup);
+    m_stagedBiquadSetup = newSetup;
+    m_stagedBiquadSections = sections;
+    m_biquadSetupReady.store(true, std::memory_order_release);
+}
+
+// ── Self-test ────────────────────────────────────────────────────────
+
+bool EqualizerProcessor::selfTest()
+{
+    qDebug() << "[EQ SelfTest] Starting...";
+    bool allPassed = true;
+
+    // ── Test 1: Flat EQ passthrough (constant input) ──
+    {
+        EqualizerProcessor proc;
+        proc.m_phaseMode = LinearPhase;
+        proc.prepare(44100.0, 2);
+
+        const int numBlocks = 10;
+        float maxErr = 0;
+
+        for (int b = 0; b < numBlocks; ++b) {
+            std::vector<float> block(LP_PARTITION_SIZE * 2, 0.5f);
+            proc.process(block.data(), LP_PARTITION_SIZE, 2);
+            if (b >= 5) {
+                for (int i = 0; i < LP_PARTITION_SIZE; ++i) {
+                    float diffL = std::abs(block[i * 2] - 0.5f);
+                    float diffR = std::abs(block[i * 2 + 1] - 0.5f);
+                    if (diffL > maxErr) maxErr = diffL;
+                    if (diffR > maxErr) maxErr = diffR;
+                }
+            }
+        }
+
+        bool pass = (maxErr < 0.01f);
+        qDebug() << "[EQ SelfTest] Flat passthrough:"
+                 << "maxErr=" << maxErr << (pass ? "PASS" : "FAIL");
+        if (!pass) allPassed = false;
+    }
+
+    // ── Test 2: Sine wave — collect full output, compare inter vs intra block delta ──
+    // Feed 1kHz sine through flat EQ.  Collect all output into a single buffer.
+    // Compare max delta at OLA partition boundaries vs max delta within partitions.
+    // If inter-block delta >> intra-block delta, the OLA has a discontinuity bug.
+    {
+        EqualizerProcessor proc;
+        proc.m_phaseMode = LinearPhase;
+        proc.prepare(44100.0, 2);
+
+        const int numBlocks = 20;
+        const int totalSamples = numBlocks * LP_PARTITION_SIZE;
+        std::vector<float> allOutput(totalSamples); // L channel only
+
+        for (int b = 0; b < numBlocks; ++b) {
+            std::vector<float> block(LP_PARTITION_SIZE * 2);
+            for (int i = 0; i < LP_PARTITION_SIZE; ++i) {
+                float t = static_cast<float>(b * LP_PARTITION_SIZE + i) / 44100.0f;
+                float sample = 0.5f * std::sin(2.0f * static_cast<float>(PI) * 1000.0f * t);
+                block[i * 2] = sample;
+                block[i * 2 + 1] = sample;
+            }
+            proc.process(block.data(), LP_PARTITION_SIZE, 2);
+            for (int i = 0; i < LP_PARTITION_SIZE; ++i)
+                allOutput[b * LP_PARTITION_SIZE + i] = block[i * 2];
+        }
+
+        // Skip first 6 partitions (latency + fade-in warmup)
+        int startSample = 6 * LP_PARTITION_SIZE;
+        float maxIntraDelta = 0; // max delta between consecutive samples WITHIN a partition
+        float maxInterDelta = 0; // max delta at partition BOUNDARIES
+
+        for (int n = startSample + 1; n < totalSamples; ++n) {
+            float delta = std::abs(allOutput[n] - allOutput[n - 1]);
+            bool isBoundary = (n % LP_PARTITION_SIZE == 0);
+            if (isBoundary) {
+                if (delta > maxInterDelta) maxInterDelta = delta;
+            } else {
+                if (delta > maxIntraDelta) maxIntraDelta = delta;
+            }
+        }
+
+        // The inter-block delta should be no larger than intra-block delta + tiny epsilon.
+        // If inter >> intra, the OLA is producing discontinuities at block edges.
+        float ratio = (maxIntraDelta > 1e-10f) ? maxInterDelta / maxIntraDelta : 0.0f;
+        bool pass = (ratio < 1.05f); // ≤5% tolerance for float precision
+        qDebug() << "[EQ SelfTest] Sine OLA continuity:"
+                 << "intra=" << maxIntraDelta << "inter=" << maxInterDelta
+                 << "ratio=" << ratio << (pass ? "PASS" : "FAIL");
+        if (!pass) allPassed = false;
+    }
+
+    // ── Test 3: +6dB EQ with 440Hz sine — same inter/intra comparison ──
+    {
+        EqualizerProcessor proc;
+        proc.m_phaseMode = LinearPhase;
+        proc.prepare(44100.0, 2);
+        proc.setBand(0, 1000.0f, 6.0f, 1.0f);
+
+        const int numBlocks = 20;
+        const int totalSamples = numBlocks * LP_PARTITION_SIZE;
+        std::vector<float> allOutput(totalSamples);
+
+        for (int b = 0; b < numBlocks; ++b) {
+            std::vector<float> block(LP_PARTITION_SIZE * 2);
+            for (int i = 0; i < LP_PARTITION_SIZE; ++i) {
+                float t = static_cast<float>(b * LP_PARTITION_SIZE + i) / 44100.0f;
+                float sample = 0.25f * std::sin(2.0f * static_cast<float>(PI) * 440.0f * t);
+                block[i * 2] = sample;
+                block[i * 2 + 1] = sample;
+            }
+            proc.process(block.data(), LP_PARTITION_SIZE, 2);
+            for (int i = 0; i < LP_PARTITION_SIZE; ++i)
+                allOutput[b * LP_PARTITION_SIZE + i] = block[i * 2];
+        }
+
+        int startSample = 6 * LP_PARTITION_SIZE;
+        float maxIntraDelta = 0;
+        float maxInterDelta = 0;
+
+        for (int n = startSample + 1; n < totalSamples; ++n) {
+            float delta = std::abs(allOutput[n] - allOutput[n - 1]);
+            bool isBoundary = (n % LP_PARTITION_SIZE == 0);
+            if (isBoundary) {
+                if (delta > maxInterDelta) maxInterDelta = delta;
+            } else {
+                if (delta > maxIntraDelta) maxIntraDelta = delta;
+            }
+        }
+
+        float ratio = (maxIntraDelta > 1e-10f) ? maxInterDelta / maxIntraDelta : 0.0f;
+        bool pass = (ratio < 1.05f);
+        qDebug() << "[EQ SelfTest] EQ+6dB OLA continuity:"
+                 << "intra=" << maxIntraDelta << "inter=" << maxInterDelta
+                 << "ratio=" << ratio << (pass ? "PASS" : "FAIL");
+        if (!pass) allPassed = false;
+    }
+
+    // ── Test 4: Mixed frame sizes with sine ──
+    {
+        EqualizerProcessor proc;
+        proc.m_phaseMode = LinearPhase;
+        proc.prepare(44100.0, 2);
+
+        const int frameSizes[] = {512, 256, 768, 1024, 2048};
+        const int totalSamples = 30 * 2048; // upper bound
+        std::vector<float> allOutput;
+        allOutput.reserve(totalSamples);
+        int totalFrames = 0;
+
+        for (int round = 0; round < 30; ++round) {
+            int frames = frameSizes[round % 5];
+            std::vector<float> block(frames * 2);
+            for (int i = 0; i < frames; ++i) {
+                float t = static_cast<float>(totalFrames + i) / 44100.0f;
+                float sample = 0.5f * std::sin(2.0f * static_cast<float>(PI) * 440.0f * t);
+                block[i * 2] = sample;
+                block[i * 2 + 1] = sample;
+            }
+            proc.process(block.data(), frames, 2);
+            for (int i = 0; i < frames; ++i)
+                allOutput.push_back(block[i * 2]);
+            totalFrames += frames;
+        }
+
+        int startSample = 6 * LP_PARTITION_SIZE;
+        float maxIntraDelta = 0;
+        float maxInterDelta = 0;
+
+        for (int n = startSample + 1; n < static_cast<int>(allOutput.size()); ++n) {
+            float delta = std::abs(allOutput[n] - allOutput[n - 1]);
+            bool isBoundary = (n % LP_PARTITION_SIZE == 0);
+            if (isBoundary) {
+                if (delta > maxInterDelta) maxInterDelta = delta;
+            } else {
+                if (delta > maxIntraDelta) maxIntraDelta = delta;
+            }
+        }
+
+        float ratio = (maxIntraDelta > 1e-10f) ? maxInterDelta / maxIntraDelta : 0.0f;
+        bool pass = (ratio < 1.05f);
+        qDebug() << "[EQ SelfTest] Mixed frames OLA:"
+                 << "intra=" << maxIntraDelta << "inter=" << maxInterDelta
+                 << "ratio=" << ratio << (pass ? "PASS" : "FAIL");
+        if (!pass) allPassed = false;
+    }
+
+    qDebug() << "[EQ SelfTest]" << (allPassed ? "ALL PASSED" : "SOME FAILED");
+    return allPassed;
+}
+
+#else // !__APPLE__
+
+bool EqualizerProcessor::selfTest()
+{
+    qDebug() << "[EQ SelfTest] Skipped — vDSP not available";
+    return true;
 }
 
 #endif // __APPLE__

@@ -170,7 +170,6 @@ void AppSidebar::setupUI()
             { tr("Playlists"),    QStringLiteral(":/icons/list-music.svg")  },
             { tr("Apple Music"),  QStringLiteral(":/icons/apple-music.svg") },
             { tr("Folders"),      QStringLiteral(":/icons/folder.svg")      },
-            // { tr("Tidal"),        QStringLiteral(":/icons/tidal.svg")       },  // TODO: restore when Tidal API available
         };
         constexpr int NAV_ITEM_COUNT = 7;
 
@@ -346,14 +345,6 @@ QPushButton* AppSidebar::createNavButton(const QString& text, const QString& ico
     // Brand icons keep their original colors
     if (iconPath.contains(QStringLiteral("apple-music"))) {
         btn->setIcon(QIcon(iconPath));
-    /* TODO: restore when Tidal API available
-    } else if (iconPath.contains(QStringLiteral("tidal"))) {
-        // Use theme-appropriate Tidal icon (white for dark, black for light)
-        QString tidalIcon = tm->isDark()
-            ? QStringLiteral(":/icons/tidal-dark.svg")
-            : QStringLiteral(":/icons/tidal-light.svg");
-        btn->setIcon(QIcon(tidalIcon));
-    */
     } else {
         btn->setIcon(tm->cachedIcon(iconPath));
     }
@@ -484,7 +475,6 @@ void AppSidebar::toggleCollapse()
             tr("Playlists"),
             tr("Apple Music"),
             tr("Folders"),
-            // tr("Tidal"),  // TODO: restore when Tidal API available
         };
         for (int i = 0; i < m_navButtons.size() && i < 7; ++i) {
             m_navButtons[i]->setText(navTexts[i]);
@@ -860,7 +850,7 @@ void AppSidebar::refreshTheme()
         ).arg(c.hover));
     }
 
-    // Nav button icons (0-4: themed icons, 5: Apple Music, 6: Folders, 7: Tidal)
+    // Nav button icons (0-4: themed icons, 5: Apple Music, 6: Folders)
     const QString iconPaths[] = {
         ":/icons/radio.svg", ":/icons/library.svg", ":/icons/disc.svg",
         ":/icons/users.svg", ":/icons/list-music.svg"
@@ -873,15 +863,6 @@ void AppSidebar::refreshTheme()
     if (m_navButtons.size() > 6) {
         m_navButtons[6]->setIcon(tm->cachedIcon(":/icons/folder.svg"));
     }
-    /* TODO: restore when Tidal API available
-    // Tidal (index 7) - monochrome, needs theme-specific variant
-    if (m_navButtons.size() > 7) {
-        QString tidalIcon = tm->isDark()
-            ? QStringLiteral(":/icons/tidal-dark.svg")
-            : QStringLiteral(":/icons/tidal-light.svg");
-        m_navButtons[7]->setIcon(QIcon(tidalIcon));
-    }
-    */
 
     // Re-apply active/inactive nav styles
     updateNavStyles();

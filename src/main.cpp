@@ -46,6 +46,8 @@ static void shutdownCrashHandler(int sig)
 #include "core/library/LibraryDatabase.h"
 #include "core/library/LibraryScanner.h"
 #include "core/library/PlaylistManager.h"
+#include "ui/services/CoverArtService.h"
+#include "metadata/CoverArtProvider.h"
 #include "ui/MainWindow.h"
 #ifdef Q_OS_MACOS
 #include "platform/macos/BookmarkManager.h"
@@ -426,6 +428,11 @@ int main(int argc, char* argv[]) {
                         LibraryScanner::instance()->scanFolders(folders);
                     }
                 }
+
+                // Evict stale cover art cache entries (>30 days)
+                CoverArtService::instance()->evictDiskCache(30);
+                CoverArtProvider::evictDiskCache(30);
+
                 std::cout << "[STARTUP] Background tasks started" << std::endl;
             });
         });

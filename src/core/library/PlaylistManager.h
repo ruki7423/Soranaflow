@@ -20,6 +20,12 @@ public:
     // ── Import ────────────────────────────────────────────────────────
     // Import a .m3u/.m3u8 playlist file. Returns playlist ID on success.
     QString importM3U(const QString& filePath);
+    // Import a .xspf playlist file. Returns playlist ID on success.
+    QString importXSPF(const QString& filePath);
+
+    // ── Export ────────────────────────────────────────────────────────
+    bool exportM3U(const QString& playlistId, const QString& filePath);
+    bool exportXSPF(const QString& playlistId, const QString& filePath);
 
     // ── Track management ─────────────────────────────────────────────
     bool addTrack(const QString& playlistId, const Track& track);

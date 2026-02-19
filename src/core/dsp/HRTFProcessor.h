@@ -18,6 +18,10 @@
 #include <mysofa.h>
 #include <vector>
 #include <atomic>
+#include <mutex>
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
 
 class HRTFProcessor : public IDSPProcessor
 {
@@ -28,8 +32,8 @@ public:
     // Load SOFA file containing HRTF data
     bool loadSOFA(const QString& filePath);
     void unloadSOFA();
-    bool isLoaded() const { return m_loaded; }
-    QString sofaPath() const { return m_sofaPath; }
+    bool isLoaded() const { std::lock_guard<std::mutex> lock(m_metaMutex); return m_loaded; }
+    QString sofaPath() const { std::lock_guard<std::mutex> lock(m_metaMutex); return m_sofaPath; }
 
     // IDSPProcessor interface
     void process(float* buf, int frames, int channels) override;
@@ -49,9 +53,10 @@ public:
     void process(float* buffer, int frameCount);
 
 private:
-    void updateFilters();
+    void buildStagedFilters(float angle);
 
-    // SOFA data
+    // SOFA data (m_loaded, m_sofaPath, m_irLength protected by m_metaMutex for non-RT reads)
+    mutable std::mutex m_metaMutex;
     struct MYSOFA_EASY* m_sofa = nullptr;
     bool m_loaded = false;
     QString m_sofaPath;
@@ -59,9 +64,7 @@ private:
 
     // Thread-safe control
     std::atomic<bool> m_enabled{false};
-    std::atomic<bool> m_needsFilterUpdate{false};
     std::atomic<bool> m_needsStateReset{true};
-    std::atomic<float> m_pendingAngle{-1.0f};
 
     // Active parameters (render thread only)
     float m_speakerAngle = 30.0f;
@@ -72,6 +75,33 @@ private:
 
     // FIR convolution history buffers (render thread only)
     std::vector<float> m_historyL, m_historyR;
+
+    // Staged filter data (built by UI thread, swapped by RT thread)
+    struct StagedFilters {
+        std::vector<float> irLL, irLR, irRL, irRR;
+#ifdef __APPLE__
+        std::vector<float> revIrLL, revIrLR, revIrRL, revIrRR;  // reversed for vDSP_conv
+        std::vector<float> extL, extR;   // extended signal [history | current]
+        std::vector<float> outL, outR;   // block FIR output
+        std::vector<float> tempFir;      // temp accumulation
+#else
+        std::vector<float> historyL, historyR;
+#endif
+        int irLength = 0;
+        float angle = 0.0f;
+    };
+    StagedFilters m_staged;
+    std::atomic<bool> m_stagedReady{false};
+
+#ifdef __APPLE__
+    // Block-based FIR buffers (RT-only, swapped from staged)
+    std::vector<float> m_revIrLL, m_revIrLR, m_revIrRL, m_revIrRR;
+    std::vector<float> m_extL, m_extR;
+    std::vector<float> m_outL, m_outR;
+    std::vector<float> m_tempFir;
+#else
+    std::vector<float> m_historyL, m_historyR;
+#endif
 
     // Fade state
     float m_wetMix = 0.0f;

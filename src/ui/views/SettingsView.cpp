@@ -47,7 +47,6 @@ void SettingsView::setupUI()
     m_tabWidget->addTab(new AudioSettingsTab(), tr("Audio"));
     m_tabWidget->addTab(new LibrarySettingsTab(), tr("Library"));
     m_tabWidget->addTab(new AppleMusicSettingsTab(), tr("Apple Music"));
-    // m_tabWidget->addTab(createTidalTab(), tr("Tidal"));  // TODO: restore when Tidal API available
     m_tabWidget->addTab(new AppearanceSettingsTab(), tr("Appearance"));
     m_tabWidget->addTab(new AboutSettingsTab(), tr("About"));
 
@@ -60,53 +59,51 @@ void SettingsView::setupUI()
 
 void SettingsView::refreshTheme()
 {
-    // Remember which tab was active before rebuild
-    int savedTabIndex = m_tabWidget ? m_tabWidget->currentIndex() : 0;
+    if (!m_tabWidget) return;
 
-    // Rebuild the entire UI to pick up new theme colors
-    QLayout* oldLayout = layout();
-    if (oldLayout) {
-        QLayoutItem* child;
-        while ((child = oldLayout->takeAt(0)) != nullptr) {
-            if (child->widget()) {
-                child->widget()->deleteLater();
-            }
-            delete child;
-        }
-        delete oldLayout;
+    // Update header label color
+    if (auto* header = findChild<QLabel*>(QString(), Qt::FindDirectChildrenOnly)) {
+        header->setStyleSheet(
+            QStringLiteral("color: %1; font-size: 24px; font-weight: bold;")
+                .arg(ThemeManager::instance()->colors().foreground));
     }
-    m_tabWidget = nullptr;
 
-    // Rebuild
-    setupUI();
+    // Replace tab contents in-place (avoids layout destruction/rebuild)
+    int savedTabIndex = m_tabWidget->currentIndex();
+    while (m_tabWidget->count() > 0) {
+        QWidget* tab = m_tabWidget->widget(0);
+        m_tabWidget->removeTab(0);
+        delete tab;
+    }
+    m_tabWidget->addTab(new AudioSettingsTab(), tr("Audio"));
+    m_tabWidget->addTab(new LibrarySettingsTab(), tr("Library"));
+    m_tabWidget->addTab(new AppleMusicSettingsTab(), tr("Apple Music"));
+    m_tabWidget->addTab(new AppearanceSettingsTab(), tr("Appearance"));
+    m_tabWidget->addTab(new AboutSettingsTab(), tr("About"));
 
-    // Restore the previously active tab
-    if (m_tabWidget && savedTabIndex < m_tabWidget->count()) {
+    if (savedTabIndex >= 0 && savedTabIndex < m_tabWidget->count())
         m_tabWidget->setCurrentIndex(savedTabIndex);
-    }
 
     // Update theme card selection borders in the Appearance tab
-    if (m_tabWidget) {
-        QWidget* appearanceTab = m_tabWidget->widget(3); // Appearance is index 3 (Audio, Library, Apple Music, Appearance, About)
-        if (appearanceTab) {
-            ThemeManager::Theme currentTheme = ThemeManager::instance()->currentTheme();
-            auto cards = appearanceTab->findChildren<QWidget*>(QString(), Qt::FindChildrenRecursively);
-            for (auto* card : cards) {
-                QVariant val = card->property("themeValue");
-                if (val.isValid()) {
-                    bool isSelected = (static_cast<ThemeManager::Theme>(val.toInt()) == currentTheme);
-                    QString borderStyle = isSelected
-                        ? QStringLiteral("border: 2px solid %1;").arg(ThemeManager::instance()->colors().accent)
-                        : QStringLiteral("border: 2px solid transparent;");
-                    card->setStyleSheet(
-                        QStringLiteral("QWidget {"
-                                       "  background-color: %1;"
-                                       "  border-radius: 8px;"
-                                       "  %2"
-                                       "}")
-                            .arg(ThemeManager::instance()->colors().backgroundSecondary)
-                            .arg(borderStyle));
-                }
+    QWidget* appearanceTab = m_tabWidget->widget(3);
+    if (appearanceTab) {
+        ThemeManager::Theme currentTheme = ThemeManager::instance()->currentTheme();
+        auto cards = appearanceTab->findChildren<QWidget*>(QString(), Qt::FindChildrenRecursively);
+        for (auto* card : cards) {
+            QVariant val = card->property("themeValue");
+            if (val.isValid()) {
+                bool isSelected = (static_cast<ThemeManager::Theme>(val.toInt()) == currentTheme);
+                QString borderStyle = isSelected
+                    ? QStringLiteral("border: 2px solid %1;").arg(ThemeManager::instance()->colors().accent)
+                    : QStringLiteral("border: 2px solid transparent;");
+                card->setStyleSheet(
+                    QStringLiteral("QWidget {"
+                                   "  background-color: %1;"
+                                   "  border-radius: 8px;"
+                                   "  %2"
+                                   "}")
+                        .arg(ThemeManager::instance()->colors().backgroundSecondary)
+                        .arg(borderStyle));
             }
         }
     }

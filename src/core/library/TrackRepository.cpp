@@ -9,6 +9,26 @@
 #include <QMutexLocker>
 #include <QSet>
 
+// ── FTS5 query escaping ───────────────────────────────────────────────
+// FTS5 treats ", *, -, +, AND, OR, NOT, NEAR, (, ) as operators.
+// Strip them to prevent syntax errors or unexpected results.
+static QString escapeFTS5(const QString& term)
+{
+    QString escaped;
+    escaped.reserve(term.size());
+    for (const QChar& ch : term) {
+        if (ch == QLatin1Char('"') || ch == QLatin1Char('*')
+            || ch == QLatin1Char('-') || ch == QLatin1Char('+')
+            || ch == QLatin1Char('(') || ch == QLatin1Char(')'))
+            escaped.append(QLatin1Char(' '));
+        else
+            escaped.append(ch);
+    }
+    // Also escape single quotes for SQL safety
+    escaped.replace(QLatin1Char('\''), QStringLiteral("''"));
+    return escaped.trimmed();
+}
+
 // ── Korean jamo normalization for FTS5 search ────────────────────────
 // Compatibility jamo (U+3131-U+3163) are standalone characters that don't
 // match composed Hangul syllables in FTS5.  Convert them to conjoining jamo
@@ -119,10 +139,11 @@ bool TrackRepository::removeDuplicates()
     qDebug() << "  Tracks before cleanup:" << before;
 
     // 1) Remove exact duplicates by file_path (keep first inserted)
+    //    Exclude empty file_path (Apple Music tracks have no local path)
     QSqlQuery q1(*m_ctx->writeDb);
     q1.exec(QStringLiteral(
-        "DELETE FROM tracks WHERE id NOT IN ("
-        "  SELECT MIN(id) FROM tracks GROUP BY file_path"
+        "DELETE FROM tracks WHERE file_path != '' AND id NOT IN ("
+        "  SELECT MIN(id) FROM tracks WHERE file_path != '' GROUP BY file_path"
         ")"
     ));
     qDebug() << "  Removed by file_path:" << q1.numRowsAffected();
@@ -487,8 +508,8 @@ QVector<Track> TrackRepository::searchTracks(const QString& query) const
 
     if (normalized.length() >= 2) {
         // Use FTS5 for 2+ char queries (< 1ms vs table scan)
-        QString ftsQuery = normalized;
-        ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
+        QString ftsQuery = escapeFTS5(normalized);
+        if (ftsQuery.isEmpty()) return result;
         ftsQuery += QStringLiteral("*");
 
         QSqlQuery q(*m_ctx->readDb);
@@ -538,9 +559,9 @@ QVector<QString> TrackRepository::searchTracksFTS(const QString& query) const
     QString normalized = normalizeKoreanForSearch(query);
     if (normalized.isEmpty()) return ids;
 
-    // FTS5 query: prefix search with *
-    QString ftsQuery = normalized;
-    ftsQuery.replace(QLatin1Char('\''), QStringLiteral("''"));
+    // FTS5 query: prefix search with * (escape special chars)
+    QString ftsQuery = escapeFTS5(normalized);
+    if (ftsQuery.isEmpty()) return ids;
     ftsQuery += QStringLiteral("*");
 
     QSqlQuery q(*m_ctx->readDb);

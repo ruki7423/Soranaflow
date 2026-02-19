@@ -19,6 +19,7 @@ struct CoreAudioOutput::Impl {
     std::atomic<bool>       destroyed{false};
     std::atomic<bool>       swappingCallback{false};
     float                   volume  = 1.0f;
+    float                   prevVolume = 1.0f;
     bool                    bitPerfect = false;
     std::atomic<bool>       dopPassthrough{false};
     std::atomic<bool>       transitioning{false};
@@ -153,13 +154,27 @@ struct CoreAudioOutput::Impl {
             }
         }
 
-        // Apply volume (skip for DoP — scaling destroys DoP markers)
+        // Apply volume with smooth ramp (skip for DoP — scaling destroys DoP markers)
         if (!isDoP) {
             float vol = self->volume;
-            if (vol < 1.0f) {
-                for (int i = 0; i < totalSamples; ++i) {
-                    outBuf[i] *= vol;
+            float prev = self->prevVolume;
+            if (prev != vol) {
+                // Ramp from prevVolume to volume over this buffer
+                int ch = self->format.channels;
+                int frames = (int)inNumberFrames;
+                if (ch > 0 && frames > 0) {
+                    float step = (vol - prev) / (float)frames;
+                    float g = prev;
+                    for (int f = 0; f < frames; ++f) {
+                        g += step;
+                        for (int c = 0; c < ch; ++c)
+                            outBuf[f * ch + c] *= g;
+                    }
                 }
+                self->prevVolume = vol;
+            } else if (vol < 1.0f) {
+                for (int i = 0; i < totalSamples; ++i)
+                    outBuf[i] *= vol;
             }
         }
 
@@ -598,7 +613,9 @@ bool CoreAudioOutput::setSampleRate(double rate)
                                          0, &asbd, sizeof(asbd));
     fprintf(stderr, "CoreAudioOutput: setSampleRate ASBD -> OSStatus %d\n", (int)err);
 
-    AudioUnitInitialize(d.audioUnit);
+    OSStatus initErr = AudioUnitInitialize(d.audioUnit);
+    if (initErr != noErr)
+        fprintf(stderr, "CoreAudioOutput: AudioUnitInitialize failed: %d\n", (int)initErr);
 
     if (wasRunning) start();
     return err == noErr;

@@ -339,6 +339,25 @@ void LibraryDatabase::createIndexes()
         }
     }
 
+    // FTS5 sync triggers (keep index in sync with tracks table)
+    q.exec(QStringLiteral(
+        "CREATE TRIGGER IF NOT EXISTS tracks_fts_insert AFTER INSERT ON tracks BEGIN "
+        "  INSERT INTO tracks_fts(rowid, title, artist, album, composer) "
+        "  VALUES (new.rowid, new.title, new.artist, new.album, new.composer); "
+        "END"));
+    q.exec(QStringLiteral(
+        "CREATE TRIGGER IF NOT EXISTS tracks_fts_delete AFTER DELETE ON tracks BEGIN "
+        "  INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, composer) "
+        "  VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.composer); "
+        "END"));
+    q.exec(QStringLiteral(
+        "CREATE TRIGGER IF NOT EXISTS tracks_fts_update AFTER UPDATE ON tracks BEGIN "
+        "  INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, composer) "
+        "  VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.composer); "
+        "  INSERT INTO tracks_fts(rowid, title, artist, album, composer) "
+        "  VALUES (new.rowid, new.title, new.artist, new.album, new.composer); "
+        "END"));
+
     // Migration: add R128 loudness columns (safe to call multiple times)
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN r128_loudness REAL DEFAULT 0"));
     q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN r128_peak REAL DEFAULT 0"));
@@ -585,6 +604,15 @@ bool LibraryDatabase::commitTransaction() { QMutexLocker lock(&m_writeMutex); m_
 bool LibraryDatabase::createBackup()
 {
     QMutexLocker lock(&m_writeMutex);
+    return createBackup_nolock();
+}
+
+bool LibraryDatabase::createBackup_nolock()
+{
+    // WAL checkpoint: flush WAL to main DB file before copying
+    QSqlQuery walQ(m_db);
+    walQ.exec(QStringLiteral("PRAGMA wal_checkpoint(TRUNCATE)"));
+
     QString backupFile = m_dbPath + QStringLiteral(".backup");
 
     if (QFile::exists(backupFile))
@@ -607,15 +635,17 @@ bool LibraryDatabase::restoreFromBackup()
         return false;
     }
 
-    // Close the database connection
+    // Close both database connections
     m_db.close();
+    m_readDb.close();
 
     // Replace DB with backup
     QFile::remove(m_dbPath);
     bool ok = QFile::copy(backupFile, m_dbPath);
 
-    // Reopen the database
+    // Reopen both database connections
     m_db.open();
+    m_readDb.open();
 
     if (ok) {
         qDebug() << "[LibraryDatabase] Restored from backup";
@@ -830,6 +860,7 @@ void LibraryDatabase::rebuildAlbumsAndArtists()
     static QElapsedTimer lastRebuild;
     if (lastRebuild.isValid() && lastRebuild.elapsed() < 5000) {
         qDebug() << "LibraryDatabase: Skipping rebuild - cooldown";
+        emit rebuildFinished();
         return;
     }
 
@@ -879,9 +910,9 @@ void LibraryDatabase::doRebuildInternal()
     QElapsedTimer rebuildTimer; rebuildTimer.start();
     QElapsedTimer stepTimer;
 
-    // Auto-backup before destructive rebuild
+    // Auto-backup before destructive rebuild (nolock — already under m_writeMutex)
     stepTimer.start();
-    createBackup();
+    createBackup_nolock();
     qDebug() << "[TIMING] doRebuild createBackup:" << stepTimer.elapsed() << "ms";
 
     qDebug() << "LibraryDatabase::rebuildAlbumsAndArtists - starting rebuild...";

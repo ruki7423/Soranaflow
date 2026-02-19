@@ -4,6 +4,7 @@
 #include "../../../core/ThemeManager.h"
 #include "../../../core/audio/AudioEngine.h"
 #include "../../../core/dsp/DSPPipeline.h"
+#include "../../../core/dsp/LoudnessContour.h"
 #include "../../../widgets/StyledButton.h"
 
 #include <QGridLayout>
@@ -29,8 +30,8 @@
 EQGraphWidget::EQGraphWidget(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumHeight(180);
-    setMaximumHeight(160);
+    setMinimumHeight(160);
+    setMaximumHeight(180);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
@@ -257,9 +258,12 @@ QWidget* EQSettingsWidget::createEQCard(QVBoxLayout* parentLayout)
         QStringLiteral("Treble Boost"),
         QStringLiteral("Vocal"),
         QStringLiteral("Electronic"),
+        QStringLiteral("Loudness (Low)"),
+        QStringLiteral("Loudness (Mid)"),
+        QStringLiteral("Loudness (High)"),
         QStringLiteral("Custom")
     });
-    m_eqPresetCombo->setFixedWidth(120);
+    m_eqPresetCombo->setFixedWidth(150);
     QString savedPreset = Settings::instance()->eqPreset();
     int presetIdx = m_eqPresetCombo->findText(savedPreset);
     if (presetIdx >= 0) m_eqPresetCombo->setCurrentIndex(presetIdx);
@@ -711,7 +715,11 @@ QWidget* EQSettingsWidget::createEQCard(QVBoxLayout* parentLayout)
         Settings::instance()->setEqActiveBands(count);
 
         auto* pipeline = AudioEngine::instance()->dspPipeline();
-        if (pipeline) pipeline->equalizerProcessor()->setActiveBands(count);
+        auto* eq = pipeline ? pipeline->equalizerProcessor() : nullptr;
+        if (eq) {
+            eq->beginBatchUpdate();
+            eq->setActiveBands(count);
+        }
 
         for (int i = 0; i < count; ++i) {
             const EQBand& b = parsedBands[i];
@@ -720,8 +728,9 @@ QWidget* EQSettingsWidget::createEQCard(QVBoxLayout* parentLayout)
             Settings::instance()->setEqBandFreq(i, b.frequency);
             Settings::instance()->setEqBandGain(i, b.gainDb);
             Settings::instance()->setEqBandQ(i, b.q);
-            if (pipeline) pipeline->equalizerProcessor()->setBand(i, b);
+            if (eq) eq->setBand(i, b);
         }
+        if (eq) eq->endBatchUpdate();
 
         // Apply preamp via gain slider if available
         if (m_gainSlider && preampDb != 0.0f) {
@@ -1123,7 +1132,52 @@ void EQSettingsWidget::applyEQPreset(const QString& presetName)
     };
 
     int idx = presetNames.indexOf(presetName);
+
+    // Check loudness contour presets
     if (idx < 0) {
+        for (int lc = 0; lc < LoudnessContour::presetCount; ++lc) {
+            if (presetName == QLatin1String(LoudnessContour::presets[lc].name)) {
+                Settings::instance()->setEqPreset(presetName);
+
+                m_activeBandCount = 10;
+                if (m_bandCountSpin) {
+                    m_bandCountSpin->blockSignals(true);
+                    m_bandCountSpin->setValue(10);
+                    m_bandCountSpin->blockSignals(false);
+                }
+                Settings::instance()->setEqActiveBands(10);
+
+                auto* pipeline = AudioEngine::instance()->dspPipeline();
+                auto* eq = pipeline ? pipeline->equalizerProcessor() : nullptr;
+                if (eq) {
+                    eq->beginBatchUpdate();
+                    eq->setActiveBands(10);
+                }
+
+                for (int i = 0; i < 10; ++i) {
+                    EQBand band;
+                    band.enabled   = true;
+                    band.type      = EQBand::Peak;
+                    band.frequency = presetFreqs[i];
+                    band.gainDb    = LoudnessContour::presets[lc].gains[i];
+                    band.q         = 0.7071f;
+
+                    Settings::instance()->setEqBandEnabled(i, true);
+                    Settings::instance()->setEqBandType(i, 0);
+                    Settings::instance()->setEqBandFreq(i, band.frequency);
+                    Settings::instance()->setEqBandGain(i, band.gainDb);
+                    Settings::instance()->setEqBandQ(i, band.q);
+
+                    if (eq) eq->setBand(i, band);
+                }
+                if (eq) eq->endBatchUpdate();
+
+                rebuildBandRows();
+                updateEQGraph();
+                return;
+            }
+        }
+        // Unknown preset name — just save it
         Settings::instance()->setEqPreset(presetName);
         return;
     }
@@ -1140,7 +1194,11 @@ void EQSettingsWidget::applyEQPreset(const QString& presetName)
     Settings::instance()->setEqActiveBands(10);
 
     auto* pipeline = AudioEngine::instance()->dspPipeline();
-    if (pipeline) pipeline->equalizerProcessor()->setActiveBands(10);
+    auto* eq = pipeline ? pipeline->equalizerProcessor() : nullptr;
+    if (eq) {
+        eq->beginBatchUpdate();
+        eq->setActiveBands(10);
+    }
 
     // Apply preset values
     for (int i = 0; i < 10; ++i) {
@@ -1158,8 +1216,9 @@ void EQSettingsWidget::applyEQPreset(const QString& presetName)
         Settings::instance()->setEqBandGain(i, band.gainDb);
         Settings::instance()->setEqBandQ(i, band.q);
 
-        if (pipeline) pipeline->equalizerProcessor()->setBand(i, band);
+        if (eq) eq->setBand(i, band);
     }
+    if (eq) eq->endBatchUpdate();
 
     // Rebuild rows and graph
     rebuildBandRows();

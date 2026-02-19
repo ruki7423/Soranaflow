@@ -222,12 +222,14 @@ void PlaybackState::previous()
 
     // If more than 3 seconds in, restart the current track
     if (m_currentTime > 3) {
+        AudioEngine::instance()->cancelNextTrack();  // disarm stale gapless before seek
         seek(0);
         return;
     }
 
     // Otherwise go to the previous track
     if (m_queueMgr->retreat(true)) {  // user-initiated
+        AudioEngine::instance()->cancelNextTrack();  // cancel stale gapless pre-load
         // Skip setCurrentTrackInfo: retreat() already set the queue index correctly.
         // Calling findOrInsertTrack + invalidateShuffleOrder would wipe shuffle history.
         m_currentTrack = m_queueMgr->currentTrack();
@@ -330,12 +332,14 @@ void PlaybackState::loadAndPlayTrack(const Track& track)
     // Determine source: empty filePath with a valid id = Apple Music
     if (track.filePath.isEmpty() && !track.id.isEmpty()) {
         if (m_currentSource == Local) {
+            AudioEngine::instance()->cancelNextTrack();
             AudioEngine::instance()->stop();
         }
         m_currentSource = AppleMusic;
 
         QString songId = track.id;
-        QTimer::singleShot(0, this, [songId]() {
+        QTimer::singleShot(0, this, [this, songId]() {
+            m_trackTransitionPending = false;
             MusicKitPlayer::instance()->play(songId);
         });
         return;
@@ -355,6 +359,7 @@ void PlaybackState::loadAndPlayTrack(const Track& track)
 
     Track trackCopy = track;
     QTimer::singleShot(0, this, [this, trackCopy]() {
+        m_trackTransitionPending = false;
         if (!trackCopy.filePath.isEmpty()) {
             auto* engine = AudioEngine::instance();
             engine->setCurrentTrack(trackCopy);
@@ -368,6 +373,7 @@ void PlaybackState::loadAndPlayTrack(const Track& track)
 // ── playTrack ───────────────────────────────────────────────────────
 void PlaybackState::playTrack(const Track& track)
 {
+    AudioEngine::instance()->cancelNextTrack();
     setCurrentTrackInfo(track);
     loadAndPlayTrack(track);
 }
@@ -414,9 +420,17 @@ void PlaybackState::removeFromQueue(int index)
     bool wasCurrent = (index == m_queueMgr->currentIndex());
     m_queueMgr->removeFromQueue(index);
 
-    if (wasCurrent && m_queueMgr->currentIndex() >= 0) {
-        m_currentTrack = m_queueMgr->currentTrack();
-        emit trackChanged(m_currentTrack);
+    if (wasCurrent) {
+        AudioEngine::instance()->cancelNextTrack();
+        if (m_queueMgr->currentIndex() >= 0) {
+            m_currentTrack = m_queueMgr->currentTrack();
+            emit trackChanged(m_currentTrack);
+            loadAndPlayTrack(m_currentTrack);
+        } else {
+            AudioEngine::instance()->stop();
+            m_playing = false;
+            emit playStateChanged(m_playing);
+        }
     }
 
     m_queuePersist->scheduleSave();
@@ -439,6 +453,7 @@ void PlaybackState::moveTo(int fromIndex, int toIndex)
 
 void PlaybackState::clearQueue()
 {
+    AudioEngine::instance()->cancelNextTrack();
     m_queueMgr->clearQueue();
     m_queuePersist->scheduleSave();
     emitQueueChangedDebounced();
@@ -490,6 +505,9 @@ void PlaybackState::playNextTrack(bool userInitiated)
 {
     if (m_queueMgr->isEmpty())
         return;
+    if (m_trackTransitionPending && !userInitiated)
+        return;  // guard against double-advance from concurrent signals
+    m_trackTransitionPending = true;
 
     auto* engine = AudioEngine::instance();
 
@@ -513,6 +531,7 @@ void PlaybackState::playNextTrack(bool userInitiated)
 
     if (result == QueueManager::EndOfQueue) {
         // Try autoplay before stopping
+        // TODO(ISSUE-044): potential overlap if autoplay callback fires while another advance is in progress
         if (m_autoplay && m_autoplay->isEnabled()) {
             m_autoplay->requestNextTrack(m_currentTrack.artist, m_currentTrack.title);
             return;
@@ -530,6 +549,8 @@ void PlaybackState::playNextTrack(bool userInitiated)
     }
 
     // Advanced — play the new track
+    // Cancel stale gapless pre-load to prevent audio thread race
+    AudioEngine::instance()->cancelNextTrack();
     // Skip setCurrentTrackInfo: advance() already set the queue index correctly.
     // Calling findOrInsertTrack + setCurrentIndex would corrupt the shuffle state.
     m_currentTrack = m_queueMgr->currentTrack();
@@ -576,6 +597,7 @@ void PlaybackState::onGaplessTransition()
     if (result == QueueManager::RepeatOne) {
         m_currentTime = 0;
         emit timeChanged(m_currentTime);
+        scheduleGaplessPrepare();  // re-arm for next loop iteration
         return;
     }
 

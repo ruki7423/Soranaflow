@@ -135,6 +135,7 @@ private:
     void createIndexes();
     void verifyFTSIndex();
     void doRebuildInternal();
+    bool createBackup_nolock();  // called under existing m_writeMutex
 
     QSqlDatabase m_db;        // write connection (scanner, inserts, updates)
     QSqlDatabase m_readDb;    // read connection (MDP, search, UI queries)

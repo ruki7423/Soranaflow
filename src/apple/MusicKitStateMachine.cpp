@@ -98,6 +98,13 @@ void MusicKitStateMachine::onPlayError()
         m_amPlayState == AMPlayState::Buffering) {
         m_amPlayState = AMPlayState::Error;
         emit amPlayStateChanged(m_amPlayState);
+        // Auto-recover to Idle after 2s so player isn't stuck in error state
+        QTimer::singleShot(2000, this, [this]() {
+            if (m_amPlayState == AMPlayState::Error) {
+                m_amPlayState = AMPlayState::Idle;
+                emit amPlayStateChanged(m_amPlayState);
+            }
+        });
     }
 }
 

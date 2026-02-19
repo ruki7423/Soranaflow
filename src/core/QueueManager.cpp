@@ -42,7 +42,7 @@ void QueueManager::removeFromQueue(int index)
 {
     if (index < 0 || index >= m_queue.size()) return;
 
-    QString removedPath = m_queue[index].filePath;
+    QString removedId = m_queue[index].id;
     m_queue.removeAt(index);
 
     if (m_queue.isEmpty()) {
@@ -55,7 +55,7 @@ void QueueManager::removeFromQueue(int index)
     }
 
     // Remove only the deleted track from history, not all history
-    m_shuffleHistory.removeAll(removedPath);
+    m_shuffleHistory.removeAll(removedId);
     if (m_shuffle && !m_queue.isEmpty())
         rebuildShuffleOrder();
 }
@@ -184,7 +184,7 @@ QueueManager::AdvanceResult QueueManager::advance(bool userInitiated)
         if (insertPos > m_queue.size()) insertPos = m_queue.size();
         m_queue.insert(insertPos, next);
         if (m_shuffle && m_queueIndex >= 0 && m_queueIndex < m_queue.size())
-            m_shuffleHistory.append(m_queue[m_queueIndex].filePath);
+            m_shuffleHistory.append(m_queue[m_queueIndex].id);
         m_queueIndex = insertPos;
         if (m_shuffle) rebuildShuffleOrder();
         qDebug() << "[Queue] Playing user-queued track:" << next.title
@@ -218,7 +218,7 @@ QueueManager::AdvanceResult QueueManager::advance(bool userInitiated)
 
         if (!m_shuffledIndices.isEmpty()) {
             if (m_queueIndex >= 0 && m_queueIndex < m_queue.size())
-                m_shuffleHistory.append(m_queue[m_queueIndex].filePath);
+                m_shuffleHistory.append(m_queue[m_queueIndex].id);
             m_queueIndex = m_shuffledIndices.takeFirst();
         } else {
             return EndOfQueue;  // Queue has 0 tracks
@@ -245,20 +245,19 @@ bool QueueManager::retreat(bool userInitiated)
 
     if (m_shuffle) {
         if (m_shuffleHistory.isEmpty()) return false;
-        QString prevPath = m_shuffleHistory.takeLast();
 
-        // Find the track by filePath in current queue
-        for (int i = 0; i < m_queue.size(); ++i) {
-            if (m_queue[i].filePath == prevPath) {
-                m_shuffledIndices.prepend(m_queueIndex);
-                m_queueIndex = i;
-                return true;
+        // Iterative history walk (avoids deep recursion if many tracks removed)
+        while (!m_shuffleHistory.isEmpty()) {
+            QString prevId = m_shuffleHistory.takeLast();
+            for (int i = 0; i < m_queue.size(); ++i) {
+                if (m_queue[i].id == prevId) {
+                    m_shuffledIndices.prepend(m_queueIndex);
+                    m_queueIndex = i;
+                    return true;
+                }
             }
+            // Track no longer in queue — try next in history
         }
-
-        // Track no longer in queue — try next in history
-        if (!m_shuffleHistory.isEmpty())
-            return retreat();
         return false;
     }
 
@@ -275,6 +274,11 @@ bool QueueManager::retreat(bool userInitiated)
 
 int QueueManager::findOrInsertTrack(const Track& track)
 {
+    for (int i = 0; i < m_queue.size(); ++i) {
+        if (m_queue.at(i).id == track.id && m_queue.at(i).filePath == track.filePath)
+            return i;
+    }
+    // Fallback: match by ID only (for Apple Music tracks with empty filePath)
     for (int i = 0; i < m_queue.size(); ++i) {
         if (m_queue.at(i).id == track.id)
             return i;

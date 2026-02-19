@@ -195,15 +195,15 @@
     qDebug() << "[MusicKitPlayer] Auth popup created at floating level";
 
     // Re-raise after auth page transitions (Apple ID sign-in → Access Request)
-    // Can't use __weak (MRC), so capture the panel pointer directly.
-    // The delayed blocks only call methods if the panel is still visible.
-    NSPanel* panelRef = panel;
+    // Use self.authPanel (authoritative reference) to avoid dangling pointer
+    // if the panel is closed before delayed blocks fire.
     for (double delay : {0.5, 1.5, 3.0}) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            if (panelRef && [panelRef isVisible]) {
+            NSPanel* p = self.authPanel;
+            if (p && [p isVisible]) {
                 [NSApp activateIgnoringOtherApps:YES];
-                [panelRef makeKeyAndOrderFront:nil];
+                [p makeKeyAndOrderFront:nil];
             }
         });
     }
@@ -283,7 +283,10 @@ MusicKitPlayer::MusicKitPlayer(QObject* parent)
     connect(m_stateMachine, &MusicKitStateMachine::executePlayRequested,
             this, [this](const QString& songId) {
                 qDebug() << "[MusicKitPlayer] Calling JS playSong()...";
-                runJS(QStringLiteral("playSong('%1')").arg(songId));
+                QString escaped = songId;
+                escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+                escaped.replace(QLatin1Char('\''), QLatin1String("\\'"));
+                runJS(QStringLiteral("playSong('%1')").arg(escaped));
             });
     connect(m_stateMachine, &MusicKitStateMachine::stopPlaybackRequested,
             this, [this]() {
@@ -437,6 +440,7 @@ void MusicKitPlayer::ensureWebView()
 // ── play — public entry point, routes through state machine ─────────
 void MusicKitPlayer::play(const QString& songId)
 {
+    // TODO(ISSUE-057): no network reachability check before attempting playback
     qDebug() << "[MusicKitPlayer] play() called with songId:" << songId;
 
     if (!m_initialized) {
@@ -510,8 +514,12 @@ void MusicKitPlayer::setVolume(double volume)
 // ── setPlaybackQuality ──────────────────────────────────────────────
 void MusicKitPlayer::setPlaybackQuality(const QString& quality)
 {
-    if (m_ready)
-        runJS(QStringLiteral("setPlaybackBitrate('%1')").arg(quality));
+    if (m_ready) {
+        QString escaped = quality;
+        escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+        escaped.replace(QLatin1Char('\''), QLatin1String("\\'"));
+        runJS(QStringLiteral("setPlaybackBitrate('%1')").arg(escaped));
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════

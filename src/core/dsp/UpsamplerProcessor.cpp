@@ -13,12 +13,16 @@ UpsamplerProcessor::~UpsamplerProcessor()
     destroySoxr();
 }
 
+// THREAD SAFETY: Null the pointer before deleting so the RT thread
+// (which checks !m_soxr at processUpsampling entry) sees passthrough
+// immediately. All callers that change upsampling config ultimately go
+// through applyUpsamplingChange() → load() → stop() which stops the
+// render callback before reconfigure().
 void UpsamplerProcessor::destroySoxr()
 {
-    if (m_soxr) {
-        soxr_delete(m_soxr);
-        m_soxr = nullptr;
-    }
+    soxr_t old = m_soxr;
+    m_soxr = nullptr;
+    if (old) soxr_delete(old);
 }
 
 void UpsamplerProcessor::setEnabled(bool enabled)

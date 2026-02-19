@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <cstring>
+#include <memory>
 
 struct AudioDecoder::Impl {
     AVFormatContext* fmtCtx   = nullptr;
@@ -23,8 +24,8 @@ struct AudioDecoder::Impl {
     int64_t          framesDecoded = 0;  // total frames output so far
     bool             opened = false;
 
-    // Residual buffer for partial reads
-    float*           residualBuf   = nullptr;
+    // Residual buffer for partial reads (RAII)
+    std::unique_ptr<float[]> residualBuf;
     int              residualFrames = 0;
     int              residualOffset = 0;
 
@@ -33,7 +34,7 @@ struct AudioDecoder::Impl {
     }
 
     void cleanup() {
-        if (residualBuf) { delete[] residualBuf; residualBuf = nullptr; }
+        residualBuf.reset();
         if (frame)    { av_frame_free(&frame); }
         if (packet)   { av_packet_free(&packet); }
         if (swrCtx)   { swr_free(&swrCtx); }
@@ -88,7 +89,11 @@ bool AudioDecoder::open(const std::string& filePath)
         avformat_close_input(&d.fmtCtx);
         return false;
     }
-    avcodec_parameters_to_context(d.codecCtx, stream->codecpar);
+    if (avcodec_parameters_to_context(d.codecCtx, stream->codecpar) < 0) {
+        avcodec_free_context(&d.codecCtx);
+        avformat_close_input(&d.fmtCtx);
+        return false;
+    }
 
     if (avcodec_open2(d.codecCtx, codec, nullptr) < 0) {
         avcodec_free_context(&d.codecCtx);
@@ -161,7 +166,7 @@ bool AudioDecoder::open(const std::string& filePath)
 
     // Allocate residual buffer (max one decoded frame worth of data)
     // Use a generous size: 192000 samples * channels
-    d.residualBuf = new float[192000 * outChannels];
+    d.residualBuf = std::make_unique<float[]>(192000 * outChannels);
 
     d.opened = true;
     return true;
@@ -188,7 +193,7 @@ int AudioDecoder::read(float* buf, int maxFrames)
     // First, drain residual buffer
     if (d.residualFrames > 0) {
         int toCopy = std::min(d.residualFrames, maxFrames);
-        std::memcpy(buf, d.residualBuf + d.residualOffset * channels,
+        std::memcpy(buf, d.residualBuf.get() + d.residualOffset * channels,
                     toCopy * channels * sizeof(float));
         d.residualOffset += toCopy;
         d.residualFrames -= toCopy;
@@ -202,7 +207,8 @@ int AudioDecoder::read(float* buf, int maxFrames)
     // Decode more data
     while (framesWritten < maxFrames) {
         int ret = av_read_frame(d.fmtCtx, d.packet);
-        if (ret < 0) break; // EOF or error
+        if (ret == AVERROR_EOF) break;  // normal end of file
+        if (ret < 0) { av_packet_unref(d.packet); break; }  // decode error
 
         if (d.packet->stream_index != d.audioStreamIndex) {
             av_packet_unref(d.packet);
@@ -216,7 +222,7 @@ int AudioDecoder::read(float* buf, int maxFrames)
         while (avcodec_receive_frame(d.codecCtx, d.frame) == 0) {
             // Convert frame to float32 interleaved
             int outSamples = d.frame->nb_samples;
-            float* outBuf = d.residualBuf;
+            float* outBuf = d.residualBuf.get();
 
             int converted = swr_convert(d.swrCtx,
                                         (uint8_t**)&outBuf, outSamples,
@@ -228,7 +234,7 @@ int AudioDecoder::read(float* buf, int maxFrames)
             int remaining = maxFrames - framesWritten;
             int toCopy = std::min(converted, remaining);
             std::memcpy(buf + framesWritten * channels,
-                        d.residualBuf,
+                        d.residualBuf.get(),
                         toCopy * channels * sizeof(float));
             framesWritten += toCopy;
 
@@ -237,8 +243,8 @@ int AudioDecoder::read(float* buf, int maxFrames)
                 d.residualOffset = toCopy;
                 d.residualFrames = converted - toCopy;
                 // Move residual data to beginning of buffer
-                std::memmove(d.residualBuf,
-                             d.residualBuf + toCopy * channels,
+                std::memmove(d.residualBuf.get(),
+                             d.residualBuf.get() + toCopy * channels,
                              d.residualFrames * channels * sizeof(float));
                 d.residualOffset = 0;
             }

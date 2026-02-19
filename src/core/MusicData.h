@@ -1,3 +1,4 @@
+#pragma once
 #ifndef MUSICDATA_H
 #define MUSICDATA_H
 

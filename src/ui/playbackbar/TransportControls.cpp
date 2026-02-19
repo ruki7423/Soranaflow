@@ -243,8 +243,10 @@ void TransportControls::showTemporaryMessage(const QString& msg)
     // Briefly show message in the total time label (3 seconds), then restore
     QString saved = m_totalTimeLabel->text();
     m_totalTimeLabel->setText(msg);
-    QTimer::singleShot(3000, this, [this, saved]() {
-        m_totalTimeLabel->setText(saved);
+    int gen = ++m_msgGeneration;
+    QTimer::singleShot(3000, this, [this, saved, gen]() {
+        if (gen == m_msgGeneration)  // only restore if no newer message
+            m_totalTimeLabel->setText(saved);
     });
 }
 
@@ -350,6 +352,7 @@ void TransportControls::updateRepeatIcon()
 
 QString TransportControls::formatTime(int seconds)
 {
+    if (seconds < 0) seconds = 0;
     int mins = seconds / 60;
     int secs = seconds % 60;
     return QString("%1:%2").arg(mins).arg(secs, 2, 10, QChar('0'));

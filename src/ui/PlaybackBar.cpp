@@ -196,9 +196,8 @@ void PlaybackBar::wireDeviceVolumeSignals()
         // Simpler: DeviceVolumeControl tracks mute state, we query slider value
         // On mute: silence. On unmute: restore slider volume.
         // The widget handles the icon; we handle the audio.
-        static bool muted = false;
-        muted = !muted;
-        if (muted) {
+        m_muted = !m_muted;
+        if (m_muted) {
             AudioEngine::instance()->setVolume(0.0f);
         } else {
             // Restore volume from PlaybackState (which tracks the real volume)

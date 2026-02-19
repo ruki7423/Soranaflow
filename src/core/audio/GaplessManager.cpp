@@ -200,8 +200,9 @@ GaplessManager::TransitionResult GaplessManager::swapToCurrent(
         currentDsdDecoder->setDoPMarkerState(m_nextDsdDecoder->dopMarkerState());
     }
 
-    // Update file path
-    { std::lock_guard<std::mutex> lock(filePathMutex); currentFilePath = m_nextFilePath; }
+    // Update file path (try_lock to avoid blocking RT thread)
+    { std::unique_lock<std::mutex> lock(filePathMutex, std::try_to_lock);
+      if (lock.owns_lock()) currentFilePath = m_nextFilePath; }
 
     // Clean up old decoder (now in next slot)
     m_nextDecoder->close();

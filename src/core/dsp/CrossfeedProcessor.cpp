@@ -62,7 +62,7 @@ void CrossfeedProcessor::recalculate()
     m_crossfeedGain = rawCrossfeed / (1.0f + rawCrossfeed);
 
     // Low-pass filter coefficient (1-pole): a = exp(-2*pi*fc/fs)
-    int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+    int sr = (m_sampleRate.load(std::memory_order_relaxed) > 0) ? m_sampleRate.load(std::memory_order_relaxed) : 44100;
     float w = 2.0f * static_cast<float>(M_PI) * cutoffHz / static_cast<float>(sr);
     m_lpCoeff = std::exp(-w);
 
@@ -75,7 +75,7 @@ void CrossfeedProcessor::recalculate()
 
 void CrossfeedProcessor::process(float* buf, int frames, int channels)
 {
-    (void)channels; // stereo-only
+    if (channels != 2) return;  // stereo-only processor
     process(buf, frames);
 }
 

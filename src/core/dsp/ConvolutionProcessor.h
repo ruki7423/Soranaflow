@@ -66,19 +66,25 @@ private:
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_hasIR{false};
     std::atomic<bool> m_needsStateReset{true};
-    std::atomic<bool> m_irSwapPending{false};
 
 #ifdef __APPLE__
-    // IR data: double-buffered
-    IRData m_irSlotA, m_irSlotB;
-    IRData* m_activeIR = nullptr;
-    IRData* m_pendingIR = nullptr;
-    std::mutex m_irSwapMutex;  // Only held briefly during pointer swap
+    // Active IR data (render thread reads, staged swap writes)
+    IRData m_irSlotA;
+    IRData* m_activeIR = nullptr;  // &m_irSlotA after first swap (or local in selfTest)
+
+    // Staged IR + FDL (built by background thread, swapped by RT thread)
+    struct StagedConvIR {
+        IRData irData;
+        std::vector<std::vector<DSPSplitComplex>> fdl;
+        std::vector<std::vector<std::vector<float>>> fdlReals, fdlImags;
+    };
+    StagedConvIR m_staged;
+    std::atomic<bool> m_stagedReady{false};
 #endif
     std::string m_irFilePath;
     std::mutex m_irFilePathMutex;
 
-    int m_sampleRate = 44100;
+    std::atomic<int> m_sampleRate{44100};
     std::atomic<bool> m_needsRecalc{false};
 
 #ifdef __APPLE__

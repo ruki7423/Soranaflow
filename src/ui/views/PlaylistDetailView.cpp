@@ -2,6 +2,7 @@
 #include <QRandomGenerator>
 #include "../../core/ThemeManager.h"
 #include "../../core/library/LibraryDatabase.h"
+#include "../../core/library/PlaylistManager.h"
 #include "../../metadata/MetadataService.h"
 #include "../dialogs/MetadataSearchDialog.h"
 #include "../services/MetadataFixService.h"
@@ -20,6 +21,7 @@ PlaylistDetailView::PlaylistDetailView(QWidget* parent)
     , m_statsLabel(nullptr)
     , m_playAllBtn(nullptr)
     , m_shuffleBtn(nullptr)
+    , m_exportBtn(nullptr)
     , m_trackTable(nullptr)
     , m_scrollArea(nullptr)
     , m_metadataFixService(new MetadataFixService(this))
@@ -131,6 +133,13 @@ void PlaylistDetailView::setupUI()
     m_shuffleBtn->setIcon(QIcon::fromTheme(QStringLiteral("media-playlist-shuffle")));
     actionsLayout->addWidget(m_shuffleBtn);
 
+    m_exportBtn = new StyledButton(QStringLiteral("Export"),
+                                    QStringLiteral("ghost"),
+                                    headerWidget);
+    m_exportBtn->setIcon(ThemeManager::instance()->cachedIcon(QStringLiteral(":/icons/download.svg")));
+    m_exportBtn->setIconSize(QSize(UISizes::toggleIconSize, UISizes::toggleIconSize));
+    actionsLayout->addWidget(m_exportBtn);
+
     actionsLayout->addStretch();
     infoLayout->addLayout(actionsLayout);
 
@@ -236,6 +245,30 @@ void PlaylistDetailView::updateDisplay()
     // ── Connect play all / shuffle buttons ──────────────────────────
     disconnect(m_playAllBtn, nullptr, nullptr, nullptr);
     disconnect(m_shuffleBtn, nullptr, nullptr, nullptr);
+    disconnect(m_exportBtn, nullptr, nullptr, nullptr);
+
+    connect(m_exportBtn, &QPushButton::clicked, this, [this]() {
+        if (m_playlist.id.isEmpty()) return;
+        QString filePath = QFileDialog::getSaveFileName(
+            this,
+            QStringLiteral("Export Playlist"),
+            m_playlist.name,
+            QStringLiteral("XSPF Playlist (*.xspf);;M3U Playlist (*.m3u);;All Files (*)"));
+        if (filePath.isEmpty()) return;
+
+        bool ok = false;
+        if (filePath.endsWith(QStringLiteral(".m3u"), Qt::CaseInsensitive) ||
+            filePath.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)) {
+            ok = PlaylistManager::instance()->exportM3U(m_playlist.id, filePath);
+        } else {
+            // Default to XSPF
+            if (!filePath.endsWith(QStringLiteral(".xspf"), Qt::CaseInsensitive))
+                filePath += QStringLiteral(".xspf");
+            ok = PlaylistManager::instance()->exportXSPF(m_playlist.id, filePath);
+        }
+        qDebug() << "[PlaylistDetailView] Export" << (ok ? "succeeded" : "failed")
+                 << filePath;
+    });
 
     connect(m_playAllBtn, &QPushButton::clicked, this, [this]() {
         if (!m_playlist.tracks.isEmpty()) {

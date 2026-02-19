@@ -59,6 +59,7 @@ void VolumeLevelingManager::setCurrentTrack(const Track& track)
     }
 }
 
+// TODO(ISSUE-051): doesn't re-compute when target loudness setting changes mid-track
 void VolumeLevelingManager::updateGain()
 {
     if (!Settings::instance()->volumeLeveling() || m_currentTrack.filePath.isEmpty()) {

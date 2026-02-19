@@ -7,6 +7,19 @@
 #include "../../core/library/PlaylistManager.h"
 #include "../services/NavigationService.h"
 
+// ── Shared gradient palette for playlist cards ──────────────────────
+static const struct { const char* from; const char* to; } kPlaylistGradients[] = {
+    {"#667eea", "#764ba2"},  // Purple-violet
+    {"#6a85b6", "#bac8e0"},  // Steel blue
+    {"#4facfe", "#00c6fb"},  // Blue-cyan
+    {"#89609e", "#c479a2"},  // Muted purple-pink
+    {"#4ca1af", "#c4e0e5"},  // Teal
+    {"#7f7fd5", "#86a8e7"},  // Soft purple-blue
+    {"#5c6bc0", "#7986cb"},  // Indigo
+    {"#26a69a", "#80cbc4"},  // Teal-mint
+};
+static constexpr int kPlaylistGradientCount = sizeof(kPlaylistGradients) / sizeof(kPlaylistGradients[0]);
+
 // ═════════════════════════════════════════════════════════════════════
 //  Constructor
 // ═════════════════════════════════════════════════════════════════════
@@ -261,18 +274,7 @@ QWidget* PlaylistsView::createPlaylistCard(const Playlist& playlist, int coverSi
 {
     auto c = ThemeManager::instance()->colors();
 
-    // ── Gradient palette per playlist ───────────────────────────────
-    static const struct { const char* from; const char* to; } gradients[] = {
-        {"#667eea", "#764ba2"},  // Purple-violet
-        {"#6a85b6", "#bac8e0"},  // Steel blue
-        {"#4facfe", "#00c6fb"},  // Blue-cyan
-        {"#89609e", "#c479a2"},  // Muted purple-pink
-        {"#4ca1af", "#c4e0e5"},  // Teal
-        {"#7f7fd5", "#86a8e7"},  // Soft purple-blue
-        {"#5c6bc0", "#7986cb"},  // Indigo
-        {"#26a69a", "#80cbc4"},  // Teal-mint
-    };
-    static constexpr int gradientCount = sizeof(gradients) / sizeof(gradients[0]);
+    // Gradient palette is defined at file scope (kPlaylistGradients)
 
     auto* card = new QWidget();
     card->setObjectName(QStringLiteral("PlaylistCard"));
@@ -299,12 +301,12 @@ QWidget* PlaylistsView::createPlaylistCard(const Playlist& playlist, int coverSi
     } else {
         // Pick a gradient based on hash of the playlist id
         uint hash = qHash(playlist.id);
-        int idx = static_cast<int>(hash % gradientCount);
+        int idx = static_cast<int>(hash % kPlaylistGradientCount);
         gradient = QStringLiteral(
             "qlineargradient(x1:0, y1:0, x2:1, y2:1,"
             " stop:0 %1, stop:1 %2)")
-            .arg(QLatin1String(gradients[idx].from),
-                 QLatin1String(gradients[idx].to));
+            .arg(QLatin1String(kPlaylistGradients[idx].from),
+                 QLatin1String(kPlaylistGradients[idx].to));
     }
 
     coverLabel->setStyleSheet(
@@ -411,15 +413,10 @@ QWidget* PlaylistsView::createPlaylistListRow(const Playlist& playlist)
     if (playlist.isSmartPlaylist) {
         gradient = QStringLiteral("qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #4A9EFF, stop:1 #7C3AED)");
     } else {
-        static const struct { const char* from; const char* to; } rowGradients[] = {
-            {"#667eea", "#764ba2"}, {"#6a85b6", "#bac8e0"}, {"#4facfe", "#00c6fb"},
-            {"#89609e", "#c479a2"}, {"#4ca1af", "#c4e0e5"}, {"#7f7fd5", "#86a8e7"},
-            {"#5c6bc0", "#7986cb"}, {"#26a69a", "#80cbc4"},
-        };
         uint hash = qHash(playlist.id);
-        int idx = static_cast<int>(hash % 8);
+        int idx = static_cast<int>(hash % kPlaylistGradientCount);
         gradient = QStringLiteral("qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2)")
-            .arg(QLatin1String(rowGradients[idx].from), QLatin1String(rowGradients[idx].to));
+            .arg(QLatin1String(kPlaylistGradients[idx].from), QLatin1String(kPlaylistGradients[idx].to));
     }
     thumb->setStyleSheet(QStringLiteral(
         "QLabel { background: %1; border-radius: 6px; color: rgba(255,255,255,0.85); font-size: 18px; }")
@@ -633,11 +630,16 @@ void PlaylistsView::onImportPlaylistClicked()
         this,
         QStringLiteral("Import Playlist"),
         QString(),
-        QStringLiteral("Playlist Files (*.m3u *.m3u8);;All Files (*)"));
+        QStringLiteral("Playlist Files (*.m3u *.m3u8 *.xspf);;All Files (*)"));
 
     if (filePath.isEmpty()) return;
 
-    QString id = PlaylistManager::instance()->importM3U(filePath);
+    QString id;
+    if (filePath.endsWith(QStringLiteral(".xspf"), Qt::CaseInsensitive)) {
+        id = PlaylistManager::instance()->importXSPF(filePath);
+    } else {
+        id = PlaylistManager::instance()->importM3U(filePath);
+    }
     if (!id.isEmpty()) {
         qDebug() << "[PlaylistsView] Imported playlist:" << id;
     }

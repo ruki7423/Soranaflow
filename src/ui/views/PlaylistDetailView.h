@@ -3,6 +3,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFileDialog>
 #include "../../widgets/StyledButton.h"
 #include "../../widgets/StyledScrollArea.h"
 #include "../../widgets/FormatBadge.h"
@@ -37,6 +38,7 @@ private:
 
     StyledButton* m_playAllBtn;
     StyledButton* m_shuffleBtn;
+    StyledButton* m_exportBtn;
 
     TrackTableView* m_trackTable;
 

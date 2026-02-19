@@ -45,5 +45,6 @@ private:
     ConvolutionProcessor m_convolution;
     HRTFProcessor m_hrtf;
     std::atomic<float> m_headroomGain{1.0f};
+    float m_prevHeadroomGain = 1.0f;  // render-thread only, for smooth ramping
     float m_prevLevelingGain = 1.0f;  // render-thread only, for smooth ramping
 };

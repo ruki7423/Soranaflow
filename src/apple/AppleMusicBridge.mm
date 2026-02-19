@@ -429,6 +429,7 @@ void AppleMusicManager::searchCatalog(const QString& term, int limit)
 //  REST API search — uses developer token + Apple Music API
 // ═══════════════════════════════════════════════════════════════════
 
+// TODO(ISSUE-058): Apple Music API pagination not fully handled for large result sets
 void AppleMusicManager::searchViaRestApi(const QString& term, int limit)
 {
     if (d->developerToken.isEmpty()) {

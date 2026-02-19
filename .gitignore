@@ -24,3 +24,4 @@ build/generated/ApiKeys.h
 moc_*.cpp
 qrc_*.cpp
 ui_*.h
+build-test/

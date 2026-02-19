@@ -35,7 +35,7 @@ private:
 
     // Active parameters (only modified by render thread via pending updates)
     Level m_level = Medium;
-    int m_sampleRate = 44100;
+    std::atomic<int> m_sampleRate{44100};
 
     // DSP coefficients (only modified in recalculate(), called from render thread)
     float m_crossfeedGain = 0.0f;

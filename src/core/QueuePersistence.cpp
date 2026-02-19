@@ -33,6 +33,7 @@ void QueuePersistence::doSave()
 
 void QueuePersistence::saveImmediate()
 {
+    // TODO(ISSUE-045): consider dirty flag to skip save when queue hasn't changed
     QSettings settings(Settings::settingsPath(), QSettings::IniFormat);
 
     const auto queue = m_mgr->queue();

@@ -27,6 +27,7 @@
 #include <thread>
 #include <chrono>
 
+
 static std::unique_ptr<IAudioOutput> createPlatformAudioOutput() {
 #ifdef Q_OS_MACOS
     return std::make_unique<CoreAudioOutput>();
@@ -188,8 +189,12 @@ AudioEngine::AudioEngine(QObject* parent)
                  << "level:" << m_renderChain.crossfeed().level();
     });
 
-    // Verify convolution math on startup
-    ConvolutionProcessor::selfTest();
+    // Verify DSP math (deferred — don't block startup)
+    QTimer::singleShot(2000, []() {
+        ConvolutionProcessor::selfTest();
+        EqualizerProcessor::selfTest();
+        qDebug() << "[STARTUP] DSP self-tests completed (deferred)";
+    });
 
     // Load convolution settings
     {
@@ -276,6 +281,31 @@ AudioEngine::AudioEngine(QObject* parent)
         }
         qDebug() << "[HRTF]" << (m_renderChain.hrtf().isEnabled() ? "ON" : "OFF")
                  << "angle:" << m_renderChain.hrtf().speakerAngle();
+    });
+
+    // Handle audio device disconnection during playback
+    connect(AudioDeviceManager::instance(), &AudioDeviceManager::deviceDisconnected,
+            this, [this](uint32_t deviceId, const QString& name) {
+        if (deviceId != m_currentDeviceId) return;
+        qDebug() << "[AudioEngine] Active device disconnected:" << name << "— falling back";
+        auto defaultDev = AudioDeviceManager::instance()->defaultOutputDevice();
+        if (defaultDev.deviceId != 0 && defaultDev.deviceId != deviceId) {
+            m_currentDeviceId = defaultDev.deviceId;
+            // If playing, reload on new device to resume
+            QString path;
+            { std::lock_guard<std::mutex> lock(m_filePathMutex); path = m_currentFilePath; }
+            if (!path.isEmpty() && (m_state == Playing || m_state == Paused)) {
+                double pos = position();
+                bool wasPlaying = (m_state == Playing);
+                if (load(path)) {
+                    seek(pos);
+                    if (wasPlaying) play();
+                }
+            }
+        } else {
+            stop();
+        }
+        emit signalPathChanged();
     });
 
     // Initialize headroom gain from persisted settings
@@ -529,6 +559,7 @@ bool AudioEngine::load(const QString& filePath)
                  << "— transitioning mute + AudioUnitReset";
     }
 
+    m_userSkipPending.store(false, std::memory_order_relaxed);
     qDebug() << "=== AudioEngine::load OK ===";
     emit durationChanged(m_duration);
     emit signalPathChanged();
@@ -637,6 +668,9 @@ void AudioEngine::seek(double secs)
         if (targetFrame < 0) targetFrame = 0;
         m_framesRendered.store(targetFrame, std::memory_order_relaxed);
         if (m_dspPipeline) m_dspPipeline->reset();
+        // Cancel any in-progress gapless crossfade (we hold m_decoderMutex)
+        if (m_gapless.isCrossfading())
+            m_gapless.endCrossfade();
         emit positionChanged(secs);
     }
 }
@@ -883,7 +917,10 @@ void AudioEngine::prepareNextTrack(const QString& filePath)
         m_usingDSDDecoder.load(std::memory_order_relaxed));
 }
 
-void AudioEngine::cancelNextTrack() { m_gapless.cancelNextTrack(); }
+void AudioEngine::cancelNextTrack() {
+    m_userSkipPending.store(true, std::memory_order_release);
+    m_gapless.cancelNextTrack();
+}
 void AudioEngine::setCrossfadeDuration(int ms) { m_gapless.setCrossfadeDuration(ms); }
 
 // ── renderAudio (called from audio thread) ──────────────────────────
@@ -919,7 +956,9 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
     if (upsamplerActive) {
         // Calculate how many source frames to decode for the requested output frames.
         // CoreAudio requests maxFrames at the OUTPUT rate; we decode fewer at SOURCE rate.
-        double ratio = (double)m_upsampler->outputSampleRate() / (double)m_upsampler->inputSampleRate();
+        int inRate = m_upsampler->inputSampleRate();
+        if (inRate <= 0) { std::memset(buf, 0, maxFrames * channels * sizeof(float)); m_renderingInProgress.store(false, std::memory_order_release); return 0; }
+        double ratio = (double)m_upsampler->outputSampleRate() / (double)inRate;
         int sourceFrames = (int)std::ceil((double)maxFrames / ratio);
 
         // Use pre-allocated decode buffer (sized in load(), no allocation here)
@@ -975,6 +1014,7 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             m_renderingInProgress.store(false, std::memory_order_release);
             return 0;
         }
+
 
         // ── Crossfade mixing (before DSP chain) ─────────────────────────
         // Only for PCM tracks with matching sample rate/channels
@@ -1104,7 +1144,9 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
             int newFrames = 0;
             if (upsamplerActive && m_decoder->isOpen() && !m_usingDSDDecoder) {
                 // Upsampler path: decode to temp buffer, then upsample to output
-                double ratio = (double)m_upsampler->outputSampleRate() / (double)m_upsampler->inputSampleRate();
+                int gInRate = m_upsampler->inputSampleRate();
+                if (gInRate <= 0) { m_renderingInProgress.store(false, std::memory_order_release); return 0; }
+                double ratio = (double)m_upsampler->outputSampleRate() / (double)gInRate;
                 int sourceFrames = (int)std::ceil((double)maxFrames / ratio);
                 int bufSamples = sourceFrames * channels;
                 if ((int)m_decodeBuf.size() < bufSamples) {
@@ -1118,7 +1160,10 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                     size_t generated = m_upsampler->processUpsampling(
                         m_decodeBuf.data(), srcRead, channels, buf, maxFrames);
                     newFrames = (int)generated;
-                    m_dspPipeline->process(buf, newFrames, channels);
+                    // Use full render chain (headroom, crossfeed, convolution, HRTF, DSP, leveling, limiter)
+                    m_renderChain.process(buf, newFrames, channels,
+                                          m_dspPipeline.get(), m_levelingManager,
+                                          false, false);
                     m_framesRendered.fetch_add(srcRead, std::memory_order_relaxed);
                 }
             } else {
@@ -1129,10 +1174,11 @@ int AudioEngine::renderAudio(float* buf, int maxFrames)
                 }
 
                 bool gaplessDoPPassthrough = m_usingDSDDecoder && m_dsdDecoder->isDoPMode();
-                if (newFrames > 0 && !gaplessDoPPassthrough
-                    && !m_bitPerfect.load(std::memory_order_relaxed)) {
-                    m_dspPipeline->process(buf, newFrames, channels);
-                }
+                // Use full render chain (headroom, crossfeed, convolution, HRTF, DSP, leveling, limiter)
+                m_renderChain.process(buf, newFrames, channels,
+                                      m_dspPipeline.get(), m_levelingManager,
+                                      gaplessDoPPassthrough,
+                                      m_bitPerfect.load(std::memory_order_relaxed));
                 // Update DoP passthrough flag for the new track
                 m_output->setDoPPassthrough(gaplessDoPPassthrough);
                 m_framesRendered.fetch_add(newFrames, std::memory_order_relaxed);
@@ -1168,10 +1214,15 @@ void AudioEngine::onPositionTimer()
 {
     // Poll RT-safe flags set by the audio thread
     if (m_rtGaplessFlag.exchange(false, std::memory_order_acquire)) {
-        emit durationChanged(m_duration);
-        emit gaplessTransitionOccurred();
+        if (m_userSkipPending.load(std::memory_order_acquire)) {
+            // User already initiated a skip — suppress this stale gapless transition
+            m_userSkipPending.store(false, std::memory_order_relaxed);
+        } else {
+            emit durationChanged(m_duration);
+            emit gaplessTransitionOccurred();
+        }
     }
-    if (m_rtPlaybackEndFlag.exchange(false, std::memory_order_acquire)) {
+    else if (m_rtPlaybackEndFlag.exchange(false, std::memory_order_acquire)) {
         // Ensure output is muted before stop (audio thread may have
         // already set these, but belt-and-suspenders for safety).
         // Keep dopPassthrough=true so render callback outputs DoP silence
@@ -1207,22 +1258,27 @@ SignalPathInfo AudioEngine::getSignalPath() const
     state.channels = m_channels.load(std::memory_order_relaxed);
     state.bitPerfect = m_bitPerfect.load(std::memory_order_relaxed);
 
-    // DSD decoder
-    state.usingDSDDecoder = m_usingDSDDecoder.load(std::memory_order_relaxed);
-    if (state.usingDSDDecoder && m_dsdDecoder) {
-        state.isDSD64 = m_dsdDecoder->isDSD64();
-        state.isDSD128 = m_dsdDecoder->isDSD128();
-        state.isDSD256 = m_dsdDecoder->isDSD256();
-        state.isDSD512 = m_dsdDecoder->isDSD512();
-        state.dsdSampleRate = m_dsdDecoder->dsdSampleRate();
-        state.isDoPMode = m_dsdDecoder->isDoPMode();
-    }
+    // Decoder state (under mutex — decoders can be reset by loadTrack)
+    {
+        std::lock_guard<std::mutex> lock(m_filePathMutex);
 
-    // PCM decoder
-    if (m_decoder && m_decoder->isOpen()) {
-        state.decoderOpen = true;
-        state.codecName = m_decoder->codecName();
-        state.decoderFormat = m_decoder->format();
+        // DSD decoder
+        state.usingDSDDecoder = m_usingDSDDecoder.load(std::memory_order_relaxed);
+        if (state.usingDSDDecoder && m_dsdDecoder) {
+            state.isDSD64 = m_dsdDecoder->isDSD64();
+            state.isDSD128 = m_dsdDecoder->isDSD128();
+            state.isDSD256 = m_dsdDecoder->isDSD256();
+            state.isDSD512 = m_dsdDecoder->isDSD512();
+            state.dsdSampleRate = m_dsdDecoder->dsdSampleRate();
+            state.isDoPMode = m_dsdDecoder->isDoPMode();
+        }
+
+        // PCM decoder
+        if (m_decoder && m_decoder->isOpen()) {
+            state.decoderOpen = true;
+            state.codecName = m_decoder->codecName();
+            state.decoderFormat = m_decoder->format();
+        }
     }
 
     // Upsampler
@@ -1319,7 +1375,7 @@ SignalPathInfo AudioEngine::getSignalPath() const
 
 AudioFormat AudioEngine::actualDsdFormat() const
 {
-    if (!m_usingDSDDecoder.load(std::memory_order_relaxed))
+    if (!m_usingDSDDecoder.load(std::memory_order_relaxed) || !m_dsdDecoder)
         return AudioFormat::FLAC; // sentinel: not using DSD decoder
 
     if (m_dsdDecoder->isDSD2048()) return AudioFormat::DSD2048;

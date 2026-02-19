@@ -94,4 +94,5 @@ private:
     PlaybackSource m_currentSource = Local;
     AutoplayManager* m_autoplay = nullptr;
     bool m_autoplayActive = false;
+    bool m_trackTransitionPending = false;  // guards against double-advance race
 };

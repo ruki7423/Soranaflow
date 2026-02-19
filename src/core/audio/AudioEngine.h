@@ -153,6 +153,11 @@ private:
     std::atomic<bool> m_rtGaplessFlag{false};
     std::atomic<bool> m_rtPlaybackEndFlag{false};
 
+    // User skip flag: suppresses stale gapless transitions when user
+    // initiated a track change (Next/Previous/playTrack). Set by
+    // cancelNextTrack(), cleared by load().
+    std::atomic<bool> m_userSkipPending{false};
+
 public:
     DSPPipeline* dspPipeline() { return m_dspPipeline.get(); }
 };

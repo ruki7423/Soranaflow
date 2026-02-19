@@ -48,4 +48,5 @@ private:
     bool m_shuffleActive = false;
     PlaybackState::RepeatMode m_repeatMode = PlaybackState::Off;
     int m_currentDuration = 0;
+    int m_msgGeneration = 0;  // generation counter for showTemporaryMessage
 };

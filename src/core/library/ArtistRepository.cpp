@@ -88,7 +88,7 @@ Artist ArtistRepository::artistById(const QString& id) const
             a.genres = genresStr.split(QStringLiteral(","));
 
         // Load albums (inlined from albumById to avoid cross-repository dependency)
-        QSqlQuery aq(*m_ctx->writeDb);
+        QSqlQuery aq(*m_ctx->readDb);
         aq.prepare(QStringLiteral("SELECT id FROM albums WHERE artist_id = ? ORDER BY year"));
         aq.addBindValue(a.id);
         if (aq.exec()) {
@@ -116,7 +116,7 @@ Artist ArtistRepository::artistById(const QString& id) const
                         alb.genres = albGenresStr.split(QStringLiteral(","));
 
                     // Load tracks
-                    QSqlQuery tq(*m_ctx->writeDb);
+                    QSqlQuery tq(*m_ctx->readDb);
                     tq.prepare(QStringLiteral("SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number"));
                     tq.addBindValue(alb.id);
                     if (tq.exec()) {

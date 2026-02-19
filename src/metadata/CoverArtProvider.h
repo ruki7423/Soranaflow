@@ -15,6 +15,9 @@ public:
     // Returns cached path, or empty string
     QString getCachedArtPath(const QString& mbid);
 
+    // Evict disk cache entries older than given days
+    static void evictDiskCache(int maxAgeDays = 30);
+
 signals:
     void albumArtFetched(const QString& mbid, const QPixmap& pixmap,
                          const QString& savedPath);

@@ -99,7 +99,7 @@ SpatialSettingsWidget::SpatialSettingsWidget(QWidget* parent)
             nullptr,
             QStringLiteral("Select Impulse Response File"),
             QString(),
-            QStringLiteral("WAV Files (*.wav);;All Files (*)"));
+            QStringLiteral("Audio Files (*.wav *.aiff *.aif *.flac);;All Files (*)"));
         if (!path.isEmpty()) {
             Settings::instance()->setConvolutionIRPath(path);
             irPathEdit->setText(path);

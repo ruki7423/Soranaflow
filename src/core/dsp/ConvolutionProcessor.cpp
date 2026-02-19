@@ -55,7 +55,6 @@ ConvolutionProcessor::ConvolutionProcessor()
         m_output[ch].resize(PARTITION_SIZE, 0.0f);
     }
 
-    m_pendingIR = &m_irSlotB;
     m_activeIR = nullptr;
 }
 
@@ -165,12 +164,12 @@ void ConvolutionProcessor::buildIRPartitions(IRData* dest,
 bool ConvolutionProcessor::loadIR(const std::string& filePath)
 {
 #ifdef __APPLE__
-    // Wait for any pending swap to be consumed by render thread
+    // Wait for any pending staged swap to be consumed by render thread
     int waitCount = 0;
-    while (m_irSwapPending.load(std::memory_order_acquire)) {
+    while (m_stagedReady.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if (++waitCount > 5000) {  // 5 second timeout
-            qWarning() << "[Convolution] Timeout waiting for IR swap";
+        if (++waitCount > 5000) {
+            qWarning() << "[Convolution] Timeout waiting for staged IR swap";
             return false;
         }
     }
@@ -201,7 +200,11 @@ bool ConvolutionProcessor::loadIR(const std::string& filePath)
     }
 
     AVCodecContext* codecCtx = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(codecCtx, par);
+    if (avcodec_parameters_to_context(codecCtx, par) < 0) {
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
     if (avcodec_open2(codecCtx, codec, nullptr) < 0) {
         avcodec_free_context(&codecCtx);
         avformat_close_input(&fmtCtx);
@@ -294,22 +297,34 @@ bool ConvolutionProcessor::loadIR(const std::string& filePath)
              << "rate:" << irSampleRate;
 
 #ifdef __APPLE__
-    // Determine which slot is NOT active (safe to write)
-    IRData* pending;
+    // Build IR partitions into staged buffer (background thread, no lock needed)
+    buildIRPartitions(&m_staged.irData, irCh, irSampleRate);
+
+    // Pre-allocate FDL for MAX_CHANNELS (RT thread will swap, never allocate)
     {
-        std::lock_guard<std::mutex> lock(m_irSwapMutex);
-        pending = (m_activeIR == &m_irSlotA) ? &m_irSlotB : &m_irSlotA;
-        m_pendingIR = pending;
+        int n = m_staged.irData.numPartitions;
+        m_staged.fdl.resize(MAX_CHANNELS);
+        m_staged.fdlReals.resize(MAX_CHANNELS);
+        m_staged.fdlImags.resize(MAX_CHANNELS);
+        for (int c = 0; c < MAX_CHANNELS; ++c) {
+            m_staged.fdl[c].resize(n);
+            m_staged.fdlReals[c].resize(n);
+            m_staged.fdlImags[c].resize(n);
+            for (int i = 0; i < n; ++i) {
+                m_staged.fdlReals[c][i].assign(FFT_HALF, 0.0f);
+                m_staged.fdlImags[c][i].assign(FFT_HALF, 0.0f);
+                m_staged.fdl[c][i].realp = m_staged.fdlReals[c][i].data();
+                m_staged.fdl[c][i].imagp = m_staged.fdlImags[c][i].data();
+            }
+        }
     }
 
-    buildIRPartitions(pending, irCh, irSampleRate);
-
-    // Signal render thread to swap
-    m_irSwapPending.store(true, std::memory_order_release);
+    // Signal render thread to swap (release ensures all staged writes visible)
+    m_stagedReady.store(true, std::memory_order_release);
 
     qDebug() << "[Convolution] IR loaded:" << filePath.c_str()
-             << "partitions:" << pending->numPartitions
-             << "irChannels:" << pending->channelCount;
+             << "partitions:" << m_staged.irData.numPartitions
+             << "irChannels:" << m_staged.irData.channelCount;
 #else
     qDebug() << "[Convolution] IR file registered (passthrough — vDSP not available)";
 #endif
@@ -403,11 +418,11 @@ void ConvolutionProcessor::convolveChannel(
         cr[0] += ar[0] * br[0];          // DC * DC
         ci[0] += ai[0] * bi[0];          // Nyquist * Nyquist
 
-        // Bins 1..FFT_HALF-1: standard complex multiply-accumulate
-        for (int k = 1; k < FFT_HALF; ++k) {
-            cr[k] += ar[k] * br[k] - ai[k] * bi[k];
-            ci[k] += ar[k] * bi[k] + ai[k] * br[k];
-        }
+        // Bins 1..FFT_HALF-1: vDSP complex multiply-accumulate
+        DSPSplitComplex zvA = { const_cast<float*>(ar + 1), const_cast<float*>(ai + 1) };
+        DSPSplitComplex zvB = { const_cast<float*>(br + 1), const_cast<float*>(bi + 1) };
+        DSPSplitComplex zvC = { cr + 1, ci + 1 };
+        vDSP_zvma(&zvA, 1, &zvB, 1, &zvC, 1, &zvC, 1, FFT_HALF - 1);
     }
 
     // Inverse FFT
@@ -440,38 +455,19 @@ void ConvolutionProcessor::process(float* buffer, int frameCount, int channels)
 
     // Clamp channels
     if (channels < 1 || channels > MAX_CHANNELS) return;
+    // TODO(ISSUE-047): add max-frame guard (chunk if frameCount > internal buffer size)
     m_activeChannels = channels;
 
-    // Swap IR if pending — resize FDL BEFORE activating new IR
-    if (m_irSwapPending.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lock(m_irSwapMutex);
-
-        IRData* newIR = m_pendingIR;
-        if (newIR && newIR->numPartitions > 0) {
-            int n = newIR->numPartitions;
-            int numCh = channels;
-
-            m_fdl.resize(numCh);
-            m_fdlReals.resize(numCh);
-            m_fdlImags.resize(numCh);
-            for (int c = 0; c < numCh; ++c) {
-                m_fdl[c].resize(n);
-                m_fdlReals[c].resize(n);
-                m_fdlImags[c].resize(n);
-                for (int i = 0; i < n; ++i) {
-                    m_fdlReals[c][i].assign(FFT_HALF, 0.0f);
-                    m_fdlImags[c][i].assign(FFT_HALF, 0.0f);
-                    m_fdl[c][i].realp = m_fdlReals[c][i].data();
-                    m_fdl[c][i].imagp = m_fdlImags[c][i].data();
-                }
-            }
-
-            m_irChannelCount = newIR->channelCount;
-            m_activeIR = newIR;
-            resetState();
-        }
-
-        m_irSwapPending.store(false, std::memory_order_release);
+    // Swap staged IR + FDL if ready (RT-safe: std::swap is O(1), no allocation)
+    if (m_stagedReady.load(std::memory_order_acquire)) {
+        std::swap(m_irSlotA, m_staged.irData);
+        std::swap(m_fdl, m_staged.fdl);
+        std::swap(m_fdlReals, m_staged.fdlReals);
+        std::swap(m_fdlImags, m_staged.fdlImags);
+        m_irChannelCount = m_irSlotA.channelCount;
+        m_activeIR = &m_irSlotA;
+        m_stagedReady.store(false, std::memory_order_release);
+        resetState();
     }
 
     // State reset on re-enable
@@ -481,25 +477,8 @@ void ConvolutionProcessor::process(float* buffer, int frameCount, int channels)
 
     if (!m_activeIR || m_activeIR->numPartitions == 0) return;
 
-    // If channel count changed since FDL was allocated, resize
+    // FDL is pre-allocated for MAX_CHANNELS during staged build
     int numCh = channels;
-    if (static_cast<int>(m_fdl.size()) < numCh) {
-        int n = m_activeIR->numPartitions;
-        m_fdl.resize(numCh);
-        m_fdlReals.resize(numCh);
-        m_fdlImags.resize(numCh);
-        for (int c = static_cast<int>(m_fdl.size()) - 1; c < numCh; ++c) {
-            m_fdl[c].resize(n);
-            m_fdlReals[c].resize(n);
-            m_fdlImags[c].resize(n);
-            for (int i = 0; i < n; ++i) {
-                m_fdlReals[c][i].assign(FFT_HALF, 0.0f);
-                m_fdlImags[c][i].assign(FFT_HALF, 0.0f);
-                m_fdl[c][i].realp = m_fdlReals[c][i].data();
-                m_fdl[c][i].imagp = m_fdlImags[c][i].data();
-            }
-        }
-    }
 
     int numPartitions = m_activeIR->numPartitions;
     int irCh = m_irChannelCount;

@@ -4,6 +4,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QStandardPaths>
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 
@@ -17,18 +20,72 @@ CoverArtService::CoverArtService(QObject* parent)
     : QObject(parent)
     , m_cache(50)
 {
+    QDir().mkpath(diskCacheDir());
 }
+
+// ── Disk cache helpers ──────────────────────────────────────────────
+
+QString CoverArtService::diskCacheDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+           + QStringLiteral("/cover_art_thumbs");
+}
+
+QString CoverArtService::diskCachePath(const QString& cacheKey)
+{
+    QByteArray hash = QCryptographicHash::hash(
+        cacheKey.toUtf8(), QCryptographicHash::Md5);
+    return diskCacheDir() + QStringLiteral("/") + hash.toHex() + QStringLiteral(".jpg");
+}
+
+QPixmap CoverArtService::loadFromDisk(const QString& cacheKey)
+{
+    QString path = diskCachePath(cacheKey);
+    QPixmap pm;
+    if (QFile::exists(path))
+        pm.load(path);
+    return pm;
+}
+
+void CoverArtService::saveToDisk(const QString& cacheKey, const QPixmap& pixmap)
+{
+    if (pixmap.isNull()) return;
+    pixmap.save(diskCachePath(cacheKey), "JPEG", 85);
+}
+
+void CoverArtService::evictDiskCache(int maxAgeDays)
+{
+    QDir dir(diskCacheDir());
+    if (!dir.exists()) return;
+    QDateTime cutoff = QDateTime::currentDateTime().addDays(-maxAgeDays);
+    for (const auto& info : dir.entryInfoList(QDir::Files)) {
+        if (info.lastModified() < cutoff)
+            QFile::remove(info.filePath());
+    }
+}
+
+// ── Cover art retrieval (3-layer: memory → disk → discovery) ────────
 
 QPixmap CoverArtService::getCoverArt(const Track& track, int size)
 {
     QString cacheKey = QStringLiteral("%1@%2").arg(track.filePath).arg(size);
 
+    // Layer 1: Memory cache
     {
         QMutexLocker locker(&m_mutex);
         if (QPixmap* cached = m_cache.object(cacheKey))
             return *cached;
     }
 
+    // Layer 2: Disk cache
+    QPixmap diskPix = loadFromDisk(cacheKey);
+    if (!diskPix.isNull()) {
+        QMutexLocker locker(&m_mutex);
+        m_cache.insert(cacheKey, new QPixmap(diskPix));
+        return diskPix;
+    }
+
+    // Layer 3: Discovery (file/folder/embedded)
     QImage img = discoverCoverArtImage(track.coverUrl, track.filePath);
     QPixmap pix;
     if (!img.isNull()) {
@@ -42,6 +99,9 @@ QPixmap CoverArtService::getCoverArt(const Track& track, int size)
         m_cache.insert(cacheKey, new QPixmap(pix));
     }
 
+    // Save to disk cache for next startup
+    saveToDisk(cacheKey, pix);
+
     return pix;
 }
 
@@ -50,6 +110,7 @@ void CoverArtService::getCoverArtAsync(const Track& track, int size,
 {
     QString cacheKey = QStringLiteral("%1@%2").arg(track.filePath).arg(size);
 
+    // Layer 1: Memory cache
     {
         QMutexLocker locker(&m_mutex);
         if (QPixmap* cached = m_cache.object(cacheKey)) {
@@ -60,6 +121,18 @@ void CoverArtService::getCoverArtAsync(const Track& track, int size,
         }
     }
 
+    // Layer 2: Disk cache (fast check on main thread)
+    QPixmap diskPix = loadFromDisk(cacheKey);
+    if (!diskPix.isNull()) {
+        {
+            QMutexLocker locker(&m_mutex);
+            m_cache.insert(cacheKey, new QPixmap(diskPix));
+        }
+        if (callback) callback(diskPix);
+        return;
+    }
+
+    // Layer 3: Discovery (async on thread pool)
     QString coverUrl = track.coverUrl;
     QString filePath = track.filePath;
 
@@ -80,6 +153,8 @@ void CoverArtService::getCoverArtAsync(const Track& track, int size,
             QMutexLocker locker(&m_mutex);
             m_cache.insert(cacheKey, new QPixmap(pix));
         }
+
+        saveToDisk(cacheKey, pix);
 
         if (callback) callback(pix);
     });

@@ -5,6 +5,8 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
 #include <QDebug>
 
 const QString CoverArtProvider::API_BASE =
@@ -123,4 +125,22 @@ void CoverArtProvider::downloadImage(const QString& url,
 
         emit albumArtFetched(mbid, pixmap, savePath);
     });
+}
+
+void CoverArtProvider::evictDiskCache(int maxAgeDays)
+{
+    QString cachePath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                        + QStringLiteral("/album_art");
+    QDir dir(cachePath);
+    if (!dir.exists()) return;
+    QDateTime cutoff = QDateTime::currentDateTime().addDays(-maxAgeDays);
+    int removed = 0;
+    for (const auto& info : dir.entryInfoList(QDir::Files)) {
+        if (info.lastModified() < cutoff) {
+            QFile::remove(info.filePath());
+            ++removed;
+        }
+    }
+    if (removed > 0)
+        qDebug() << "[CoverArt] Evicted" << removed << "stale cache files (>" << maxAgeDays << "days)";
 }

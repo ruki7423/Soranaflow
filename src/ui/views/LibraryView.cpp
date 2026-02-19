@@ -435,7 +435,7 @@ void LibraryView::onOpenFilesClicked()
         this,
         QStringLiteral("Open Audio Files"),
         QString(),
-        QStringLiteral("Audio Files (*.flac *.mp3 *.wav *.aac *.m4a *.ogg *.alac);;All Files (*)")
+        QStringLiteral("Audio Files (*.flac *.mp3 *.wav *.aac *.m4a *.ogg *.alac *.aiff *.aif *.opus *.dsf *.dff *.wma);;All Files (*)")
     );
 
     if (!files.isEmpty()) {

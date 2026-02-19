@@ -1,7 +1,7 @@
 #include "ProcessingSettingsWidget.h"
 #include "SettingsUtils.h"
 #include "../../../core/Settings.h"
-#include "../../../core/dsp/ReplayGainScanner.h"
+#include "../../../core/library/ReplayGainScanner.h"
 #include "../../../widgets/StyledSwitch.h"
 #include "../../../widgets/StyledComboBox.h"
 

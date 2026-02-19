@@ -396,6 +396,7 @@ void LibraryScanner::processFile(const QString& filePath)
 }
 
 // ── scanFolder (single folder) ──────────────────────────────────────
+// TODO(ISSUE-049): concurrent scanFolder calls could race — consider mutex or m_scanning guard
 void LibraryScanner::scanFolder(const QString& folder)
 {
     scanFolders({folder});

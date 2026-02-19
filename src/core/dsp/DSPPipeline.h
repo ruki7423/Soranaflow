@@ -55,6 +55,11 @@ private:
     double m_sampleRate = 44100.0;
     int m_channels = 2;
 
+    // Enable/disable fade (crossfade between dry and processed over ~6ms)
+    float m_fadeMix = 1.0f;              // RT-only: 0.0=dry, 1.0=processed
+    std::vector<float> m_fadeBuf;         // pre-allocated dry copy for crossfade
+    static constexpr float FADE_STEP = 1.0f / 256.0f;
+
     // Built-in processors (always present)
     std::unique_ptr<GainProcessor>      m_gain;
     std::unique_ptr<EqualizerProcessor> m_eq;

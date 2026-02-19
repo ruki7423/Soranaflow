@@ -25,4 +25,5 @@ private:
     NowPlayingInfo* m_nowPlaying = nullptr;
     TransportControls* m_transport = nullptr;
     DeviceVolumeControl* m_deviceVolume = nullptr;
+    bool m_muted = false;
 };

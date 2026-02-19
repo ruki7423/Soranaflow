@@ -24,7 +24,6 @@ class PlaylistDetailView;
 class QueueView;
 class SettingsView;
 class AppleMusicView;
-// class TidalView;  // TODO: restore when Tidal API available
 class FolderBrowserView;
 class SearchResultsView;
 class QKeyEvent;
@@ -82,7 +81,6 @@ private:
     PlaylistsView*     ensurePlaylistsView();
     PlaylistDetailView* ensurePlaylistDetailView();
     AppleMusicView*    ensureAppleMusicView();
-    // TidalView*         ensureTidalView();  // TODO: restore when Tidal API available
     FolderBrowserView* ensureFolderBrowserView();
     QueueView*         ensureQueueView();
     SettingsView*      ensureSettingsView();
@@ -105,7 +103,6 @@ private:
     PlaylistsView* m_playlistsView = nullptr;
     PlaylistDetailView* m_playlistDetailView = nullptr;
     AppleMusicView* m_appleMusicView = nullptr;
-    // TidalView* m_tidalView = nullptr;  // TODO: restore when Tidal API available
     FolderBrowserView* m_folderBrowserView = nullptr;
     QueueView* m_queueView = nullptr;
     SettingsView* m_settingsView = nullptr;

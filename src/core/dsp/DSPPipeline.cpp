@@ -1,5 +1,6 @@
 #include "DSPPipeline.h"
 #include <QDebug>
+#include <cstring>
 
 DSPPipeline::DSPPipeline(QObject* parent)
     : QObject(parent)
@@ -21,7 +22,18 @@ void DSPPipeline::notifyConfigurationChanged()
 
 void DSPPipeline::process(float* buf, int frames, int channels)
 {
-    if (!m_enabled.load(std::memory_order_acquire)) return;
+    bool target = m_enabled.load(std::memory_order_acquire);
+    bool fading = (target && m_fadeMix < 1.0f) || (!target && m_fadeMix > 0.0f);
+
+    // Fully off and done fading — pass through
+    if (!target && !fading) return;
+
+    int n = frames * channels;
+
+    // Save dry copy when fading (crossfade between dry and processed)
+    if (fading && (int)m_fadeBuf.size() >= n) {
+        std::memcpy(m_fadeBuf.data(), buf, n * sizeof(float));
+    }
 
     // Signal chain: Gain -> EQ -> Plugins
     if (m_gain) m_gain->process(buf, frames, channels);
@@ -35,16 +47,39 @@ void DSPPipeline::process(float* buf, int frames, int channels)
     if (lock.owns_lock()) {
         for (auto& proc : m_plugins) {
             if (proc && proc->isEnabled()) {
-                proc->process(buf, frames, channels);
+                try {
+                    proc->process(buf, frames, channels);
+                } catch (...) {
+                    proc->setEnabled(false);
+                }
             }
         }
     }
+
+    // Crossfade between dry and processed when toggling
+    if (fading && (int)m_fadeBuf.size() >= n) {
+        float step = target ? FADE_STEP : -FADE_STEP;
+        for (int f = 0; f < frames; ++f) {
+            m_fadeMix += step;
+            if (m_fadeMix < 0.0f) m_fadeMix = 0.0f;
+            if (m_fadeMix > 1.0f) m_fadeMix = 1.0f;
+            float dry = 1.0f - m_fadeMix;
+            for (int c = 0; c < channels; ++c) {
+                int idx = f * channels + c;
+                buf[idx] = m_fadeBuf[idx] * dry + buf[idx] * m_fadeMix;
+            }
+        }
+    }
+
 }
 
 void DSPPipeline::prepare(double sampleRate, int channels)
 {
     m_sampleRate = sampleRate;
     m_channels = channels;
+
+    // Pre-allocate fade buffer for enable/disable crossfade (4096 frames max)
+    m_fadeBuf.resize(4096 * channels);
 
     m_gain->prepare(sampleRate, channels);
     m_eq->prepare(sampleRate, channels);

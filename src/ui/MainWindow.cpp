@@ -19,7 +19,6 @@
 #include "views/QueueView.h"
 #include "views/SettingsView.h"
 #include "views/AppleMusicView.h"
-// #include "views/TidalView.h"  // TODO: restore when Tidal API available
 #include "views/FolderBrowserView.h"
 #include "views/SearchResultsView.h"
 #include "../core/library/LibraryDatabase.h"
@@ -609,17 +608,6 @@ FolderBrowserView* MainWindow::ensureFolderBrowserView()
     return m_folderBrowserView;
 }
 
-/* TODO: restore when Tidal API available
-TidalView* MainWindow::ensureTidalView()
-{
-    if (!m_tidalView) {
-        m_tidalView = new TidalView();
-        m_viewStack->addWidget(m_tidalView);
-    }
-    return m_tidalView;
-}
-*/
-
 QueueView* MainWindow::ensureQueueView()
 {
     if (!m_queueView) {
@@ -714,7 +702,6 @@ void MainWindow::onNavigationChanged(int index)
         case 4: m_viewStack->setCurrentWidget(ensurePlaylistsView());  break;
         case 5: m_viewStack->setCurrentWidget(ensureAppleMusicView());   break;
         case 6: m_viewStack->setCurrentWidget(ensureFolderBrowserView()); break;
-        // case 7: m_viewStack->setCurrentWidget(ensureTidalView()); break;  // TODO: restore when Tidal API available
         case 9: m_viewStack->setCurrentWidget(ensureSettingsView());   break;
     }
     m_sidebar->setActiveIndex(index);
@@ -828,7 +815,6 @@ int MainWindow::sidebarIndexForView(QWidget* view)
     if (view == m_playlistDetailView)  return 4;
     if (view == m_appleMusicView)      return 5;
     if (view == m_folderBrowserView)  return 6;
-    // if (view == m_tidalView)           return 7;  // TODO: restore when Tidal API available
     if (view == m_queueView)           return 1;
     if (view == m_settingsView)        return 1;
     if (view == m_searchResultsView)   return -1;
