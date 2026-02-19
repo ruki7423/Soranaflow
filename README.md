@@ -57,12 +57,39 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ---
 
+## What's New (v1.8.0)
+
+### New Features
+- **Composer tag support** — metadata read from FLAC, MP3, AAC, AIFF, WAV, DSF/DFF, stored in library database, and displayed in track details panel
+
+### Bug Fixes
+- **VST plugin freeze fix** — fixed freeze when loading VST plugins during playback (redundant deactivate/reactivate cycle)
+
+---
+
 ## What's New (v1.7.9)
 
 ### Bug Fixes
 - **Album sort order now persists across restarts** — your chosen sort mode (Artist, Title, Year, etc.) is saved and restored automatically
 - **"Add to Queue" updates UI immediately** — tracks added via context menu now appear in the queue panel in real time
 - **VST2/VST3 plugin settings saved across restart** — uses VST2 chunk API and VST3 IComponent/IEditController state serialization
+
+---
+
+## What's New (v1.7.8)
+
+### Architecture
+- Decomposed PlaybackBar into TransportControls, NowPlayingInfo, and DeviceVolumeControl
+- Decomposed AppleMusicView into AMSearchPanel, AMArtistPanel, AMAlbumPanel via AMContentPanel
+- Extracted MusicKitStateMachine as pure C++ from Obj-C++ MusicKitPlayer
+- Extracted MenuBarManager from MainWindow
+- Split DSPSettingsWidget into EQSettingsWidget, SpatialSettingsWidget, and ProcessingSettingsWidget
+
+### Bug Fixes
+- Fixed thread safety issue with Apple Music token access
+- Fixed AlbumRepository using write connection for read queries
+- Added network timeouts to prevent hung requests
+- Added 190 unit tests across 7 test suites
 
 ---
 
@@ -129,6 +156,13 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ### Bug Fixes
 - Fixed VST3/VST2 plugins failing to load — missing codesign entitlements blocked macOS from loading unsigned third-party plugin libraries
+
+---
+
+## What's New (v1.7.1)
+
+### Bug Fixes
+- Fixed VST3/VST2 plugins failing to load due to missing codesign entitlements that blocked macOS from loading unsigned third-party plugin libraries
 
 ---
 
@@ -287,6 +321,13 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 - "Add to Queue" updates queue panel immediately
 - VST2/VST3 plugin settings saved and restored across restart
 
+### v1.7.8 — Architecture Refactoring & Testing
+
+- Decomposed PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
+- Extracted MusicKitStateMachine and MenuBarManager
+- Fixed thread safety and read-connection issues
+- Added 190 unit tests across 7 test suites
+
 ### v1.7.7 — VST3 Plugin Activation Fix
 
 - Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`)
@@ -316,6 +357,10 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 ### v1.7.2 — VST Plugin Fix
 
 - Fixed VST3/VST2 loading: missing codesign entitlements
+
+### v1.7.1 — VST Plugin Fix
+
+- Fixed VST3/VST2 plugins failing to load due to missing codesign entitlements
 
 ### v1.7.0 — Year & Album Artist
 
@@ -412,6 +457,56 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 **Apple Music**
 - Disconnect/reconnect functionality for Apple Music integration
+
+### v1.3.1 — Library Rollback Polish
+
+- Improved library rollback stability
+- Dark mode UI refinements
+
+### v1.3.0 — Folder Browser & Library Rollback
+
+- Folder Browser view for file-based navigation
+- Library metadata rollback to undo last rescan
+- Fixed dark mode arrow visibility
+
+### v1.2.2 — Stability Improvements
+
+- Fixed album art and artist display after rescan
+
+### v1.2.1 — VST2 Scanner & Art Fixes
+
+- Fixed VST2 plugin folder scanning (nested subdirectories)
+- Fixed album cover art and artist display
+- Improved album loading performance
+- Added Report Issue link in Settings
+
+### v1.2.0 — VST2 Plugin Support
+
+- VST2 plugin hosting — load, scan, and process classic VST2 plugins with full editor UI
+- Unified VST2/VST3 plugin management in Settings
+- Standalone uninstaller app
+
+### v1.1.0 — Performance & Polish
+
+- Library scan speed ~10x faster with transaction batching
+- Async cover art loading — no more UI freeze during library browsing
+- Apple Music Connect/Disconnect button size unified
+- Improved metadata identification accuracy
+
+### v1.0.0 — Initial Release
+
+- FFmpeg audio engine with CoreAudio output
+- Library management with metadata scanning
+- Gapless playback and crossfade
+- Exclusive Mode (Hog Mode) for DACs
+- VST3 plugin hosting with editor UI
+- Convolution reverb with IR file loading
+- HRTF binaural audio processing
+- Apple Music streaming via MusicKit
+- Dark/Light theme support
+- macOS media keys and Now Playing integration
+- Auto-update via Sparkle
+- Code-signed and Apple Notarized
 
 See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
 
