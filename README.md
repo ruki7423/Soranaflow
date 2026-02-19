@@ -53,9 +53,6 @@
 - Removed 2,500 lines of unused code
 - 61 issues fixed from full correctness audit
 
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
-
 ---
 
 ## What's New (v1.8.1)
@@ -542,6 +539,12 @@ No permission to use, copy, modify, or distribute.
 See [LICENSE](LICENSE) for full terms.
 
 Official binaries available at [soranaflow.com](https://soranaflow.com/downloads).
+
+---
+
+### Support
+
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ---
 
