@@ -25,6 +25,26 @@
 
 ---
 
+## What's New (v1.9.0)
+
+### Synology NAS Integration
+- **FileStation Browsing** — Browse shared folders, navigate directories, play audio files directly from your Synology NAS
+- **Keychain Integration** — Passwords stored securely in macOS Keychain with auto-login on launch
+- **Login Retry** — Re-authentication dialog on failed login attempts
+- **Connection Management** — Right-click to remove saved Synology connections
+
+### Improvements
+- Fixed signal connection issues causing disconnected state on launch
+- Fixed duplicate tree node creation for NAS devices
+- Visual connection status indicator (connected/disconnected)
+- Connecting placeholder while login is in progress
+
+### Support
+
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
+---
+
 ## What's New (v1.8.3)
 
 ### Bug Fixes
@@ -32,10 +52,6 @@
 - **VST3 editor freeze** — Fixed UI freeze when opening plugin editors
 - **VST loading protection** — Exception handling and loading indicator when activating plugins
 - **Plugin fault notification** — Crashed plugins flagged for UI notification
-
-### Support
-
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ---
 
@@ -244,8 +260,10 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Library rollback — one-click restore after rescan
 - Synced lyrics support (embedded + LRCLIB)
 
-**Streaming**
+**Streaming & NAS**
 - Apple Music integration via Native MusicKit
+- Synology NAS browsing via FileStation API
+- DLNA/UPnP media server discovery
 
 ## Tech Stack
 
@@ -255,14 +273,14 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 | Audio | CoreAudio, FFmpeg, soxr |
 | DSP | Custom pipeline, VST3 SDK, VST2 SDK |
 | Metadata | TagLib, MusicBrainz, AcoustID, chromaprint |
-| Streaming | Native MusicKit (Apple Music) |
+| Streaming | Native MusicKit (Apple Music), Synology FileStation, DLNA/UPnP |
 | Spatial | libmysofa (HRTF) |
 | Updates | Sparkle framework |
 | Build | CMake, Apple Silicon native (arm64) |
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.8.2](https://github.com/ruki7423/Soranaflow/releases/download/v1.8.2/SoranaFlow-1.8.2.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.9.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.9.0/SoranaFlow-1.9.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -297,13 +315,21 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 34 (v1.0.0 → v1.8.2) |
+| GitHub Releases | 35 (v1.0.0 → v1.9.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.9.0 — Synology NAS Integration
+
+- FileStation browsing: shared folders, directory navigation, audio playback
+- macOS Keychain password storage with auto-login on launch
+- Login retry dialog on authentication failure
+- Right-click context menu for Synology removal
+- Fixed duplicate tree nodes and signal connection issues
 
 ### v1.8.3 — VST Regression Hotfix
 
