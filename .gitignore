@@ -1,0 +1,41 @@
+# ===== Sorana Flow — Distribution Repo =====
+# Only README.md, LICENSE, TERMS.md, and app icon are tracked.
+# All source code and build files are excluded.
+
+# Source code
+src/
+external/
+packaging/
+resources/
+
+# Build
+build/
+CMakeLists.txt
+*.dmg
+
+# Config
+.env
+.env.example
+.gitmodules
+
+# Internal docs
+CLAUDE.md
+docs/*
+!docs/images/
+docs/images/*
+!docs/images/app-icon.png
+tests/
+scripts/
+translations/
+
+# IDE / OS
+.DS_Store
+*.xcodeproj
+.vscode/
+.idea/
+
+# Secrets
+*.p8
+
+# Backups
+*.bak
