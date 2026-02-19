@@ -16,7 +16,7 @@
   <a href="https://github.com/ruki7423/Soranaflow/releases">
     <img src="https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&color=green" alt="Downloads">
   </a>
-  <img src="https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/arch-Apple%20Silicon-orange?style=flat-square" alt="Architecture">
   <a href="https://soranaflow.com">
     <img src="https://img.shields.io/badge/website-soranaflow.com-blue?style=flat-square" alt="Website">
@@ -267,7 +267,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
 **Requirements:**
-- macOS 13.0 (Ventura) or later
+- macOS 14.0 (Sonoma) or later
 - Apple Silicon (M1 / M2 / M3 / M4)
 
 ## Contributors
