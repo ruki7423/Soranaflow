@@ -25,15 +25,35 @@
 
 ---
 
+## What's New (v1.8.2)
+
+### New Features
+- **AIFF/AIF file support** — play AIFF audio files natively
+- **XSPF playlist support** — import and export XSPF playlists
+- **ISO 226 Equal Loudness Contour** — 3 EQ presets (Low/Mid/High Volume) that compensate for human hearing sensitivity at different listening levels
+
+### Audio Engine Improvements
+- **Linear Phase EQ pop noise eliminated** — parameter changes use smooth fade-out → rebuild → fade-in transition
+- **Convolution IR swap now lock-free** — uses staged swap pattern, eliminating audio glitches
+- **HRTF filter updates now lock-free** — speaker angle changes no longer cause audio glitches
+
+### Technical
+- Zero blocking operations on the real-time audio thread
+- Zero heap allocations on the real-time audio thread
+- Removed 2,500 lines of unused code
+- 61 issues fixed from full correctness audit
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
+---
+
 ## What's New (v1.8.1)
 
 ### Bug Fixes
 - **VST instrument bypass** — Instrument/synth VST plugins (e.g. Serum 2) no longer silence audio output. They are bypassed in the audio chain since they require MIDI input. Effect plugins continue to work normally.
 - **DAC fallback** — Audio output now falls back to system default when a saved external DAC is disconnected on launch
 - **VST3 state restore** — Improved state restore ordering to follow the VST3 spec
-
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ---
 
@@ -197,7 +217,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.8.1](https://github.com/ruki7423/Soranaflow/releases/download/v1.8.1/SoranaFlow-1.8.1.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.8.2](https://github.com/ruki7423/Soranaflow/releases/download/v1.8.2/SoranaFlow-1.8.2.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -232,13 +252,23 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 33 (v1.0.0 → v1.8.1) |
+| GitHub Releases | 34 (v1.0.0 → v1.8.2) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.8.2 — AIFF, XSPF, Loudness Contour, RT Safety
+
+- AIFF/AIF native playback support
+- XSPF playlist import/export
+- ISO 226 Equal Loudness Contour EQ presets
+- Linear Phase EQ pop noise eliminated
+- Lock-free Convolution IR and HRTF filter swap
+- 61 issues fixed from full correctness audit
+- Zero blocking/allocation on real-time audio thread
 
 ### v1.8.1 — VST Instrument Bypass + DAC Fallback
 
