@@ -25,15 +25,27 @@
 
 ---
 
+## What's New (v1.10.2)
+
+### DSP Pipeline
+- **Upsampling reorder** — DSP processing now runs at source sample rate before upsampling, reducing CPU load by ~4x
+- Convolution, EQ, VST3/AU plugins, and HRTF all process at native rate
+
+### SMB/NAS
+- Fixed SMB network mount failure
+
+### Plugins
+- Removed VST2 support (deprecated by Apple) — VST3 and Audio Unit only
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
 ## What's New (v1.10.1)
 
 ### Hotfix
 - **Critical Fix** — Fixed crash on launch caused by missing HRTF library
 - **SMB/NAS** — Fixed connection handling and authentication
 - **NAS UI** — Improved connection state display
-
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.0)
 
@@ -320,6 +332,12 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.10.2 — Performance & Stability
+
+- Upsampling reorder: DSP at source rate, ~4x less CPU
+- Fixed SMB mount failure (@autoreleasepool)
+- Removed VST2 support
 
 ### v1.10.1 — Hotfix
 
