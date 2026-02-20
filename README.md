@@ -25,14 +25,23 @@
 
 ---
 
+## What's New (v1.10.4)
+
+### EQ Preset Save/Load
+- **Save/Load/Delete named EQ presets** — Save your parametric EQ configuration as named presets (JSON files). Presets include all band settings, preamp, and phase mode.
+- **User presets appear in preset dropdown** — Saved presets show alongside built-in presets (Flat, Rock, Pop, etc.) with separator.
+
+### Database Auto-Migration
+- **Automatic library refresh on update** — When upgrading from older versions, the library database is automatically cleared and rescanned to apply schema changes. A backup is created before migration. Playlists are preserved.
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
 ## What's New (v1.10.3)
 
 ### Compilation Album Fix
 - **Fixed compilation album grouping** — Albums now correctly group by Album Artist (ALBUMARTIST tag) when available, instead of per-track artist. Compilation albums (e.g., Various Artists) are no longer split into separate entries.
 - **To fix existing library:** Settings → Library → Rescan
-
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.2)
 
