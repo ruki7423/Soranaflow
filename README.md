@@ -25,19 +25,29 @@
 
 ---
 
-## What's New (v1.9.0)
+## What's New (v1.10.0)
 
-### Synology NAS Integration
-- **FileStation Browsing** — Browse shared folders, navigate directories, play audio files directly from your Synology NAS
-- **Keychain Integration** — Passwords stored securely in macOS Keychain with auto-login on launch
-- **Login Retry** — Re-authentication dialog on failed login attempts
-- **Connection Management** — Right-click to remove saved Synology connections
+### Audio Units
+- **AU Plugin Support** — Load macOS-native audio effects alongside VST2/VST3
+- **AU Scanner** — Detects all system Audio Unit effects automatically
+- **3-Tier AU Editor** — Native plugin UI, CocoaUI factory, or generic parameter sliders
+- **DSP Integration** — AU effects chain with EQ, crossfeed, convolution
 
-### Improvements
-- Fixed signal connection issues causing disconnected state on launch
-- Fixed duplicate tree node creation for NAS devices
-- Visual connection status indicator (connected/disconnected)
-- Connecting placeholder while login is in progress
+### VST3 Improvements
+- Improved plugin compatibility — plugins loaded once and kept in memory, eliminating reload failures
+- Scan-failed plugins now shown grayed out with "(load failed)" label
+- Fixed potential crash when loading surround/multi-channel VST3 plugins (channels clamped to stereo)
+- Fixed app freeze when selecting a plugin that failed to load during scan
+
+### Audio Device
+- Fixed no audio when switching DAC or Bluetooth headphones while app is running
+- Audio device list now updates automatically when connecting or disconnecting devices
+- System default device changes are now followed automatically
+- Device switching works correctly when playback is paused
+
+### Bug Fixes
+- Fixed AU plugin rendering error with Apple's built-in effects (v2-bridged Audio Units)
+- Fixed memory leak in AU plugin error handling paths
 
 ### Support
 
@@ -246,7 +256,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 **DSP Processing**
 - 20-band parametric EQ with real-time frequency analyzer
-- VST3 & VST2 plugin hosting with native editor UI
+- VST3, VST2, and Audio Unit plugin hosting with native editor UI
 - Convolution engine for room correction (IR loading)
 - HRTF binaural processing (libmysofa)
 - Headroom management & limiter
@@ -271,7 +281,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 |-----------|-----------|
 | Framework | Qt 6 / C++17 |
 | Audio | CoreAudio, FFmpeg, soxr |
-| DSP | Custom pipeline, VST3 SDK, VST2 SDK |
+| DSP | Custom pipeline, VST3 SDK, VST2 SDK, Audio Units |
 | Metadata | TagLib, MusicBrainz, AcoustID, chromaprint |
 | Streaming | Native MusicKit (Apple Music), Synology FileStation, DLNA/UPnP |
 | Spatial | libmysofa (HRTF) |
@@ -280,7 +290,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.9.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.9.0/SoranaFlow-1.9.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest DMG: **[Sorana Flow v1.10.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.10.0/SoranaFlow-1.10.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -315,13 +325,21 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 35 (v1.0.0 → v1.9.0) |
+| GitHub Releases | 36 (v1.0.0 → v1.10.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.10.0 — Audio Units + DAC Hotplug
+
+- Audio Unit (AU) plugin hosting — macOS-native effects alongside VST2/VST3
+- 3-tier AU editor: native UI, CocoaUI factory, or generic parameter sliders
+- VST3: keep-module-loaded + failed-entry guard for better compatibility
+- Fixed DAC hotplug: full reconfigure on device switch (close→open→start)
+- Auto-follow system default device, device list refresh on hotplug
 
 ### v1.9.0 — Synology NAS Integration
 
