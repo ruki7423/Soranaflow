@@ -32,6 +32,9 @@
 - **SMB/NAS** — Fixed connection handling and authentication
 - **NAS UI** — Improved connection state display
 
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
 ## What's New (v1.10.0)
 
 ### Audio Units
