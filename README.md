@@ -25,17 +25,11 @@
 
 ---
 
-## What's New (v1.10.2)
+## What's New (v1.10.3)
 
-### DSP Pipeline
-- **Upsampling reorder** — DSP processing now runs at source sample rate before upsampling, reducing CPU load by ~4x
-- Convolution, EQ, VST3/AU plugins, and HRTF all process at native rate
-
-### SMB/NAS
-- Fixed SMB network mount failure
-
-### Plugins
-- Removed VST2 support (deprecated by Apple) — VST3 and Audio Unit only
+### Compilation Album Fix
+- **Fixed compilation album grouping** — Albums now correctly group by Album Artist (ALBUMARTIST tag) when available, instead of per-track artist. Compilation albums (e.g., Various Artists) are no longer split into separate entries.
+- **To fix existing library:** Settings → Library → Rescan
 
 ### Support
 If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
@@ -332,6 +326,11 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.10.3 — Compilation Album Fix
+
+- Fixed compilation albums splitting into separate entries per track artist
+- Albums now group by Album Artist (ALBUMARTIST tag) when available
 
 ### v1.10.2 — Performance & Stability
 
