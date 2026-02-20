@@ -40,7 +40,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 ## What's New (v1.10.0)
 
 ### Audio Units
-- **AU Plugin Support** — Load macOS-native audio effects alongside VST2/VST3
+- **AU Plugin Support** — Load macOS-native audio effects alongside VST3
 - **AU Scanner** — Detects all system Audio Unit effects automatically
 - **3-Tier AU Editor** — Native plugin UI, CocoaUI factory, or generic parameter sliders
 - **DSP Integration** — AU effects chain with EQ, crossfeed, convolution
@@ -280,7 +280,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 **DSP Processing**
 - 20-band parametric EQ with real-time frequency analyzer
-- VST3, VST2, and Audio Unit plugin hosting with native editor UI
+- VST3 and Audio Unit plugin hosting with native editor UI
 - Convolution engine for room correction (IR loading)
 - HRTF binaural processing (libmysofa)
 - Headroom management & limiter
@@ -305,7 +305,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 |-----------|-----------|
 | Framework | Qt 6 / C++17 |
 | Audio | CoreAudio, FFmpeg, soxr |
-| DSP | Custom pipeline, VST3 SDK, VST2 SDK, Audio Units |
+| DSP | Custom pipeline, VST3 SDK, Audio Units |
 | Metadata | TagLib, MusicBrainz, AcoustID, chromaprint |
 | Streaming | Native MusicKit (Apple Music), Synology FileStation, DLNA/UPnP |
 | Spatial | libmysofa (HRTF) |
