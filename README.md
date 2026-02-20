@@ -55,6 +55,22 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ---
 
+## What's New (v1.9.0)
+
+### Synology NAS Integration
+- **FileStation Browsing** — Browse shared folders, navigate directories, play audio files directly from your Synology NAS
+- **Keychain Integration** — Passwords stored securely in macOS Keychain with auto-login on launch
+- **Login Retry** — Re-authentication dialog on failed login attempts
+- **Connection Management** — Right-click to remove saved Synology connections
+
+### Improvements
+- Fixed signal connection issues causing disconnected state on launch
+- Fixed duplicate tree node creation for NAS devices
+- Visual connection status indicator (connected/disconnected)
+- Connecting placeholder while login is in progress
+
+---
+
 ## What's New (v1.8.3)
 
 ### Bug Fixes
