@@ -25,6 +25,13 @@
 
 ---
 
+## What's New (v1.10.1)
+
+### Hotfix
+- **Critical Fix** — Fixed crash on launch caused by missing HRTF library
+- **SMB/NAS** — Fixed connection handling and authentication
+- **NAS UI** — Improved connection state display
+
 ## What's New (v1.10.0)
 
 ### Audio Units
