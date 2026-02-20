@@ -34,6 +34,18 @@
 ### Support
 If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
+## What's New (v1.10.2)
+
+### DSP Pipeline
+- **Upsampling reorder** — DSP processing now runs at source sample rate before upsampling, reducing CPU load by ~4x
+- Convolution, EQ, VST3/AU plugins, and HRTF all process at native rate
+
+### SMB/NAS
+- Fixed SMB network mount failure
+
+### Plugins
+- Removed VST2 support (deprecated by Apple) — VST3 and Audio Unit only
+
 ## What's New (v1.10.1)
 
 ### Hotfix
