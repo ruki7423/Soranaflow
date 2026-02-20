@@ -32,11 +32,6 @@
 - **SMB/NAS** — Fixed connection handling and authentication
 - **NAS UI** — Improved connection state display
 
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
-
----
-
 ## What's New (v1.10.0)
 
 ### Audio Units
@@ -61,8 +56,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Fixed AU plugin rendering error with Apple's built-in effects (v2-bridged Audio Units)
 - Fixed memory leak in AU plugin error handling paths
 
----
-
 ## What's New (v1.9.0)
 
 ### Synology NAS Integration
@@ -77,8 +70,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Visual connection status indicator (connected/disconnected)
 - Connecting placeholder while login is in progress
 
----
-
 ## What's New (v1.8.3)
 
 ### Bug Fixes
@@ -86,8 +77,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - **VST3 editor freeze** — Fixed UI freeze when opening plugin editors
 - **VST loading protection** — Exception handling and loading indicator when activating plugins
 - **Plugin fault notification** — Crashed plugins flagged for UI notification
-
----
 
 ## What's New (v1.8.2)
 
@@ -107,16 +96,12 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Removed 2,500 lines of unused code
 - 61 issues fixed from full correctness audit
 
----
-
 ## What's New (v1.8.1)
 
 ### Bug Fixes
 - **VST instrument bypass** — Instrument/synth VST plugins (e.g. Serum 2) no longer silence audio output. They are bypassed in the audio chain since they require MIDI input. Effect plugins continue to work normally.
 - **DAC fallback** — Audio output now falls back to system default when a saved external DAC is disconnected on launch
 - **VST3 state restore** — Improved state restore ordering to follow the VST3 spec
-
----
 
 ## What's New (v1.8.0)
 
@@ -126,16 +111,12 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 ### Bug Fixes
 - **VST plugin freeze fix** — fixed freeze when loading VST plugins during playback (redundant deactivate/reactivate cycle)
 
----
-
 ## What's New (v1.7.9)
 
 ### Bug Fixes
 - **Album sort order now persists across restarts** — your chosen sort mode (Artist, Title, Year, etc.) is saved and restored automatically
 - **"Add to Queue" updates UI immediately** — tracks added via context menu now appear in the queue panel in real time
 - **VST2/VST3 plugin settings saved across restart** — uses VST2 chunk API and VST3 IComponent/IEditController state serialization
-
----
 
 ## What's New (v1.7.8)
 
@@ -152,14 +133,10 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Added network timeouts to prevent hung requests
 - Added 190 unit tests across 7 test suites
 
----
-
 ## What's New (v1.7.7)
 
 ### Bug Fixes
 - Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`), causing macOS to block loading third-party VST3 plugins
-
----
 
 ## What's New (v1.7.6)
 
@@ -167,8 +144,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Unit test framework: 7 suites, ~190 tests (Qt Test + CTest)
 - God class decomposition: PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
 - No user-facing behavior changes — pure internal quality improvement
-
----
 
 ## What's New (v1.7.5)
 
@@ -180,8 +155,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - "Recently Added" sort option in Albums view
 - m3u/m3u8 playlist import
 
----
-
 ## What's New (v1.7.4)
 
 ### Apple Music Playback Fixes
@@ -190,8 +163,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Fixed title/audio mismatch during rapid song changes
 - Removed "Loading..." title flash during song transitions
 - macOS: clicks on inactive window now pass through immediately
-
----
 
 ## What's New (v1.7.3)
 
@@ -211,21 +182,15 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Fixed include path in LibrarySettingsTab
 - Split AudioSettingsTab into focused sub-widgets for maintainability
 
----
-
 ## What's New (v1.7.2)
 
 ### Bug Fixes
 - Fixed VST3/VST2 plugins failing to load — missing codesign entitlements blocked macOS from loading unsigned third-party plugin libraries
 
----
-
 ## What's New (v1.7.1)
 
 ### Bug Fixes
 - Fixed VST3/VST2 plugins failing to load due to missing codesign entitlements that blocked macOS from loading unsigned third-party plugin libraries
-
----
 
 ## What's New (v1.7.0)
 
@@ -238,8 +203,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 - Fixed album artist and year not populated from file tags
 - VST plugin loading now shows clear error messages on failure
 
----
-
 ## What's New (v1.6.1)
 
 ### Bug Fixes
@@ -248,8 +211,6 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ### Internal
 - Phase 1 modularization: extracted MetadataFixService, CoverArtService, SignalPathBuilder, VolumeLevelingManager; split SettingsView into 6 focused tab widgets
-
----
 
 ## What's New (v1.6.0)
 
@@ -314,7 +275,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 ## Installation
 
-**Download** the latest DMG: **[Sorana Flow v1.10.0](https://github.com/ruki7423/Soranaflow/releases/download/v1.10.0/SoranaFlow-1.10.0.dmg)** or browse [all releases](https://github.com/ruki7423/Soranaflow/releases). Also available at [soranaflow.com/downloads](https://soranaflow.com/downloads).
+**Download** the latest version from [soranaflow.com/downloads](https://soranaflow.com/downloads) or browse [all releases](https://github.com/ruki7423/Soranaflow/releases).
 
 Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
 
@@ -357,9 +318,15 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 ## Changelog
 
+### v1.10.1 — Hotfix
+
+- Fixed crash on launch caused by missing HRTF library (libmysofa)
+- Fixed SMB connection handling and authentication
+- Improved NAS connection state display
+
 ### v1.10.0 — Audio Units + DAC Hotplug
 
-- Audio Unit (AU) plugin hosting — macOS-native effects alongside VST2/VST3
+- Audio Unit (AU) plugin hosting — macOS-native effects alongside VST3
 - 3-tier AU editor: native UI, CocoaUI factory, or generic parameter sliders
 - VST3: keep-module-loaded + failed-entry guard for better compatibility
 - Fixed DAC hotplug: full reconfigure on device switch (close→open→start)
@@ -595,6 +562,10 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 - Code-signed and Apple Notarized
 
 See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
+
+## Support
+
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## Links
 
