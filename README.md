@@ -25,6 +25,14 @@
 
 ---
 
+## What's New (v1.10.5)
+
+### Auto-Rescan Fix
+- **Automatic library rescan after database migration** — Fixes empty library after updating from v1.10.3. The app now automatically rescans your library when a database migration is needed, even if auto-scan is disabled.
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
 ## What's New (v1.10.4)
 
 ### EQ Preset Save/Load
@@ -33,9 +41,6 @@
 
 ### Database Auto-Migration
 - **Automatic library refresh on update** — When upgrading from older versions, the library database is automatically cleared and rescanned to apply schema changes. A backup is created before migration. Playlists are preserved.
-
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.3)
 
