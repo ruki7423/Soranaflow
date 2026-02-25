@@ -25,13 +25,31 @@
 
 ---
 
+## What's New (v1.11.0)
+
+### Critical Fixes
+- **Fixed app freeze with USB DACs** — Device alive-check and enumeration moved to background thread. Apps no longer freeze when USB DAC is unresponsive (e.g., Emotiva DC-1)
+- **Fixed frozen DSP settings** — Controls below the DSP master toggle are now visually dimmed (opacity) instead of disabled. You can configure DSP settings while DSP is off
+
+### Audio Engine
+- **Signal path: SRC vs Upsampling distinction** — When Output Sample Rate is fixed but Upsampling is off, signal path now correctly shows "Sample Rate Conversion" instead of "Upsampling"
+- **HRTF/Crossfeed mutual exclusion** — Deferred signal handling prevents potential UI cascade when toggling between HRTF and Crossfeed
+
+### Settings & UI
+- **Output Sample Rate relocated** — Moved from deep in Quality section to Output section near device selection for easier access
+- **Device capability caching** — Settings tab opens faster by reading cached sample rates and buffer sizes instead of live CoreAudio queries
+- **Format Badges toggle** — Now functional: hide/show format badges (FLAC, DSD, etc.) in track list
+- **Album Art toggle** — Now functional: hide/show album art in Now Playing
+- **Apple Music quality persistence** — Selected quality now saved across app restarts
+- **Removed non-functional controls** — Cleaned up Library and Appearance tabs by removing placeholder controls
+
+### Support
+If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+
 ## What's New (v1.10.5)
 
 ### Auto-Rescan Fix
 - **Automatic library rescan after database migration** — Fixes empty library after updating from v1.10.3. The app now automatically rescans your library when a database migration is needed, even if auto-scan is disabled.
-
-### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.4)
 
@@ -345,13 +363,32 @@ Drag **Sorana Flow** to your Applications folder. The app is signed and notarize
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 36 (v1.0.0 → v1.10.0) |
+| GitHub Releases | 37 (v1.0.0 → v1.11.0) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
 | Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
 
 ## Changelog
+
+### v1.11.0 — USB DAC Freeze Fix, Settings Audit, Signal Path
+
+- Fixed app freeze with USB DACs (background thread migration)
+- Fixed frozen DSP settings (opacity dimming instead of disabled)
+- Fixed 7 dead settings controls (3 connected, 4 removed)
+- HRTF/Crossfeed mutual exclusion deferred signal handling
+- Signal path: "Sample Rate Conversion" vs "Upsampling" distinction
+- Output Sample Rate relocated to Output section
+- Device capability caching for faster settings loading
+
+### v1.10.5 — Auto-Rescan Fix
+
+- Automatic library rescan after database migration
+
+### v1.10.4 — EQ Presets + DB Migration
+
+- Save/Load/Delete named EQ presets
+- Automatic library refresh on database schema update
 
 ### v1.10.3 — Compilation Album Fix
 
