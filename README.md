@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/images/app-icon.png" width="128" alt="Sorana Flow">
+  <img src="docs/images/app-icon.png" width="128" alt="Soranaflow">
 </p>
 
-<h1 align="center">Sorana Flow</h1>
+<h1 align="center">Soranaflow</h1>
 
 <p align="center">
   <b>Professional Hi-Fi Audio Player for macOS</b><br>
@@ -25,6 +25,15 @@
 
 ---
 
+## What's New (v1.11.1)
+
+Fixed signal path display issues where macOS AudioToolbox decoders caused incorrect codec classification.
+
+- Lossless codecs (ALAC, FLAC) now correctly show "Lossless Decode" instead of "Lossy Decode"
+- Overall signal path quality no longer shows "Unknown" for lossless playback chains
+- True-Peak Lookahead limiter now displays latency in milliseconds
+- Auto sample rate correctly identifies lossy formats through AudioToolbox decoder variants
+
 ## What's New (v1.11.0)
 
 ### Critical Fixes
@@ -44,7 +53,7 @@
 - **Removed non-functional controls** — Cleaned up Library and Appearance tabs by removing placeholder controls
 
 ### Support
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+If you find Soranaflow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.5)
 
@@ -330,7 +339,7 @@ If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki74
 
 **Download** the latest version from [soranaflow.com/downloads](https://soranaflow.com/downloads) or browse [all releases](https://github.com/ruki7423/Soranaflow/releases).
 
-Drag **Sorana Flow** to your Applications folder. The app is signed and notarized.
+Drag **Soranaflow** to your Applications folder. The app is signed and notarized.
 
 **Requirements:**
 - macOS 14.0 (Sonoma) or later
@@ -648,7 +657,7 @@ See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/chan
 
 ## Support
 
-If you find Sorana Flow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
+If you find Soranaflow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## Links
 
