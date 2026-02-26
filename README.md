@@ -25,271 +25,18 @@
 
 ---
 
-## What's New (v1.11.1)
-
-Fixed signal path display issues where macOS AudioToolbox decoders caused incorrect codec classification.
-
-- Lossless codecs (ALAC, FLAC) now correctly show "Lossless Decode" instead of "Lossy Decode"
-- Overall signal path quality no longer shows "Unknown" for lossless playback chains
-- True-Peak Lookahead limiter now displays latency in milliseconds
-- Auto sample rate correctly identifies lossy formats through AudioToolbox decoder variants
-
-## What's New (v1.11.0)
-
-### Critical Fixes
-- **Fixed app freeze with USB DACs** — Device alive-check and enumeration moved to background thread. Apps no longer freeze when USB DAC is unresponsive (e.g., Emotiva DC-1)
-- **Fixed frozen DSP settings** — Controls below the DSP master toggle are now visually dimmed (opacity) instead of disabled. You can configure DSP settings while DSP is off
-
-### Audio Engine
-- **Signal path: SRC vs Upsampling distinction** — When Output Sample Rate is fixed but Upsampling is off, signal path now correctly shows "Sample Rate Conversion" instead of "Upsampling"
-- **HRTF/Crossfeed mutual exclusion** — Deferred signal handling prevents potential UI cascade when toggling between HRTF and Crossfeed
-
-### Settings & UI
-- **Output Sample Rate relocated** — Moved from deep in Quality section to Output section near device selection for easier access
-- **Device capability caching** — Settings tab opens faster by reading cached sample rates and buffer sizes instead of live CoreAudio queries
-- **Format Badges toggle** — Now functional: hide/show format badges (FLAC, DSD, etc.) in track list
-- **Album Art toggle** — Now functional: hide/show album art in Now Playing
-- **Apple Music quality persistence** — Selected quality now saved across app restarts
-- **Removed non-functional controls** — Cleaned up Library and Appearance tabs by removing placeholder controls
-
-
-## What's New (v1.10.5)
-
-### Auto-Rescan Fix
-- **Automatic library rescan after database migration** — Fixes empty library after updating from v1.10.3. The app now automatically rescans your library when a database migration is needed, even if auto-scan is disabled.
-
-## What's New (v1.10.4)
-
-### EQ Preset Save/Load
-- **Save/Load/Delete named EQ presets** — Save your parametric EQ configuration as named presets (JSON files). Presets include all band settings, preamp, and phase mode.
-- **User presets appear in preset dropdown** — Saved presets show alongside built-in presets (Flat, Rock, Pop, etc.) with separator.
-
-### Database Auto-Migration
-- **Automatic library refresh on update** — When upgrading from older versions, the library database is automatically cleared and rescanned to apply schema changes. A backup is created before migration. Playlists are preserved.
-
-## What's New (v1.10.3)
-
-### Compilation Album Fix
-- **Fixed compilation album grouping** — Albums now correctly group by Album Artist (ALBUMARTIST tag) when available, instead of per-track artist. Compilation albums (e.g., Various Artists) are no longer split into separate entries.
-- **To fix existing library:** Settings → Library → Rescan
-
-## What's New (v1.10.2)
-
-### DSP Pipeline
-- **Upsampling reorder** — DSP processing now runs at source sample rate before upsampling, reducing CPU load by ~4x
-- Convolution, EQ, VST3/AU plugins, and HRTF all process at native rate
-
-### SMB/NAS
-- Fixed SMB network mount failure
-
-### Plugins
-- Removed VST2 support (deprecated by Apple) — VST3 and Audio Unit only
-
-## What's New (v1.10.1)
-
-### Hotfix
-- **Critical Fix** — Fixed crash on launch caused by missing HRTF library
-- **SMB/NAS** — Fixed connection handling and authentication
-- **NAS UI** — Improved connection state display
-
-## What's New (v1.10.0)
-
-### Audio Units
-- **AU Plugin Support** — Load macOS-native audio effects alongside VST3
-- **AU Scanner** — Detects all system Audio Unit effects automatically
-- **3-Tier AU Editor** — Native plugin UI, CocoaUI factory, or generic parameter sliders
-- **DSP Integration** — AU effects chain with EQ, crossfeed, convolution
-
-### VST3 Improvements
-- Improved plugin compatibility — plugins loaded once and kept in memory, eliminating reload failures
-- Scan-failed plugins now shown grayed out with "(load failed)" label
-- Fixed potential crash when loading surround/multi-channel VST3 plugins (channels clamped to stereo)
-- Fixed app freeze when selecting a plugin that failed to load during scan
-
-### Audio Device
-- Fixed no audio when switching DAC or Bluetooth headphones while app is running
-- Audio device list now updates automatically when connecting or disconnecting devices
-- System default device changes are now followed automatically
-- Device switching works correctly when playback is paused
-
-### Bug Fixes
-- Fixed AU plugin rendering error with Apple's built-in effects (v2-bridged Audio Units)
-- Fixed memory leak in AU plugin error handling paths
-
-## What's New (v1.9.0)
-
-### Synology NAS Integration
-- **FileStation Browsing** — Browse shared folders, navigate directories, play audio files directly from your Synology NAS
-- **Keychain Integration** — Passwords stored securely in macOS Keychain with auto-login on launch
-- **Login Retry** — Re-authentication dialog on failed login attempts
-- **Connection Management** — Right-click to remove saved Synology connections
-
-### Improvements
-- Fixed signal connection issues causing disconnected state on launch
-- Fixed duplicate tree node creation for NAS devices
-- Visual connection status indicator (connected/disconnected)
-- Connecting placeholder while login is in progress
-
-## What's New (v1.8.3)
-
-### Bug Fixes
-- **VST3 plugin scan** — One incompatible plugin no longer prevents other plugins from appearing
-- **VST3 editor freeze** — Fixed UI freeze when opening plugin editors
-- **VST loading protection** — Exception handling and loading indicator when activating plugins
-- **Plugin fault notification** — Crashed plugins flagged for UI notification
-
-## What's New (v1.8.2)
-
-### New Features
-- **AIFF/AIF file support** — play AIFF audio files natively
-- **XSPF playlist support** — import and export XSPF playlists
-- **ISO 226 Equal Loudness Contour** — 3 EQ presets (Low/Mid/High Volume) that compensate for human hearing sensitivity at different listening levels
-
-### Audio Engine Improvements
-- **Linear Phase EQ pop noise eliminated** — parameter changes use smooth fade-out → rebuild → fade-in transition
-- **Convolution IR swap now lock-free** — uses staged swap pattern, eliminating audio glitches
-- **HRTF filter updates now lock-free** — speaker angle changes no longer cause audio glitches
-
-### Technical
-- Zero blocking operations on the real-time audio thread
-- Zero heap allocations on the real-time audio thread
-- Removed 2,500 lines of unused code
-- 61 issues fixed from full correctness audit
-
-## What's New (v1.8.1)
-
-### Bug Fixes
-- **VST instrument bypass** — Instrument/synth VST plugins (e.g. Serum 2) no longer silence audio output. They are bypassed in the audio chain since they require MIDI input. Effect plugins continue to work normally.
-- **DAC fallback** — Audio output now falls back to system default when a saved external DAC is disconnected on launch
-- **VST3 state restore** — Improved state restore ordering to follow the VST3 spec
-
-## What's New (v1.8.0)
-
-### New Features
-- **Composer tag support** — metadata read from FLAC, MP3, AAC, AIFF, WAV, DSF/DFF, stored in library database, and displayed in track details panel
-
-### Bug Fixes
-- **VST plugin freeze fix** — fixed freeze when loading VST plugins during playback (redundant deactivate/reactivate cycle)
-
-## What's New (v1.7.9)
-
-### Bug Fixes
-- **Album sort order now persists across restarts** — your chosen sort mode (Artist, Title, Year, etc.) is saved and restored automatically
-- **"Add to Queue" updates UI immediately** — tracks added via context menu now appear in the queue panel in real time
-- **VST2/VST3 plugin settings saved across restart** — uses VST2 chunk API and VST3 IComponent/IEditController state serialization
-
-## What's New (v1.7.8)
-
-### Architecture
-- Decomposed PlaybackBar into TransportControls, NowPlayingInfo, and DeviceVolumeControl
-- Decomposed AppleMusicView into AMSearchPanel, AMArtistPanel, AMAlbumPanel via AMContentPanel
-- Extracted MusicKitStateMachine as pure C++ from Obj-C++ MusicKitPlayer
-- Extracted MenuBarManager from MainWindow
-- Split DSPSettingsWidget into EQSettingsWidget, SpatialSettingsWidget, and ProcessingSettingsWidget
-
-### Bug Fixes
-- Fixed thread safety issue with Apple Music token access
-- Fixed AlbumRepository using write connection for read queries
-- Added network timeouts to prevent hung requests
-- Added 190 unit tests across 7 test suites
-
-## What's New (v1.7.7)
-
-### Bug Fixes
-- Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`), causing macOS to block loading third-party VST3 plugins
-
-## What's New (v1.7.6)
-
-### Internal Quality
-- Unit test framework: 7 suites, ~190 tests (Qt Test + CTest)
-- God class decomposition: PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
-- No user-facing behavior changes — pure internal quality improvement
-
-## What's New (v1.7.5)
-
-### Bug Fixes
-- Improved VST3 plugin compatibility (Crave EQ, PSP Audioware) — parameter changes now forwarded to plugins
-- Signal Path now only shows EQ when bands have audible effect
-
-### Features
-- "Recently Added" sort option in Albums view
-- m3u/m3u8 playlist import
-
-## What's New (v1.7.4)
-
-### Apple Music Playback Fixes
-- Fixed ghost playback when switching from Apple Music to local files
-- Fixed first double-click ignored after opening Apple Music tab
-- Fixed title/audio mismatch during rapid song changes
-- Removed "Loading..." title flash during song transitions
-- macOS: clicks on inactive window now pass through immediately
-
-## What's New (v1.7.3)
-
-### VST3 Hosting Improvements
-- Fixed component-to-controller state sync via IBStream protocol
-- Fixed initialization order: bus activation now precedes process setup
-- Added proper bus arrangement negotiation with stereo fallback
-- Per-class VST3 plugin enumeration for multi-effect bundles
-
-### EQ Improvements
-- Default Q changed to 0.7071 (Butterworth — flat response, no resonance)
-- Double-click Q/Freq/Gain spinboxes to reset to defaults
-- Collapsible EQ section with persistent state
-
-### Bug Fixes
-- AudioEngine nullptr guards prevent crashes during initialization
-- Fixed include path in LibrarySettingsTab
-- Split AudioSettingsTab into focused sub-widgets for maintainability
-
-## What's New (v1.7.2)
-
-### Bug Fixes
-- Fixed VST3/VST2 plugins failing to load — missing codesign entitlements blocked macOS from loading unsigned third-party plugin libraries
-
-## What's New (v1.7.1)
-
-### Bug Fixes
-- Fixed VST3/VST2 plugins failing to load due to missing codesign entitlements that blocked macOS from loading unsigned third-party plugin libraries
-
-## What's New (v1.7.0)
-
-### Features
-- Year display in Now Playing and Album Detail views
-- Album Artist standalone sort option in Albums view
-- Internet metadata lookup toggle in Settings
-
-### Bug Fixes
-- Fixed album artist and year not populated from file tags
-- VST plugin loading now shows clear error messages on failure
-
-## What's New (v1.6.1)
-
-### Bug Fixes
-- Fixed crash (deadlock) when enabling Upsampling in Settings
-- Fixed Appearance tab highlighting in Settings
-
-### Internal
-- Phase 1 modularization: extracted MetadataFixService, CoverArtService, SignalPathBuilder, VolumeLevelingManager; split SettingsView into 6 focused tab widgets
-
-## What's New (v1.6.0)
-
-### Audio
-- Fixed DSD DoP crackling, pops, and track transition noise
-- Fixed VST3 plugin class selection causing silent playback
-- Buffer size now filtered by device capability
-- Gapless DoP marker state preserved across track boundaries
-
-### Apple Music
-- Fixed first-click playback failure with state machine + command queue
-- Added loading indicator during MusicKit DRM handshake
-
-### Library & UI
-- New Album Artist column with sortable header
-- Albums view: new sort options (Artist, Album Artist, Year, Title)
-- Responsive layout: window resize adapts all views
-- Artist page: album covers, popular tracks, clickable URLs
-- Auto-organize confirmation warning
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Framework | Qt 6 / C++17 |
+| Audio | CoreAudio, FFmpeg, soxr |
+| DSP | Custom pipeline, VST3 SDK, Audio Units |
+| Metadata | TagLib, MusicBrainz, AcoustID, chromaprint |
+| Streaming | Native MusicKit (Apple Music), Synology FileStation, DLNA/UPnP |
+| Spatial | libmysofa (HRTF) |
+| Updates | Sparkle framework |
+| Build | CMake, Apple Silicon native (arm64) |
 
 ## Features
 
@@ -320,28 +67,13 @@ Fixed signal path display issues where macOS AudioToolbox decoders caused incorr
 - Synology NAS browsing via FileStation API
 - DLNA/UPnP media server discovery
 
-## Tech Stack
+## Links
 
-| Component | Technology |
-|-----------|-----------|
-| Framework | Qt 6 / C++17 |
-| Audio | CoreAudio, FFmpeg, soxr |
-| DSP | Custom pipeline, VST3 SDK, Audio Units |
-| Metadata | TagLib, MusicBrainz, AcoustID, chromaprint |
-| Streaming | Native MusicKit (Apple Music), Synology FileStation, DLNA/UPnP |
-| Spatial | libmysofa (HRTF) |
-| Updates | Sparkle framework |
-| Build | CMake, Apple Silicon native (arm64) |
-
-## Installation
-
-**Download** the latest version from [soranaflow.com/downloads](https://soranaflow.com/downloads) or browse [all releases](https://github.com/ruki7423/Soranaflow/releases).
-
-Drag **Soranaflow** to your Applications folder. The app is signed and notarized.
-
-**Requirements:**
-- macOS 14.0 (Sonoma) or later
-- Apple Silicon (M1 / M2 / M3 / M4)
+- [Website](https://soranaflow.com)
+- [Downloads](https://soranaflow.com/downloads)
+- [Changelog](https://soranaflow.com/changelog)
+- [Report Issue](https://soranaflow.com/support)
+- [Privacy Policy](https://soranaflow.com/privacy)
 
 ## Contributors
 
@@ -357,320 +89,37 @@ Drag **Soranaflow** to your Applications folder. The app is signed and notarized
     <td align="center">
       <a href="https://claude.ai">
         <img src="https://avatars.githubusercontent.com/u/76263028" width="80" style="border-radius:50%"><br>
-        <b>Claude Code</b>
+        <b>Claude</b>
       </a><br>
       AI Pair Programmer
     </td>
   </tr>
 </table>
 
-> Built with [Claude Code](https://claude.ai/code) by Anthropic — AI-assisted architecture, DSP pipeline, cross-platform abstractions, and automated testing.
-
-## Growth
-
-| Metric | Count |
-|--------|-------|
-| GitHub Releases | 44 (v1.0.0 → v1.11.1) |
-| Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
-| Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
-| Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
-| Commits | ![Commits](https://img.shields.io/github/commit-activity/m/ruki7423/Soranaflow?style=flat-square&label=) |
-
-## Changelog
-
-### v1.11.1 — Signal Path Hotfix
-
-- Fixed lossless codec misclassification (ALAC, FLAC) on macOS AudioToolbox decoders
-- Fixed overall signal path quality showing "Unknown"
-- Limiter display: milliseconds instead of raw sample count
-- Auto sample rate lossy codec detection fixed for AudioToolbox variants
-
-### v1.11.0 — USB DAC Freeze Fix, Settings Overhaul
-
-- Fixed app freeze with USB DACs (background thread migration)
-- Fixed frozen DSP settings (opacity dimming instead of disabled)
-- Fixed 7 dead settings controls (3 connected, 4 removed)
-- HRTF/Crossfeed mutual exclusion deferred signal handling
-- Signal path: "Sample Rate Conversion" vs "Upsampling" distinction
-- Output Sample Rate relocated to Output section
-- Device capability caching for faster settings loading
-
-### v1.10.5 — Auto-Rescan Fix
-
-- Automatic library rescan after database migration
-
-### v1.10.4 — EQ Presets + DB Migration
-
-- Save/Load/Delete named EQ presets
-- Automatic library refresh on database schema update
-
-### v1.10.3 — Compilation Album Fix
-
-- Fixed compilation albums splitting into separate entries per track artist
-- Albums now group by Album Artist (ALBUMARTIST tag) when available
-
-### v1.10.2 — Performance & Stability
-
-- Upsampling reorder: DSP at source rate, ~4x less CPU
-- Fixed SMB mount failure (@autoreleasepool)
-- Removed VST2 support
-
-### v1.10.1 — Hotfix
-
-- Fixed crash on launch caused by missing HRTF library (libmysofa)
-- Fixed SMB connection handling and authentication
-- Improved NAS connection state display
-
-### v1.10.0 — Audio Units + DAC Hotplug
-
-- Audio Unit (AU) plugin hosting — macOS-native effects alongside VST3
-- 3-tier AU editor: native UI, CocoaUI factory, or generic parameter sliders
-- VST3: keep-module-loaded + failed-entry guard for better compatibility
-- Fixed DAC hotplug: full reconfigure on device switch (close→open→start)
-- Auto-follow system default device, device list refresh on hotplug
-
-### v1.9.0 — Synology NAS Integration
-
-- FileStation browsing: shared folders, directory navigation, audio playback
-- macOS Keychain password storage with auto-login on launch
-- Login retry dialog on authentication failure
-- Right-click context menu for Synology removal
-- Fixed duplicate tree nodes and signal connection issues
-
-### v1.8.3 — VST Regression Hotfix
-
-- VST3 scan: one bad plugin no longer kills entire scan
-- VST3 editor: fixed UI freeze on double-click
-- Plugin loading: exception handling + loading indicator
-- Plugin fault notification for silently disabled plugins
-
-### v1.8.2 — AIFF, XSPF, Loudness Contour, RT Safety
-
-- AIFF/AIF native playback support
-- XSPF playlist import/export
-- ISO 226 Equal Loudness Contour EQ presets
-- Linear Phase EQ pop noise eliminated
-- Lock-free Convolution IR and HRTF filter swap
-- 61 issues fixed from full correctness audit
-- Zero blocking/allocation on real-time audio thread
-
-### v1.8.1 — VST Instrument Bypass + DAC Fallback
-
-- Instrument/synth VST plugins no longer silence audio
-- DAC fallback to system default on disconnect
-- VST3 state restore ordering fix
-
-### v1.8.0 — Composer Tag + VST Stability
-
-- Composer tag support across all audio formats
-- Fixed VST plugin freeze during playback (redundant deactivate/reactivate cycle)
-
-### v1.7.9 — Bug Fixes & VST State Persistence
-
-- Album sort order now persists across restarts
-- "Add to Queue" updates queue panel immediately
-- VST2/VST3 plugin settings saved and restored across restart
-
-### v1.7.8 — Architecture Refactoring & Testing
-
-- Decomposed PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
-- Extracted MusicKitStateMachine and MenuBarManager
-- Fixed thread safety and read-connection issues
-- Added 190 unit tests across 7 test suites
-
-### v1.7.7 — VST3 Plugin Activation Fix
-
-- Fixed VST3 plugin activation freeze — v1.7.6 was missing codesign entitlements (`disable-library-validation`)
-
-### v1.7.6 — Internal Quality & Test Infrastructure
-
-- Unit test framework: 7 suites, ~190 tests (Qt Test + CTest)
-- God class decomposition: PlaybackBar, AppleMusicView, DSPSettingsWidget, MainWindow, MusicKitPlayer
-- No user-facing behavior changes
-
-### v1.7.5 — VST3 Compatibility + Playlists
-
-- VST3 parameter forwarding for Crave EQ, PSP Audioware compatibility
-- Signal Path only shows active DSP components
-- "Recently Added" album sort, m3u/m3u8 playlist import
-
-### v1.7.4 — Apple Music Playback Fixes
-
-- Ghost playback fix, first-click fix, title/audio mismatch fix, acceptsFirstMouse
-
-### v1.7.3 — VST3 Hosting + EQ Improvements
-
-- VST3 IBStream state sync, init order fix, bus negotiation, per-class scan
-- EQ: Butterworth default Q, double-click reset, collapsible section
-- AudioEngine nullptr guards, AudioSettingsTab split
-
-### v1.7.2 — VST Plugin Fix
-
-- Fixed VST3/VST2 loading: missing codesign entitlements
-
-### v1.7.1 — VST Plugin Fix
-
-- Fixed VST3/VST2 plugins failing to load due to missing codesign entitlements
-
-### v1.7.0 — Year & Album Artist
-
-- Year display, Album Artist sort, VST error feedback, internet metadata toggle
-
-### v1.6.1 — Upsampling Crash Fix
-
-- Fixed deadlock when enabling Upsampling, fixed Appearance tab highlighting
-
-### v1.6.0 — DSD DoP Fix, Apple Music, Responsive UI
-
-- Fixed DSD crackling, Apple Music first-click, VST3 class selection
-- See [What's New (v1.6.0)](#whats-new-v160) for full details
-
-### v1.5.4 — Performance & Column Fixes
-
-- Fixed startup delay, column resize lag, and library display issues
-
-### v1.5.3 — Header State Migration
-
-- Fixed library columns not visible after updating from older versions
-
-### v1.5.2 — Startup Performance Fix
-
-- Fixed ~2 minute startup delay when external drives were disconnected
-
-### v1.5.1 — Performance & DSD Fix
-
-- Faster search, album browsing, and cover art loading
-- Fixed DSD playback issues and silent Apple Music playback
-
-### v1.5.0 — Architecture Refactoring
-
-- Eliminated all synchronous DB calls from the main thread (swap-on-complete caching)
-- SVG icon cache: 102 uncached renders → QHash lookup with theme-change invalidation
-- Crash handler: POSIX sigaction + backtrace to crash.log, previous-crash detection on startup
-- DB integrity: PRAGMA quick_check on open, auto-backup corrupt databases
-
-### v1.4.6 — Freeze Hotfix
-
-- Library reload: debounced view cascade (max once per 2s during scan)
-- Album/Artist views: single allTracks() copy per reload (was 2+ full copies)
-- Autoplay: O(1) hash lookup replaces O(n×m) nested loop
-- Single-instance guard prevents dual-launch SQLite contention
-
-### v1.4.5 — Performance & Reliability
-
-- Volume slider: fixed drag lag — SVG icon tier caching + debounced settings save
-- Language dialog: fixed text truncation
-- Settings: fixed not saving on quit — flush debounce timers before shutdown
-- Security: API keys moved to build-time injection (no keys in source)
-
-### v1.4.4 — Apple Music & Stability
-
-- Apple Music: eliminated auth popup, fixed first-play stall, ProcessTap audio capture
-- Clean shutdown in ~1s — proper WKWebView, DB, scanner teardown
-- Sidebar: Library Folders collapsible with scroll support
-- Improved uninstaller with admin privileges and Apple Music data cleanup
-- Database: fixed connection warnings on quit
-
-### v1.4.3 — Auto-Scan on Folder Add
-
-- Auto-scan now triggers immediately after adding a music folder
-- Previously required manual "Scan Now" click after adding folders
-
-### v1.4.2 — Scan & Auth Performance
-
-- Apple Music auth popup now appears on top of main window
-- Separate read/write DB connections (WAL concurrent reads)
-- Scanner mini-batch commits reduce UI blocking during scan
-- Fixed Apple Music beachball when connecting during library scan
-
-### v1.4.1 — Stability & Polish
-
-- Apple Music works in distributed builds (embedded JWT token)
-- Faster library scan — adaptive thread count for external drives
-- Fixed 6-minute beachball on first play (async queue save)
-- Auth popup auto-closes after Apple Music connect
-- Smoother scanning — reduced UI reloads during scan
-- Fixed font warnings (Sans-serif, SF Pro Display)
-
-### v1.4.0 — Library Performance & Stability
-
-**Library Engine Overhaul**
-- SQLite WAL mode + mmap 256MB + 64MB cache for faster DB access
-- FTS5 full-text search — instant search across title, artist, album
-- HybridTrackModel — lightweight in-memory index (~100 bytes/track) for instant startup, sort, and search even with 100K+ tracks
-- String pooling for deduplicated metadata storage
-- Batch INSERT with transactions for album/artist rebuild
-- Async post-scan reload — no more UI freeze after library scan
-
-**Stability**
-- Thread-safe database access (QRecursiveMutex) — fixed potential crash when scanning and searching simultaneously
-
-**Apple Music**
-- Disconnect/reconnect functionality for Apple Music integration
-
-### v1.3.1 — Library Rollback Polish
-
-- Improved library rollback stability
-- Dark mode UI refinements
-
-### v1.3.0 — Folder Browser & Library Rollback
-
-- Folder Browser view for file-based navigation
-- Library metadata rollback to undo last rescan
-- Fixed dark mode arrow visibility
-
-### v1.2.2 — Stability Improvements
-
-- Fixed album art and artist display after rescan
-
-### v1.2.1 — VST2 Scanner & Art Fixes
-
-- Fixed VST2 plugin folder scanning (nested subdirectories)
-- Fixed album cover art and artist display
-- Improved album loading performance
-- Added Report Issue link in Settings
-
-### v1.2.0 — VST2 Plugin Support
-
-- VST2 plugin hosting — load, scan, and process classic VST2 plugins with full editor UI
-- Unified VST2/VST3 plugin management in Settings
-- Standalone uninstaller app
-
-### v1.1.0 — Performance & Polish
-
-- Library scan speed ~10x faster with transaction batching
-- Async cover art loading — no more UI freeze during library browsing
-- Apple Music Connect/Disconnect button size unified
-- Improved metadata identification accuracy
-
-### v1.0.0 — Initial Release
-
-- FFmpeg audio engine with CoreAudio output
-- Library management with metadata scanning
-- Gapless playback and crossfade
-- Exclusive Mode (Hog Mode) for DACs
-- VST3 plugin hosting with editor UI
-- Convolution reverb with IR file loading
-- HRTF binaural audio processing
-- Apple Music streaming via MusicKit
-- Dark/Light theme support
-- macOS media keys and Now Playing integration
-- Auto-update via Sparkle
-- Code-signed and Apple Notarized
-
-See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
-
 ## Support
 
 If you find Soranaflow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
-## Links
+## Installation
 
-- [Website](https://soranaflow.com)
-- [Downloads](https://soranaflow.com/downloads)
-- [Changelog](https://soranaflow.com/changelog)
-- [Report Issue](https://soranaflow.com/support)
-- [Privacy Policy](https://soranaflow.com/privacy)
+**Download** the latest version from [soranaflow.com/downloads](https://soranaflow.com/downloads) or browse [all releases](https://github.com/ruki7423/Soranaflow/releases).
+
+Drag **Soranaflow** to your Applications folder. The app is signed and notarized.
+
+**Requirements:**
+- macOS 14.0 (Sonoma) or later
+- Apple Silicon (M1 / M2 / M3 / M4)
+
+## What's New (v1.11.1)
+
+Fixed signal path display issues where macOS AudioToolbox decoders caused incorrect codec classification.
+
+- Lossless codecs (ALAC, FLAC) now correctly show "Lossless Decode" instead of "Lossy Decode"
+- Overall signal path quality no longer shows "Unknown" for lossless playback chains
+- True-Peak Lookahead limiter now displays latency in milliseconds
+- Auto sample rate correctly identifies lossy formats through AudioToolbox decoder variants
+
+See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
 
 ## License
 
