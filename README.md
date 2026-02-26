@@ -52,8 +52,6 @@ Fixed signal path display issues where macOS AudioToolbox decoders caused incorr
 - **Apple Music quality persistence** — Selected quality now saved across app restarts
 - **Removed non-functional controls** — Cleaned up Library and Appearance tabs by removing placeholder controls
 
-### Support
-If you find Soranaflow useful, you can support development at [ko-fi.com/ruki7423](https://ko-fi.com/ruki7423).
 
 ## What's New (v1.10.5)
 
@@ -372,7 +370,7 @@ Drag **Soranaflow** to your Applications folder. The app is signed and notarized
 
 | Metric | Count |
 |--------|-------|
-| GitHub Releases | 37 (v1.0.0 → v1.11.0) |
+| GitHub Releases | 44 (v1.0.0 → v1.11.1) |
 | Total Downloads | ![Downloads](https://img.shields.io/github/downloads/ruki7423/Soranaflow/total?style=flat-square&label=) |
 | Latest Release | ![Latest](https://img.shields.io/github/downloads/ruki7423/Soranaflow/latest/total?style=flat-square&label=) |
 | Stars | ![Stars](https://img.shields.io/github/stars/ruki7423/Soranaflow?style=flat-square&label=) |
@@ -380,7 +378,14 @@ Drag **Soranaflow** to your Applications folder. The app is signed and notarized
 
 ## Changelog
 
-### v1.11.0 — USB DAC Freeze Fix, Settings Audit, Signal Path
+### v1.11.1 — Signal Path Hotfix
+
+- Fixed lossless codec misclassification (ALAC, FLAC) on macOS AudioToolbox decoders
+- Fixed overall signal path quality showing "Unknown"
+- Limiter display: milliseconds instead of raw sample count
+- Auto sample rate lossy codec detection fixed for AudioToolbox variants
+
+### v1.11.0 — USB DAC Freeze Fix, Settings Overhaul
 
 - Fixed app freeze with USB DACs (background thread migration)
 - Fixed frozen DSP settings (opacity dimming instead of disabled)
