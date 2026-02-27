@@ -110,14 +110,14 @@ Drag **Soranaflow** to your Applications folder. The app is signed and notarized
 - macOS 14.0 (Sonoma) or later
 - Apple Silicon (M1 / M2 / M3 / M4)
 
-## What's New (v1.11.2)
+## What's New (v1.11.3)
 
-Signal path hotfix — codec display, limiter, album art, and build reliability.
+Bluetooth fix + lyrics toggle.
 
-- Signal path codec state now cached before decoder close (fixes "Lossy Decode" / "Unknown" for lossless)
-- Limiter displays "True-Peak Lookahead (1.5 ms)" instead of raw sample count
-- Album art deferred resize fixes 200px startup size issue
-- SwiftBridge CMake dependency added for clean build reliability
+- Fixed Bluetooth audio corruption — app no longer forces sample rate on BT devices, restores device state on quit
+- Bluetooth devices treated like built-in speakers (CoreAudio resamples internally)
+- New "Show Lyrics" toggle in Settings > Appearance
+- Lyrics hidden: album art vertically centered in Now Playing view
 
 See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
 
