@@ -110,14 +110,14 @@ Drag **Soranaflow** to your Applications folder. The app is signed and notarized
 - macOS 14.0 (Sonoma) or later
 - Apple Silicon (M1 / M2 / M3 / M4)
 
-## What's New (v1.11.1)
+## What's New (v1.11.2)
 
-Fixed signal path display issues where macOS AudioToolbox decoders caused incorrect codec classification.
+Signal path hotfix — codec display, limiter, album art, and build reliability.
 
-- Lossless codecs (ALAC, FLAC) now correctly show "Lossless Decode" instead of "Lossy Decode"
-- Overall signal path quality no longer shows "Unknown" for lossless playback chains
-- True-Peak Lookahead limiter now displays latency in milliseconds
-- Auto sample rate correctly identifies lossy formats through AudioToolbox decoder variants
+- Signal path codec state now cached before decoder close (fixes "Lossy Decode" / "Unknown" for lossless)
+- Limiter displays "True-Peak Lookahead (1.5 ms)" instead of raw sample count
+- Album art deferred resize fixes 200px startup size issue
+- SwiftBridge CMake dependency added for clean build reliability
 
 See the full changelog at [soranaflow.com/changelog](https://soranaflow.com/changelog).
 
