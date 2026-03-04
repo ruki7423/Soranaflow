@@ -1,16 +1,16 @@
 # Terms of Service
 
-최종 수정일: 2026년 2월 9일 / Last Updated: February 9, 2026
+최종 수정일: 2026년 3월 5일 / Last Updated: March 5, 2026
 
-soranaflow.com("웹사이트") 또는 Sorana Flow 데스크톱 애플리케이션("앱")을 사용하기 전에 본 이용약관("약관")을 주의 깊게 읽어주십시오. 서비스를 이용함으로써 본 약관에 동의하게 됩니다. 동의하지 않는 경우 서비스를 이용하지 마십시오.
+soranaflow.com("웹사이트") 또는 Soranaflow 데스크톱 애플리케이션("앱")을 사용하기 전에 본 이용약관("약관")을 주의 깊게 읽어주십시오. 서비스를 이용함으로써 본 약관에 동의하게 됩니다. 동의하지 않는 경우 서비스를 이용하지 마십시오.
 
 Please read these Terms of Service ("Terms") carefully. By using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.
 
 ## 1. 정의 / Definitions
 
-- "앱" / "Application": Sorana Flow macOS 데스크톱 소프트웨어
+- "앱" / "Application": Soranaflow macOS 데스크톱 소프트웨어
 - "웹사이트" / "Website": soranaflow.com 및 모든 하위 페이지
-- "개발자" / "Developer": Sorana Flow 개발자
+- "개발자" / "Developer": Soranaflow 개발자
 - "이용자" / "You", "User": 서비스 이용자
 - "콘텐츠" / "Content": 이용자가 앱과 함께 사용하는 오디오 파일, 메타데이터, 재생 목록 등 모든 데이터
 - "서비스" / "Service": 웹사이트와 앱을 통칭
@@ -31,9 +31,9 @@ The App is provided as freeware. You are granted a non-exclusive, non-transferab
 - 제3자 지적재산권을 침해하는 방식의 사용 / Use in a manner infringing third-party IP
 - 경쟁 제품 개발 목적의 사용 / Use for competitive product development
 
-**2.3 본 앱은 오픈 소스가 아닙니다. 명시적으로 부여되지 않은 모든 권리는 개발자에게 유보됩니다.**
+**2.3 본 앱의 소스 코드는 독점적이며 공개 라이선스가 아닙니다. 명시적으로 부여되지 않은 모든 권리는 개발자에게 유보됩니다.**
 
-**The Application is NOT open source. All rights not expressly granted are reserved.**
+**The Application's source code is proprietary and not publicly licensed. All rights not expressly granted are reserved.**
 
 ## 3. 지적재산권 / Intellectual Property
 
@@ -41,7 +41,7 @@ The App is provided as freeware. You are granted a non-exclusive, non-transferab
 
 **© 2026 Haeseong Choi. All rights reserved.**
 
-3.2 "Sorana Flow"는 개발자의 상표입니다. 무단 사용은 금지됩니다. / "Sorana Flow" is a trademark of the developer. Unauthorized use is prohibited.
+3.2 "Soranaflow"는 개발자의 상표입니다. 무단 사용은 금지됩니다. / "Soranaflow" is a trademark of the developer. Unauthorized use is prohibited.
 
 3.3 이용자의 음악 파일 및 개인 콘텐츠에 대한 소유권은 이용자에게 있습니다. 앱은 이용자의 콘텐츠에 대한 어떠한 소유권이나 라이선스도 주장하지 않습니다. / Your music files and personal content remain your property.
 
@@ -55,13 +55,17 @@ The App is provided as freeware. You are granted a non-exclusive, non-transferab
 
 4.3 Apple Music 연동은 유효한 Apple Music 구독이 필요하며 Apple의 약관에 따릅니다. 개발자는 Apple Inc.와 제휴하거나 Apple의 보증을 받지 않습니다.
 
-4.4 VST2/VST3 플러그인은 독립적인 제3자에 의해 개발되며 본 소프트웨어의 일부가 아닙니다. 개발자는 제3자 플러그인에 대해 어떠한 보증도 제공하지 않습니다. 이용자는 플러그인 사용으로 인한 시스템 불안정, 충돌, 데이터 손실, 오디오 아티팩트, 과도한 음량, 장비 손상, 청력 손상, 보안 취약성 또는 지적재산권 침해에 대해 개발자가 책임지지 않음에 동의합니다. 플러그인 사용은 전적으로 이용자의 책임입니다.
+4.4 앱은 Synology FileStation API를 통해 Synology NAS에 연결할 수 있습니다. NAS 자격 증명은 macOS Keychain에 암호화 저장되며 개발자에게 전송되지 않습니다. Synology의 약관이 적용됩니다. / The App may connect to Synology NAS via the FileStation API. Credentials are encrypted in macOS Keychain and never transmitted to the developer. Subject to Synology's terms.
 
-VST2/VST3 plugins are developed by independent third parties and are not part of the Software. The developer provides NO warranties regarding any third-party plugin. You acknowledge that the developer is not liable for system instability, crashes, data loss, audio artifacts, excessive volume, equipment damage, hearing damage, security vulnerabilities, or IP infringement caused by third-party plugins. Plugin use is entirely at your own risk.
+4.5 앱은 DLNA/UPnP 프로토콜을 통해 로컬 네트워크의 미디어 서버를 자동 검색합니다. 인터넷 연결은 사용되지 않습니다. / The App auto-discovers media servers on the local network via DLNA/UPnP. No internet connection is used.
+
+4.6 VST3 플러그인은 독립적인 제3자에 의해 개발되며 본 소프트웨어의 일부가 아닙니다. 개발자는 제3자 플러그인에 대해 어떠한 보증도 제공하지 않습니다. 이용자는 플러그인 사용으로 인한 시스템 불안정, 충돌, 데이터 손실, 오디오 아티팩트, 과도한 음량, 장비 손상, 청력 손상, 보안 취약성 또는 지적재산권 침해에 대해 개발자가 책임지지 않음에 동의합니다. 플러그인 사용은 전적으로 이용자의 책임입니다.
+
+VST3 plugins are developed by independent third parties and are not part of the Software. The developer provides NO warranties regarding any third-party plugin. You acknowledge that the developer is not liable for system instability, crashes, data loss, audio artifacts, excessive volume, equipment damage, hearing damage, security vulnerabilities, or IP infringement caused by third-party plugins. Plugin use is entirely at your own risk.
 
 *VST® is a trademark of Steinberg Media Technologies GmbH.*
 
-## 5. 오디오 안전 경고 / Audio Safety Warnings
+## 5. ⚠️ 오디오 안전 경고 / Audio Safety Warnings
 
 ### 5.1 청력 안전 / Hearing Safety
 
@@ -174,7 +178,7 @@ You agree to indemnify the developer from claims arising from your use of the Se
 
 13.2 해지 시 앱 사용 라이선스는 즉시 철회됩니다. 이용자는 앱의 모든 사본을 삭제해야 합니다.
 
-13.3 제9조, 제10조, 제11조, 제14조는 해지 후에도 존속합니다. / Sections 9, 10, 11, and 14 survive termination.
+13.3 제5조(오디오 안전), 제9조(보증의 부인), 제10조(책임의 제한), 제11조(면책), 제14조(준거법)는 해지 후에도 존속합니다. / Sections 5 (Audio Safety), 9 (Disclaimer), 10 (Limitation of Liability), 11 (Indemnification), and 14 (Governing Law) survive termination.
 
 ## 14. 준거법 및 분쟁 해결 / Governing Law and Dispute Resolution
 
