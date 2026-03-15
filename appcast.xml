@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Sorana Flow</title>
+    <link>https://soranaflow.com</link>
+    <description>Sorana Flow updates</description>
+    <language>en</language>
+    <item>
+      <title>Version 1.11.4</title>
+      <sparkle:version>1.11.4</sparkle:version>
+      <sparkle:shortVersionString>1.11.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 15 Mar 2026 00:00:00 +0000</pubDate>
+      <enclosure
+        url="https://github.com/ruki7423/Soranaflow/releases/download/v1.11.4/SoranaFlow-1.11.4.dmg"
+        sparkle:version="1.11.4"
+        sparkle:shortVersionString="1.11.4"
+        type="application/octet-stream"
+      />
+    </item>
+  </channel>
+</rss>
